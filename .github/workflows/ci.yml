@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches:
+      - master
       - main
   workflow_dispatch:
 
@@ -33,7 +34,7 @@ jobs:
         with:
           path: .deps/maivn-shared
           repository: ${{ vars.MAIVN_SHARED_REPO || format('{0}/maivn-shared', github.repository_owner) }}
-          ref: ${{ vars.MAIVN_SHARED_REF || 'main' }}
+          ref: ${{ vars.MAIVN_SHARED_REF || 'master' }}
 
       - name: Inject local maivn-shared source override
         run: |
