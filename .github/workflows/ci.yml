@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: maivn-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Check out maivn-shared
+        uses: actions/checkout@v4
+        with:
+          path: .deps/maivn-shared
+          repository: ${{ vars.MAIVN_SHARED_REPO || format('{0}/maivn-shared', github.repository_owner) }}
+          ref: ${{ vars.MAIVN_SHARED_REF || 'main' }}
+
+      - name: Inject local maivn-shared source override
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          pyproject = Path("pyproject.toml")
+          text = pyproject.read_text(encoding="utf-8")
+          marker = "\n[tool.uv.sources]\nmaivn-shared = { path = \".deps/maivn-shared\", editable = true }\n"
+          if "[tool.uv.sources]" not in text:
+              pyproject.write_text(text.rstrip() + marker, encoding="utf-8")
+          PY
+
+      - name: Sync environment
+        run: uv sync --frozen
+
+      - name: Validate OSS license report
+        run: uv run --no-sync python scripts/oss_license_audit.py --check
+
+      - name: Ruff
+        run: uv run --no-sync ruff check .
+
+      - name: Pyright
+        run: uv run --no-sync pyright src/maivn
+
+      - name: Pytest
+        run: uv run --no-sync pytest
