@@ -64,8 +64,8 @@ def _run_studio(extra_args: list[str]) -> None:
             sys.exit(130)
 
     print("[ERROR] Failed to launch MAIVN Studio: maivn-studio not found")
-    print("[INFO] Make sure maivn-studio is installed:")
-    print("       uv pip install maivn-studio")
+    print("[INFO] Make sure the Studio companion is installed:")
+    print('       uv pip install "maivn[studio]"')
     sys.exit(1)
 
 

@@ -36,10 +36,10 @@ from PyPI.
 To install the public Studio companion and enable `maivn studio` from a normal shell:
 
 ```bash
-pip install maivn-studio
+pip install "maivn[studio]"
 ```
 
-`maivn-studio` installs `maivn` as a dependency, so the `maivn` CLI will be available too.
+If you prefer to install the companion package directly, `pip install maivn-studio` also works.
 
 ## Quick Start
 
@@ -325,7 +325,7 @@ uv run pyright
 
 ## Releases
 
-- `CI` runs on pull requests and pushes to `main`.
+- `CI` runs on pull requests and pushes to the default branch (`master` today).
 - `Publish PyPI` runs on version tags that match `v*`.
 - Configure PyPI Trusted Publishing for this repository before the first release.
 - See [`DEPLOYMENT.md`](DEPLOYMENT.md) for the full GitHub and PyPI release procedure.
