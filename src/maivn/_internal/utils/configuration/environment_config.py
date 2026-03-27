@@ -1,19 +1,26 @@
 """Configuration management for the maivn SDK.
 
 This module provides structured configuration management with type safety and validation.
-Configuration values must be provided by the consuming application - the SDK remains
-environment-agnostic and does not read environment variables directly.
+The default server base URL can be overridden via the MAIVN_SERVER_BASE_URL environment
+variable; all other configuration values must be provided by the consuming application.
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
+from dotenv import load_dotenv
+
 # MARK: Constants
 
-DEFAULT_SERVER_BASE_URL = "http://127.0.0.1:8000"
-"""Default server URL (will be updated to production URL in the future)."""
+load_dotenv()
+
+DEFAULT_SERVER_BASE_URL = os.environ.get("MAIVN_SERVER_BASE_URL", "https://api.maivn.io")
+# DEFAULT_SERVER_BASE_URL = "https://api.maivn.io"
+
+"""Default server URL, overridable via MAIVN_SERVER_BASE_URL env var."""
 
 VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 """Valid logging level values."""
