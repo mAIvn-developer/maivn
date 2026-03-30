@@ -195,12 +195,14 @@ RedactedMessage(
 
 ### Automatic PII Detection
 
-When you send a `RedactedMessage` containing sensitive data, the server automatically:
+When you send a `RedactedMessage` containing sensitive data, the runtime automatically:
 
 1. **Detects PII** in the message content
 2. **Stores original values** in `private_data` (server-side only)
+3. **Replaces raw values with placeholders** before any LLM-visible context is built
+4. **Re-checks outbound payloads** before runtime handoff, blocking known-value leaks
 
-The LLM only sees the redacted version with placeholders.
+Model-visible runtimes only see the redacted version with placeholders unless the user has explicitly authorized a supported system-tool flow.
 
 ### Detected PII Types
 
@@ -235,7 +237,7 @@ response = agent.invoke([
 
 ### Known PII Values
 
-Use `known_pii_values` to explicitly declare PII values that should be redacted. These values are seeded into `private_data` and redacted from both the prompt and all tool results, even if auto-detection doesn't catch them:
+Use `known_pii_values` to explicitly declare PII values that should be redacted. These values are seeded into `private_data` and redacted from both the prompt and all tool results, even if auto-detection doesn't catch them. Matching against known values is case-insensitive, so user-injected casing variants are still scrubbed before they reach model-visible runtimes:
 
 ```python
 from maivn.messages import RedactedMessage, PrivateData

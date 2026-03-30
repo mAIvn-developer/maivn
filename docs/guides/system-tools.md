@@ -1,6 +1,6 @@
 # System Tools Guide
 
-The maivn server provides built-in system tools for common capabilities like web search, code execution, artifact synthesis, and reasoning.
+The Maivn runtime provides built-in system tools for common capabilities like web search, code execution, artifact synthesis, and reasoning.
 
 ## Overview
 
@@ -14,7 +14,7 @@ System tools are server-side tools that extend agent capabilities:
 | `compose_artifact` | Synthesize a substantial downstream artifact for a specific tool arg |
 | `reevaluate`       | Insert a planning checkpoint before continuing execution             |
 
-These tools are **not** defined in your SDK code - they're injected by the server when appropriate.
+These tools are **not** defined in your SDK code - they're made available by the runtime when appropriate.
 
 ## Built-in Capabilities
 
@@ -93,10 +93,10 @@ System tools are designed with built-in privacy protections that automatically s
 
 All system tools follow a strict privacy model:
 
-- **Zero external exposure**: Private data never leaves the server environment
-- **Schema-only awareness**: Tools only know about data structure, not values
-- **Automatic redaction**: Sensitive data removed from all outputs
-- **Audit logging**: All private data access is tracked
+- **Protected by default**: raw private data stays behind the protected runtime boundary
+- **Schema-only awareness**: planning and prompts use field names and placeholders, not raw values
+- **Automatic redaction**: known private values are scrubbed from outbound payloads and outputs
+- **Audit logging**: private-data access is tracked
 
 ### Web Search Privacy
 
@@ -170,7 +170,7 @@ Search the web for current information, news, or facts.
 ### How It Works
 
 1. The agent determines it needs current information
-2. Server performs the web search
+2. The runtime performs the web search
 3. Search results are returned to the agent
 4. Agent incorporates results into its response
 
@@ -201,7 +201,7 @@ Execute Python code in a secure sandbox.
 ### How It Works
 
 1. Agent generates Python code to solve a problem
-2. Server executes code in an isolated sandbox
+2. The runtime executes code in an isolated sandbox
 3. Execution results (stdout, errors) are returned
 4. Agent interprets results and continues
 
@@ -315,7 +315,7 @@ Route complex reasoning tasks to the optimal LLM.
 ### How It Works
 
 1. Agent encounters a complex reasoning task
-2. Server routes to the best model for the task type
+2. The runtime routes to the best model for the task type
 3. Reasoning is performed with appropriate capabilities
 4. Results are returned to the agent
 
@@ -452,24 +452,15 @@ All system tools maintain comprehensive audit logs:
 }
 ```
 
-### Configurable Privacy Levels
+### Final Privacy Boundary
 
-System tools support different privacy modes:
+Every system-tool invocation still passes through the final protected-data boundary:
 
-```python
-# Default: Maximum privacy
-client = Client(
-    api_key='...',
-    privacy_mode='strict'  # Exclude all private data
-)
-
-# Development: Limited exposure
-client = Client(
-    api_key='...',
-    privacy_mode='development',  # Allow non-sensitive data
-    allowed_private_fields=['environment', 'debug_mode']
-)
-```
+- Raw outbound `private_data` is cleared by default
+- Known private values are placeholderized case-insensitively across payloads
+- User-typed literals that match known `private_data` are scrubbed before they reach a model-visible runtime
+- The call is blocked if a known private value still appears in the outbound payload
+- Raw private data may leave the protected boundary only when the user has explicitly authorized a supported system-tool flow
 
 ### Compliance Features
 
@@ -480,9 +471,9 @@ client = Client(
 
 ## Configuration
 
-System tools are still provisioned by the server, but developers can influence use at the SDK layer:
+System tools are still provisioned by the runtime, but developers can influence use at the SDK layer:
 
-- Server administrators control availability, quotas, and deployment policy
+- Deployment administrators control availability, quotas, and deployment policy
 - Invocation `metadata['allowed_system_tools']` can narrow which system tools may run for a session
 - `@compose_artifact_policy(...)` controls whether a specific argument can use `compose_artifact`
 - `metadata['approved_compose_artifact_targets']` provides explicit approval for args that require it
