@@ -43,6 +43,8 @@ REQ_NAME_RE = re.compile(r"^\s*([A-Za-z0-9_.-]+)\s*(?:==|@)")
 STRONG_PATTERNS = ("agpl", "gpl", "sspl")
 WEAK_PATTERNS = ("mpl", "mozilla public", "lgpl", "eclipse public")
 NON_OSI_PATTERNS = ("elastic", "commons clause", "polyform", "source available", "bsl")
+REPORT_DATE_RE = re.compile(r"^\*\*Report Date\*\*: .*$", re.MULTILINE)
+ELECTION_DATE_RE = re.compile(r"^\*\*Date\*\*: .*$", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -429,10 +431,19 @@ def build_elections_report(
     return "\n".join(lines) + "\n"
 
 
+def normalize_report_content(content: str) -> str:
+    normalized = REPORT_DATE_RE.sub("**Report Date**: <ignored-for-check>", content)
+    return ELECTION_DATE_RE.sub("**Date**: <ignored-for-check>", normalized)
+
+
 def ensure_report(path: Path, content: str, check_only: bool) -> bool:
     existing = path.read_text(encoding="utf-8") if path.exists() else None
     if check_only:
-        return existing == content
+        if existing is None:
+            return False
+        normalized_existing = normalize_report_content(existing)
+        normalized_content = normalize_report_content(content)
+        return normalized_existing == normalized_content
     path.write_text(content, encoding="utf-8")
     return True
 
