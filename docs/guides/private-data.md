@@ -7,8 +7,8 @@ Securely handle sensitive data like API keys, passwords, and PII using the priva
 The maivn SDK provides a secure mechanism for handling sensitive data:
 
 1. **Automatic PII detection** - Server detects and redacts PII only for `RedactedMessage` user messages
-2. **Private data stays server-side** - Never sent to the LLM
-3. **Schema-only planning** - LLM sees field names, not values
+2. **Private data stays protected by default** - Never sent to the model by default
+3. **Schema-only planning** - The model sees field names, not values
 4. **Runtime injection** - Values injected only at tool execution
 5. **Automatic redaction** - Sensitive data in results is removed
 
@@ -57,7 +57,7 @@ def connect_db(query: str, host: str, password: str) -> dict:
 
 ### What the LLM Sees
 
-The LLM receives a schema describing available private data:
+The model receives a schema describing available private data:
 
 ```
 Available private data fields:
@@ -65,16 +65,17 @@ Available private data fields:
 - db_password (string): Database password
 ```
 
-The LLM **never** sees the actual values.
+The model **never** sees the actual values by default.
 
-### Server-Side Injection
+### Protected Runtime Injection
 
-Private data values are injected by the server:
+Private data values are injected within the protected runtime:
 
-1. SDK sends tool request with private data placeholders
-2. Server looks up actual values from `private_data`
+1. SDK sends a tool request with private-data placeholders
+2. The runtime looks up actual values from `private_data`
 3. Values are injected into tool arguments
-4. Tool executes with real values
+4. The tool executes with real values
+5. Outbound payloads are re-checked and blocked if a known private value still appears
 
 ### Automatic Redaction
 
@@ -97,10 +98,11 @@ Use `RedactedMessage` to enable automatic PII detection and redaction. The serve
 ### How It Works
 
 1. **Send a RedactedMessage** with sensitive data
-2. **Server detects PII** in the message content
-3. **Server replaces values** with placeholders (e.g., `{_{pii_email_1}_}`)
+2. **The runtime detects PII** in the message content
+3. **The runtime replaces values** with placeholders (e.g., `{_{pii_email_1}_}`)
 4. **Original values stored** in session's `private_data` (server-side only)
-5. **LLM sees only placeholders**, never the actual sensitive data
+5. **Known values are matched case-insensitively** across outbound payloads, including user-injected literals
+6. **The model sees only placeholders**, never the actual sensitive data by default
 
 ### Example
 

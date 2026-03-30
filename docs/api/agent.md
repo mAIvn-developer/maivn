@@ -237,7 +237,7 @@ def preview_redaction(
 ) -> RedactionPreviewResponse
 ```
 
-Use this when you want to inspect which placeholders will be inserted, which values will be added to `private_data`, and which caller-supplied literals matched before sending the message to the model.
+Use this when you want to inspect which placeholders will be inserted, which values will be added to `private_data`, and which caller-supplied literals matched before sending the message to the model. The preview uses the same case-insensitive known-value matching the runtime applies before outbound handoff.
 
 #### Parameters
 
