@@ -16,6 +16,25 @@ from .helpers import clean_text, compute_delta, map_assignment_status
 # MARK: Assistant Streaming
 
 
+def _resolve_swarm_agent_name(
+    payload: dict[str, Any],
+    options: NormalizationOptions,
+) -> str:
+    """Resolve the display name for a swarm-agent assignment update."""
+    action_name = clean_text(payload.get("action_name"))
+    if action_name is not None:
+        return action_name
+
+    action_id = clean_text(payload.get("action_id"))
+    if action_id and options.assignment_name_map and action_id in options.assignment_name_map:
+        return options.assignment_name_map[action_id]
+
+    if action_id is not None:
+        return action_id
+
+    return "unknown-agent"
+
+
 def handle_update_event(
     payload: dict[str, Any],
     state: NormalizedStreamState,
@@ -40,11 +59,7 @@ def handle_update_event(
     action_type = clean_text(payload.get("action_type"))
     if action_type == "swarm_agent":
         assignment_status = map_assignment_status(clean_text(payload.get("status")))
-        action_name = (
-            clean_text(payload.get("action_name"))
-            or clean_text(payload.get("action_id"))
-            or "unknown-agent"
-        )
+        action_name = _resolve_swarm_agent_name(payload, options)
         normalized_payloads.append(
             build_agent_assignment_payload(
                 agent_name=action_name,
