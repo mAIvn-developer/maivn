@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from maivn import AppEvent, RawSSEEvent, normalize_stream
+from maivn import AppEvent, RawSSEEvent, normalize_stream, normalize_stream_event
 from maivn.events import (
     ENRICHMENT_EVENT_NAME,
     FINAL_EVENT_NAME,
@@ -122,6 +122,28 @@ def test_normalize_stream_uses_tool_metadata_for_agent_dependencies() -> None:
     dumped = normalized[0].model_dump(mode="json")
     assert dumped["agent_name"] == "Data Analyzer"
     assert dumped["swarm_name"] == "Research Swarm"
+
+
+def test_normalize_stream_event_uses_assignment_name_map_for_swarm_agents() -> None:
+    normalized = normalize_stream_event(
+        RawSSEEvent(
+            name=UPDATE_EVENT_NAME,
+            payload={
+                "action_type": "swarm_agent",
+                "action_id": "d9bad818-8331-548b-8b2d-06e1d69cb1a4",
+                "status": "started",
+                "swarm_name": "Research Assistant",
+            },
+        ),
+        assignment_name_map={
+            "d9bad818-8331-548b-8b2d-06e1d69cb1a4": "Report Writer",
+        },
+    )
+
+    assert _names(normalized) == ["agent_assignment"]
+    assert normalized[0].assignment is not None
+    assert normalized[0].assignment.agent_name == "Report Writer"
+    assert normalized[0].assignment.id == "d9bad818-8331-548b-8b2d-06e1d69cb1a4"
 
 
 def test_normalize_stream_deferred_model_tool_completion_from_final() -> None:

@@ -15,6 +15,7 @@ class NormalizationOptions:
     default_participant_key: str | None = None
     default_participant_name: str | None = None
     default_participant_role: str | None = None
+    assignment_name_map: dict[str, str] | None = None
     tool_name_map: dict[str, str] | None = None
     tool_metadata_map: dict[str, dict[str, Any]] | None = None
 

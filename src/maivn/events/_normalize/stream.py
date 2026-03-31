@@ -21,6 +21,7 @@ def normalize_stream_event(
     default_participant_key: str | None = None,
     default_participant_name: str | None = None,
     default_participant_role: str | None = None,
+    assignment_name_map: dict[str, str] | None = None,
     tool_name_map: dict[str, str] | None = None,
     tool_metadata_map: dict[str, dict[str, Any]] | None = None,
 ) -> list[AppEvent]:
@@ -37,6 +38,7 @@ def normalize_stream_event(
         default_participant_key=default_participant_key,
         default_participant_name=default_participant_name,
         default_participant_role=default_participant_role,
+        assignment_name_map=assignment_name_map,
         tool_name_map=tool_name_map,
         tool_metadata_map=tool_metadata_map,
     )
@@ -56,6 +58,7 @@ def normalize_stream(
     default_participant_key: str | None = None,
     default_participant_name: str | None = None,
     default_participant_role: str | None = None,
+    assignment_name_map: dict[str, str] | None = None,
     tool_name_map: dict[str, str] | None = None,
     tool_metadata_map: dict[str, dict[str, Any]] | None = None,
 ) -> Iterator[AppEvent]:
@@ -66,6 +69,7 @@ def normalize_stream(
         "default_participant_key": default_participant_key,
         "default_participant_name": default_participant_name,
         "default_participant_role": default_participant_role,
+        "assignment_name_map": assignment_name_map,
         "tool_name_map": tool_name_map,
         "tool_metadata_map": tool_metadata_map,
     }
