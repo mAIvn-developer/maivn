@@ -11,7 +11,11 @@ from .helpers import clean_text, coerce_mapping
 
 
 def extract_tool_identifier(tool_call: dict[str, Any]) -> str:
-    for key in ("tool_id", "id", "name", "tool_name"):
+    for key in ("tool_id", "id"):
+        candidate = clean_text(tool_call.get(key))
+        if candidate is not None:
+            return candidate
+    for key in ("name", "tool_name"):
         candidate = clean_text(tool_call.get(key))
         if candidate is not None:
             return candidate
