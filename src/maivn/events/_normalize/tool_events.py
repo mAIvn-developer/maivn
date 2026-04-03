@@ -20,6 +20,25 @@ from .tooling import (
 # MARK: Tool Execution
 
 
+def _resolve_tool_event_id(
+    payload: dict[str, Any],
+    tool_call: dict[str, Any],
+    tool_index: int,
+) -> str:
+    for key in ("tool_id", "id"):
+        candidate = clean_text(tool_call.get(key))
+        if candidate is not None:
+            return candidate
+
+    tool_id = extract_tool_identifier(tool_call)
+
+    raw_event_id = clean_text(payload.get("id"))
+    fallback_name = clean_text(tool_call.get("name") or tool_call.get("tool_name")) or "tool"
+    if raw_event_id is not None:
+        return f"{raw_event_id}:{tool_index}:{fallback_name}"
+    return tool_id
+
+
 def handle_tool_event(
     payload: dict[str, Any],
     state: NormalizedStreamState,
@@ -38,8 +57,8 @@ def handle_tool_event(
             tool_calls = [single]
 
     normalized_payloads: list[dict[str, Any]] = []
-    for tool_call in tool_calls:
-        tool_id = extract_tool_identifier(tool_call)
+    for tool_index, tool_call in enumerate(tool_calls):
+        tool_id = _resolve_tool_event_id(payload, tool_call, tool_index)
         if not tool_id or tool_id in state.reported_tool_ids:
             continue
         state.reported_tool_ids.add(tool_id)
