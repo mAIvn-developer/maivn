@@ -196,9 +196,10 @@ response = agent.invoke(
 
 ## Validation
 
-### Only One Final Tool
+### Only One Final Tool Per Scope
 
-An agent (or swarm) can have only ONE tool marked `final_tool=True`:
+Each scope (a single agent, or the swarm itself) can have at most ONE tool
+marked `final_tool=True`:
 
 ```python
 # This will raise an error
@@ -215,19 +216,28 @@ TOOL CONFIGURATION ERROR
 ================================================================================
 [ERROR] Multiple tools marked with final_tool=True: 'Report', 'Summary'
   SCOPE: Agent 'my_agent'
-  ISSUE: Only ONE tool can be designated as the final output tool.
-  FIX: Remove 'final_tool=True' from all but one tool.
+  ISSUE: Only ONE tool per scope can be designated as the final output tool.
+  FIX: Remove 'final_tool=True' from all but one tool in this scope.
 ================================================================================
 ```
 
-### Cannot Mix with always_execute
+Inside a swarm, each agent has its own scope, so different agents may each
+own a distinct `final_tool`. When more than one scope in the swarm declares
+a `final_tool`, the swarm must designate which one produces its final
+response by setting `use_as_final_output=True` on exactly one agent.
+
+### Mixing always_execute and final_tool
+
+`always_execute` and `final_tool` are orthogonal — one controls *frequency*,
+the other controls *role*. They can coexist on the same tool or on different
+tools in the same scope:
 
 ```python
-# This will raise an error
+# Valid: an audit tool always runs, and a separate tool finalizes output.
 @agent.toolify(always_execute=True)
 def logger() -> dict: ...
 
-@agent.toolify(final_tool=True)  # Error: conflicts with always_execute
+@agent.toolify(final_tool=True)
 class Report(BaseModel): ...
 ```
 
