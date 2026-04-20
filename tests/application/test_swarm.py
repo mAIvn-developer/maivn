@@ -236,8 +236,28 @@ def test_swarm_validate_force_final_tool_request() -> None:
     swarm._tool_repo.add_tool(final_tool)
     agent.use_as_final_output = True
 
-    with pytest.raises(ValueError):
+    swarm._validate_force_final_tool_request(True)
+
+
+def test_swarm_force_final_tool_rejects_ambiguous_multi_agent_finals() -> None:
+    agent_a = Agent(name="agent_a", client=_make_client())
+    agent_b = Agent(name="agent_b", client=_make_client())
+
+    tool_a = FunctionTool(name="final_a", description="f", tool_id="final_a", func=lambda: "ok")
+    tool_a.final_tool = True
+    agent_a._tool_repo.add_tool(tool_a)
+
+    tool_b = FunctionTool(name="final_b", description="f", tool_id="final_b", func=lambda: "ok")
+    tool_b.final_tool = True
+    agent_b._tool_repo.add_tool(tool_b)
+
+    swarm = Swarm(name="swarm", agents=[agent_a, agent_b])
+
+    with pytest.raises(ValueError, match="ambiguous"):
         swarm._validate_force_final_tool_request(True)
+
+    agent_a.use_as_final_output = True
+    swarm._validate_force_final_tool_request(True)
 
 
 def test_swarm_requires_agents_on_invoke() -> None:

@@ -25,11 +25,9 @@ from .builders import (
 from .mcp import McpRegistry
 from .redaction import preview_redaction as _preview_redaction
 from .validation import (
-    collect_all_tools,
-    get_scope_name_for_validation,
     raise_validation_error,
     validate_swarm_final_output_agents,
-    validate_tool_flags,
+    validate_tool_flags_per_scope,
 )
 
 # MARK: Scope Tooling
@@ -159,13 +157,7 @@ class BaseScopeToolingMixin:
     # MARK: - Validation
 
     def validate_tool_configuration(self) -> None:
-        all_tools = collect_all_tools(self)
-        scope_name = get_scope_name_for_validation(self)
-
-        always_execute_tools = [t for t in all_tools if getattr(t, "always_execute", False)]
-        final_tools = [t for t in all_tools if getattr(t, "final_tool", False)]
-
-        errors = validate_tool_flags(always_execute_tools, final_tools, scope_name)
+        errors = validate_tool_flags_per_scope(self)
         errors.extend(validate_swarm_final_output_agents(self))
 
         if errors:
