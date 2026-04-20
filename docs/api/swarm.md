@@ -373,21 +373,41 @@ When `swarm.invoke(force_final_tool=True)` is called, the swarm coordinates to e
 
 ### Tool Configuration
 
-Swarm validates that:
+Swarm validates per-scope, not swarm-wide:
 
-- Only ONE tool is marked `final_tool=True` across all agents and swarm-level tools
-- Only ONE agent is marked `use_as_final_output=True`
-- No conflicts between `always_execute` and `final_tool` flags
+- Each agent may have at most ONE tool with `final_tool=True` (that agent's scope).
+- The swarm itself may have at most ONE swarm-scope tool with `final_tool=True`.
+- When two or more scopes in the swarm declare a `final_tool` (multiple agents,
+  or an agent plus swarm-scope), exactly ONE agent must be marked
+  `use_as_final_output=True` so the swarm's final response is unambiguous.
+- At most ONE agent across the swarm may be marked `use_as_final_output=True`.
+- `always_execute` and `final_tool` may coexist — on the same tool or on
+  different tools in the same scope. The orchestrator composes them.
 
-### Example Error
+### Example Errors
+
+Two tools in the same scope marked `final_tool=True`:
 
 ```
 TOOL CONFIGURATION ERROR
 ================================================================================
 [ERROR] Multiple tools marked with final_tool=True: 'Report', 'Summary'
-  SCOPE: Swarm 'my_swarm' (including all agents)
-  ISSUE: Only ONE tool can be designated as the final output tool.
-  FIX: Remove 'final_tool=True' from all but one tool.
+  SCOPE: Agent 'writer' within Swarm 'my_swarm'
+  ISSUE: Only ONE tool per scope can be designated as the final output tool.
+  FIX: Remove 'final_tool=True' from all but one tool in this scope.
+================================================================================
+```
+
+Multiple agents own a `final_tool` but no designated final-output agent:
+
+```
+TOOL CONFIGURATION ERROR
+================================================================================
+[ERROR] Ambiguous final_tool ownership in Swarm 'my_swarm'
+  Final tools declared on: agents: 'analyst', 'writer'
+  ISSUE: When multiple scopes in a swarm declare final_tool, the swarm's
+         final response agent must be designated explicitly.
+  FIX: Set use_as_final_output=True on exactly one agent.
 ================================================================================
 ```
 

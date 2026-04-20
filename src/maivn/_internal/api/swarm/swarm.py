@@ -365,7 +365,16 @@ class Swarm(BaseScope):
         return any(bool(getattr(tool, "final_tool", False)) for tool in self.list_tools())
 
     def _validate_force_final_tool_request(self, force_final_tool: bool) -> None:
-        """Validate force_final_tool usage for swarm invocations."""
+        """Validate force_final_tool usage for swarm invocations.
+
+        Resolution order when a final response must be forced:
+          1. A designated final-output agent (use_as_final_output=True) with a
+             final_tool on that agent — the swarm will force that agent's tool.
+          2. A designated final-output agent with no final_tool but the swarm
+             has a swarm-scope final_tool — the designated agent runs and the
+             swarm-scope tool supplies final output.
+          3. No designated agent: fall back to a swarm-scope final_tool.
+        """
         if not force_final_tool:
             return
 
@@ -375,16 +384,24 @@ class Swarm(BaseScope):
         final_output_agents = [
             agent for agent in self.agents if bool(getattr(agent, "use_as_final_output", False))
         ]
-        if swarm_final_tools and final_output_agents:
+        agents_with_final_tool = [
+            agent
+            for agent in self.agents
+            if any(bool(getattr(t, "final_tool", False)) for t in agent.list_tools())
+        ]
+
+        if not swarm_final_tools and not final_output_agents and not agents_with_final_tool:
             raise ValueError(
-                "Swarm.invoke(force_final_tool=True) cannot be combined with both "
-                "swarm final_tool(s) and use_as_final_output=True on swarm agents."
+                "Swarm.invoke(force_final_tool=True) requires at least one of: "
+                "a swarm-scope tool with final_tool=True, an agent with use_as_final_output=True, "
+                "or an agent that owns a tool with final_tool=True."
             )
 
-        if not swarm_final_tools and not final_output_agents:
+        if agents_with_final_tool and not final_output_agents and len(agents_with_final_tool) > 1:
             raise ValueError(
-                "Swarm.invoke(force_final_tool=True) requires either a swarm tool with "
-                "final_tool=True or an agent with use_as_final_output=True."
+                "Swarm.invoke(force_final_tool=True) is ambiguous: multiple agents own "
+                "final_tool but none are marked use_as_final_output=True. "
+                "Set use_as_final_output=True on the agent whose final_tool should be forced."
             )
 
 
