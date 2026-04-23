@@ -51,7 +51,16 @@ class BackgroundExecutor:
         self._pending_count = 0
         self._lock = threading.Lock()
 
+        # `_executor` is nulled after shutdown() so submit() can lazily
+        # re-create a fresh pool on the next call. `_shutdown` is a
+        # belt-and-suspenders flag in case any caller holds onto an old
+        # ThreadPoolExecutor reference. The revive path makes the
+        # BackgroundExecutor safe to re-use after a close() cycle, which
+        # is required when an Agent instance outlives a Studio demo
+        # reload (demo A's teardown shuts the pool, demo B's cached
+        # module-level Agent submits the next tool call).
         self._executor: ThreadPoolExecutor | None = None
+        self._shutdown: bool = False
         if not self._run_inline:
             self._executor = ThreadPoolExecutor(max_workers=self._max_workers)
 
@@ -86,6 +95,16 @@ class BackgroundExecutor:
         with self._lock:
             if self._pending_count >= self._max_queue_size:
                 raise queue.Full(f"Executor queue at capacity ({self._max_queue_size})")
+            # Revive the pool if a prior shutdown() tore it down. This
+            # turns shutdown() into a "return the pool to fresh state"
+            # rather than "permanently disable" - the latter bit several
+            # callers that reused the same BackgroundExecutor across a
+            # demo-reload cycle in Studio (see
+            # apps/maivn-studio/src/maivn_studio/services/session_manager/
+            # lifecycle.py).
+            if not self._run_inline and (self._executor is None or self._shutdown):
+                self._executor = ThreadPoolExecutor(max_workers=self._max_workers)
+                self._shutdown = False
             self._pending_count += 1
 
         ctx = contextvars.copy_context()
@@ -145,12 +164,27 @@ class BackgroundExecutor:
     def shutdown(self, *, wait: bool = False) -> None:
         """Shutdown the underlying executor.
 
+        Idempotent - safe to call multiple times. After shutdown, a
+        subsequent call to submit() will transparently create a fresh
+        ThreadPoolExecutor so the BackgroundExecutor instance remains
+        usable. This matters for Agent singletons whose lifecycle is
+        managed by a caller (e.g. Studio) that closes-and-reopens the
+        Agent between demo runs.
+
         Args:
             wait: Whether to wait for pending tasks to complete
         """
-        if self._executor is None:
-            return
-        self._executor.shutdown(wait=wait)
+        with self._lock:
+            if self._executor is None:
+                self._shutdown = True
+                return
+            executor = self._executor
+            self._executor = None
+            self._shutdown = True
+        # Drop the lock before calling shutdown(): with wait=True this
+        # can block on running tasks, and we do not want to hold the
+        # instance lock across that.
+        executor.shutdown(wait=wait)
 
     # MARK: - Context Manager
 
