@@ -12,6 +12,8 @@ from typing import Any, ForwardRef, get_type_hints
 from maivn_shared import ToolSpec, create_uuid
 from pydantic import BaseModel
 
+from maivn._internal.core.services.team_dependencies import apply_team_dependency_arg_schemas
+
 from .dependency_extractor import (
     apply_arg_policies_to_schema,
     extract_tool_dependencies,
@@ -100,6 +102,7 @@ class ToolFlattener:
         if target_agent_id:
             resolved_metadata["target_agent_id"] = target_agent_id
         apply_arg_policies_to_schema(func_schema, resolved_metadata)
+        apply_team_dependency_arg_schemas(func_schema, resolved_metadata)
 
         func_tool_spec = ToolSpec(
             tool_id=resolved_tool_id,

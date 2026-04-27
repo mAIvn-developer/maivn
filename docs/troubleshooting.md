@@ -105,7 +105,14 @@ Agent 'my_agent' has 3 tool(s) but none are final.
 @agent.toolify(final_tool=True)  # Add final_tool=True
 class FinalOutput(BaseModel):
     result: str
+
+# Or register the final model imperatively.
+agent.add_tool(FinalOutput, final_tool=True)
 ```
+
+If you use constructor-based tools, raw functions and models are registered with default
+tool options. Use `agent.add_tool(..., final_tool=True)` when a Pydantic model must be the
+agent's final tool.
 
 ### Connection errors
 

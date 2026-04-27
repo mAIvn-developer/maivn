@@ -126,6 +126,12 @@ response = agent.invoke(
 )
 ```
 
+You can also register the final model imperatively:
+
+```python
+agent.add_tool(Report, name='report', final_tool=True)
+```
+
 ## Model Requirements
 
 ### Use Descriptive Fields

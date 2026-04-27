@@ -1,4 +1,4 @@
-# RUNBOOK - Maivn SDK
+# RUNBOOK - mAIvn SDK
 
 This runbook explains how to build, test, and validate the Python SDK after changes, plus how to roll them back if needed.
 

@@ -25,7 +25,7 @@ async def stream(session_id: str):
 
 The bridge handles event history buffering, client reconnection replay, deduplication, and heartbeat keep-alive.
 
-For MAIVN contract events, it also standardizes known event families before they enter bridge history or SSE replay.
+For mAIvn contract events, it also standardizes known event families before they enter bridge history or SSE replay.
 
 ## Bridge audiences
 
@@ -41,7 +41,7 @@ public_bridge = EventBridge("session-1", audience="frontend_safe")
 internal_bridge = EventBridge("session-1", audience="internal")
 ```
 
-Use `frontend_safe` for customer-facing browser sessions. Use `internal` for trusted developer/admin tools such as MAIVN Studio, Booth, or internal observability consoles.
+Use `frontend_safe` for customer-facing browser sessions. Use `internal` for trusted developer/admin tools such as mAIvn Studio, Booth, or internal observability consoles.
 
 ## Architecture
 
@@ -62,7 +62,7 @@ Use one owner per layer:
 
 1. `normalize_stream()` / `normalize_stream_event()` owns raw transport normalization.
 2. `forward_normalized_event()` / `forward_normalized_stream()` owns replaying normalized `AppEvent` values into reporters and bridges.
-3. `EventBridge` owns canonical MAIVN payload shaping for known bridge families, stable identity reuse, replay-safe history, and audience-based sanitization.
+3. `EventBridge` owns canonical mAIvn payload shaping for known bridge families, stable identity reuse, replay-safe history, and audience-based sanitization.
 4. Your frontend store owns UI state and rendering.
 
 Do not let multiple layers co-own the same event family. If reporter callbacks already own live `tool_event` or `status_message` delivery, keep normalized replay for other families such as streamed assistant chunks or interrupts instead of forwarding the same logical event twice.
@@ -122,7 +122,7 @@ This makes it easier for frontends to key state off stable nested objects instea
 
 ## Known bridge event families
 
-When you emit through `EventBridge`, the following event families are normalized through the shared MAIVN payload builders even if you call raw `emit(event_name, payload)` instead of a typed helper:
+When you emit through `EventBridge`, the following event families are normalized through the shared mAIvn payload builders even if you call raw `emit(event_name, payload)` instead of a typed helper:
 
 - `tool_event`
 - `system_tool_start`
@@ -138,7 +138,7 @@ When you emit through `EventBridge`, the following event families are normalized
 
 Unknown/custom event names still pass through unchanged.
 
-For developer-facing backend code, this means you can treat the bridge as a predictable backend boundary for known MAIVN event families without re-implementing payload shaping or identity resolution in Studio, Booth, or similar frontends. App-specific dedupe can still sit on top when two valid delivery paths overlap.
+For developer-facing backend code, this means you can treat the bridge as a predictable backend boundary for known mAIvn event families without re-implementing payload shaping or identity resolution in Studio, Booth, or similar frontends. App-specific dedupe can still sit on top when two valid delivery paths overlap.
 
 ## UI integration guidance
 
@@ -295,7 +295,7 @@ Examples:
 
 When your bridge buffers event history for reconnection, the SSE generator must deduplicate events that exist in both the history buffer and the live queue. After replaying history, track replayed event IDs in a set and skip any queued events with matching IDs during the live streaming phase. This prevents duplicate cards during replay.
 
-That transport-level replay dedupe is different from app-level logical dedupe. If your application can emit the same logical interrupt or status message through two already-valid paths, keep that suppression local to the app adapter. MAIVN Studio does this for logical interrupt duplicates and repeated identical status messages within a turn while still relying on the shared MAIVN bridge contract underneath.
+That transport-level replay dedupe is different from app-level logical dedupe. If your application can emit the same logical interrupt or status message through two already-valid paths, keep that suppression local to the app adapter. mAIvn Studio does this for logical interrupt duplicates and repeated identical status messages within a turn while still relying on the shared mAIvn bridge contract underneath.
 
 On the frontend side, also dedupe by SSE event ID before dispatching into your state store. That protects against reconnect or transport-level double delivery without leaking dedupe concerns into per-event UI handlers.
 
@@ -326,7 +326,7 @@ Frontends can then dispatch on the standard `event_name` field while the envelop
 8. emit tool completion from your reporter only for function tools - do not duplicate system or model tool completion that already comes from the normalized stream
 9. deduplicate events when replaying history + streaming live events
 10. if you need extra logical dedupe for overlapping delivery paths, keep it app-local and narrowly scoped
-11. prefer typed `EventBridge` helpers in new code; if you use raw `emit(...)`, keep it to known normalized MAIVN event families or explicit custom events
+11. prefer typed `EventBridge` helpers in new code; if you use raw `emit(...)`, keep it to known normalized mAIvn event families or explicit custom events
 
 ## Related references
 

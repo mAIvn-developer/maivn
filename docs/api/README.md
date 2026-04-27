@@ -60,7 +60,7 @@ from maivn.messages import HumanMessage, AIMessage, SystemMessage
 | Class                                    | Description                                                     | Reference |
 | ---------------------------------------- | --------------------------------------------------------------- | --------- |
 | [Agent](agent.md)                        | Main agent class for tool registration and invocation           | Core      |
-| [Swarm](swarm.md)                        | Multi-agent orchestration container                             | Core      |
+| [Swarm](swarm.md)                        | Multi-agent orchestration container with `member` registration  | Core      |
 | [Client](client.md)                      | HTTP connection manager for server communication                | Core      |
 | [ClientBuilder](client.md#clientbuilder) | Factory for creating Client instances                           | Core      |
 | [BaseScope](agent.md#basescope)          | Base class shared by Agent and Swarm                            | Core      |

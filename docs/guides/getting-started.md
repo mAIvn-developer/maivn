@@ -72,6 +72,23 @@ def get_weather(city: str) -> dict:
     return {'city': city, 'temp': 72, 'condition': 'sunny'}
 ```
 
+You can register tools without decorators when that better fits your module layout:
+
+```python
+def get_weather(city: str) -> dict:
+    """Get current weather for a city."""
+    return {'city': city, 'temp': 72, 'condition': 'sunny'}
+
+agent = Agent(
+    name='weather_agent',
+    api_key='your-api-key',
+    tools=[get_weather],
+)
+
+# Or add it after construction.
+agent.add_tool(get_weather)
+```
+
 **Note:** Your tool code executes locally in your environment - it is never transferred to or executed on maivn servers. Only the tool schema (name, description, parameters) is sent to the server for orchestration.
 
 ## Step 4: Invoke the Agent

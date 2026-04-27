@@ -36,6 +36,7 @@ from maivn._internal.core.registrars import AgentRegistrar
 from maivn._internal.core.tool_specs import ToolSpecFactory
 
 from ..base_scope import BaseScope
+from .member import SwarmMemberDecoratorBuilder
 from .metadata import (
     _build_agent_roster_entry as _swarm_build_agent_roster_entry,
 )
@@ -108,6 +109,11 @@ class Swarm(BaseScope):
     def list_agents(self) -> list[Agent]:
         """List all agents in the swarm."""
         return self._agent_repo.list_agents()  # type: ignore[return-value]
+
+    @property
+    def member(self) -> SwarmMemberDecoratorBuilder:
+        """Build a decorator for registering dependency-aware Swarm member agents."""
+        return SwarmMemberDecoratorBuilder(self)
 
     # MARK: - Validation
 

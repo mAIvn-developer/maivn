@@ -187,7 +187,7 @@ Each SSE frame contains JSON with:
 
 Studio treats the backend SSE stream as an app-facing contract, not as raw SDK transport. Payloads are normalized around the public `maivn.events` schema and include `contract_version`, `event_name`, `event_kind`, and nested descriptors such as `tool`, `assistant`, `assignment`, `enrichment`, `interrupt`, `output`, and `error_info` while preserving legacy flat fields for compatibility.
 
-Studio inherits the shared `maivn.events.EventBridge` normalization contract. Known MAIVN bridge event families are standardized before they enter SSE history or replay, and the bridge canonicalizes long-lived instance IDs for tools, agent assignments, and enrichment scopes so Studio can preserve one logical card/timeline entry per runtime instance.
+Studio inherits the shared `maivn.events.EventBridge` normalization contract. Known mAIvn bridge event families are standardized before they enter SSE history or replay, and the bridge canonicalizes long-lived instance IDs for tools, agent assignments, and enrichment scopes so Studio can preserve one logical card/timeline entry per runtime instance.
 
 Studio also keeps a small app-specific dedupe layer on top of that shared contract. Its job is narrow: suppress duplicate logical deliveries that can occur when overlapping Studio delivery paths surface the same interrupt or adjacent identical status message. It does not replace raw-stream normalization or shared bridge identity logic.
 

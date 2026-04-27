@@ -54,6 +54,62 @@ The maivn SDK supports two types of tools:
 1. **Function Tools** - Python functions that execute logic
 2. **Model Tools** - Pydantic models for structured output
 
+## Registration Styles
+
+Tools can be registered in three ways. All three styles use the same underlying agent tool
+registry and support the same dependency decorators.
+
+### Decorator Registration
+
+Use `@agent.toolify(...)` when defining the tool next to the agent:
+
+```python
+agent = Agent(name='helper', api_key='...')
+
+@agent.toolify(description='Add two numbers together')
+def add_numbers(a: int, b: int) -> dict:
+    return {'sum': a + b}
+```
+
+### Constructor Registration
+
+Use `Agent(..., tools=[...])` when functions or models are already defined and the agent
+configuration should show the full tool surface:
+
+```python
+def add_numbers(a: int, b: int) -> dict:
+    """Add two numbers together."""
+    return {'sum': a + b}
+
+agent = Agent(name='helper', api_key='...', tools=[add_numbers])
+```
+
+### Imperative Registration
+
+Use `agent.add_tool(...)` when tools are imported, assembled conditionally, or need options:
+
+```python
+agent = Agent(name='helper', api_key='...')
+agent.add_tool(
+    add_numbers,
+    name='add_numbers',
+    description='Add two numbers together',
+    tags=['math'],
+)
+```
+
+For Pydantic final tools, prefer `add_tool(..., final_tool=True)` when using imperative
+registration:
+
+```python
+class MathAnswer(BaseModel):
+    """Return the final math answer."""
+
+    answer: int
+
+agent.add_tool(MathAnswer, name='math_answer', final_tool=True)
+```
+
 ## Function Tools
 
 ### Basic Function Tool
@@ -438,4 +494,4 @@ def manage_user(action: str, user_id: str, data: dict = None) -> dict: ...
 
 - [Dependencies Guide](dependencies.md) - Chain tools together
 - [Structured Output Guide](structured-output.md) - Model tools and final_tool
-- [Agent API](../api/agent.md) - `toolify()` reference
+- [Agent API](../api/agent.md) - `toolify()`, `add_tool(...)`, and `tools=[...]` reference
