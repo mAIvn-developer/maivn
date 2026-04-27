@@ -223,6 +223,48 @@ def add_agent(agent: Agent) -> None
 
 The agent becomes a member of the swarm and can be referenced by other agents via `@depends_on_agent`.
 
+### member()
+
+Register swarm member agents declaratively.
+
+```python
+@swarm.member
+def researcher() -> Agent:
+    return Agent(name='researcher', api_key='...')
+```
+
+`member` accepts either a zero-argument `Agent` factory or an existing `Agent` instance. It
+returns the registered `Agent`.
+
+The builder form attaches dependencies to the generated agent invocation tool:
+
+```python
+@swarm.toolify(description='Load launch context')
+def load_context() -> dict:
+    return {'market': 'healthcare'}
+
+@swarm.member
+@depends_on_tool(load_context, arg_name='context')
+def researcher() -> Agent:
+    return Agent(name='researcher', api_key='...')
+
+writer = swarm.member.depends_on_agent(
+    researcher,
+    arg_name='research_notes',
+)(Agent(name='writer', api_key='...', use_as_final_output=True))
+```
+
+Supported member-builder dependencies:
+
+- `swarm.member.depends_on_tool(...)`
+- `swarm.member.depends_on_agent(...)`
+- `swarm.member.depends_on_await_for(...)`
+- `swarm.member.depends_on_reevaluate(...)`
+- `swarm.member.depends_on_interrupt(...)`
+
+Private-data dependencies are not supported directly on member agents. Put private-data access
+behind a swarm-level tool and make the member agent depend on that tool.
+
 ### get_agent()
 
 Retrieve an agent by ID.
@@ -328,6 +370,24 @@ response = swarm.invoke(
     HumanMessage(content='Research AI trends'),
     force_final_tool=True,
 )
+```
+
+### Declarative Member Registration
+
+Use `swarm.member` when you want the swarm to own agent registration and dependency metadata
+near the agent definition:
+
+```python
+swarm = Swarm(name='research_team')
+
+@swarm.member
+def researcher() -> Agent:
+    return Agent(name='researcher', api_key='...')
+
+writer = swarm.member.depends_on_agent(
+    researcher,
+    arg_name='research',
+)(Agent(name='writer', api_key='...', use_as_final_output=True))
 ```
 
 ### Parallel Agent Execution

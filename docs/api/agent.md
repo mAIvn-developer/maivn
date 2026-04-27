@@ -19,6 +19,7 @@ Agent(
     client: Client | None = None,
     timeout: float | None = None,
     max_results: int | None = None,
+    tools: list[Any] = [],
     use_as_final_output: bool = False,
     included_nested_synthesis: bool | Literal['auto'] = 'auto',
     private_data: dict = {},
@@ -43,6 +44,7 @@ Agent(
 | `client`                    | `Client \| None`                 | `None`     | Existing Client instance (alternative to api_key)                                                                                                                      |
 | `timeout`                   | `float \| None`                  | `None`     | Default timeout in seconds                                                                                                                                             |
 | `max_results`               | `int \| None`                    | `None`     | Max tools returned from semantic search (final/targeted tools and dependencies may add more)                                                                           |
+| `tools`                     | `list[Any]`                      | `[]`       | Initial tools to register on this agent. Accepts callables, Pydantic model classes, and prebuilt SDK tool objects                                                      |
 | `use_as_final_output`       | `bool`                           | `False`    | When in a Swarm, designate this agent's output as final                                                                                                                |
 | `included_nested_synthesis` | `bool \| Literal['auto']`        | `'auto'`   | Nested synthesis mode for Swarm invocations: `True` always includes synthesized response, `False` returns tool results only, `'auto'` lets orchestrator/runtime decide |
 | `private_data`              | `dict`                           | `{}`       | Server-side secret data for dependency injection                                                                                                                       |
@@ -121,6 +123,42 @@ Use this for scope-bound runbooks/checklists without hand-building metadata per 
 Legacy note: `documents` remains accepted as a compatibility alias for older SDK code.
 
 ## Methods
+
+### add_tool()
+
+Register a callable, Pydantic model class, or prebuilt SDK tool on the agent.
+
+```python
+def add_tool(
+    tool: BaseTool | Callable[..., Any] | type[BaseModel],
+    name: str | None = None,
+    description: str | None = None,
+    *,
+    always_execute: bool = False,
+    final_tool: bool = False,
+    tags: list[str] | None = None,
+    before_execute: Callable[[dict[str, Any]], Any] | None = None,
+    after_execute: Callable[[dict[str, Any]], Any] | None = None,
+) -> BaseTool
+```
+
+Use `Agent(..., tools=[...])` for simple constructor registration and `add_tool(...)`
+when you need options such as `name`, `description`, `tags`, or `final_tool`.
+
+```python
+def load_profile(customer_id: str) -> dict:
+    """Load a customer profile."""
+    return {'customer_id': customer_id}
+
+agent = Agent(name='support', api_key='...', tools=[load_profile])
+
+class ResolutionPlan(BaseModel):
+    """Write the final support plan."""
+
+    steps: list[str]
+
+agent.add_tool(ResolutionPlan, name='resolution_plan', final_tool=True)
+```
 
 ### invoke()
 
@@ -384,6 +422,7 @@ for event in agent.events(exclude=["system"]).stream(
 ### toolify()
 
 Decorator to register a function or Pydantic model as a tool.
+For non-decorator registration, use `add_tool(...)` or `Agent(..., tools=[...])`.
 
 ```python
 def toolify(
@@ -616,7 +655,7 @@ with Agent(name='temp', api_key='...') as agent:
 
 `Agent` inherits from `BaseScope`, which provides:
 
-- Tool registration (`toolify()`)
+- Tool registration (`toolify()`, `add_tool(...)`, and constructor `tools=[...]`)
 - Tool compilation (`compile_tools()`)
 - Tool validation (`validate_tool_configuration()`)
 - MCP server registration (`register_mcp_servers()`)

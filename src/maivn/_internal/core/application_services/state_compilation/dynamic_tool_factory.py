@@ -14,6 +14,18 @@ from maivn_shared import (
 )
 
 from maivn._internal.core.entities import AgentTool, BaseTool, FunctionTool
+from maivn._internal.core.services.team_dependencies import (
+    SWARM_AGENT_DEPENDENCY_CONTEXT_KEYS_METADATA_KEY,
+    SWARM_AGENT_DEPENDENCY_CONTEXT_METADATA_KEY,
+    TEAM_DEPENDENCY_ARG_SCHEMAS_METADATA_KEY,
+    apply_team_invocation_signature,
+    build_execution_controls_metadata,
+    build_team_dependency_arg_schemas,
+    build_team_dependency_context,
+    format_dependency_context_for_prompt,
+    get_team_dependencies,
+    get_team_execution_controls,
+)
 
 from .dynamic_tool_factory_nested import DynamicToolFactoryNestedInvocationMixin
 from .dynamic_tool_factory_response import DynamicToolFactoryResponseMixin
@@ -151,6 +163,8 @@ class DynamicToolFactory(
         target_agent = self._find_agent_in_swarm(agent_id, swarm_scope)
         agent_name = self._get_required_agent_name(target_agent, agent_id)
         tool_description = self._build_tool_description(target_agent, agent_name)
+        team_dependencies = get_team_dependencies(target_agent)
+        team_execution_controls = get_team_execution_controls(target_agent)
 
         def invoke_agent(
             prompt: str,
@@ -159,6 +173,7 @@ class DynamicToolFactory(
             model: str | None = None,
             included_nested_synthesis: bool | str | None = None,
             memory_recall_turn_active: bool = False,
+            **dependency_kwargs: Any,
         ) -> Any:
             """Invoke the target agent with a prompt and return its result.
 
@@ -176,6 +191,11 @@ class DynamicToolFactory(
                     strict recall active for this turn.
             """
             agent = self._find_agent_in_swarm(agent_id, swarm_scope)
+            dependency_context = build_team_dependency_context(
+                dependency_kwargs,
+                team_dependencies,
+            )
+            nested_prompt = format_dependency_context_for_prompt(prompt, dependency_context)
             agent_default_nested_synthesis = getattr(agent, "included_nested_synthesis", "auto")
             resolved_nested_synthesis = self._normalize_included_nested_synthesis(
                 included_nested_synthesis
@@ -190,6 +210,11 @@ class DynamicToolFactory(
                 resolved_nested_synthesis=resolved_nested_synthesis,
                 memory_recall_turn_active=memory_recall_turn_active,
             )
+            if dependency_context:
+                metadata[SWARM_AGENT_DEPENDENCY_CONTEXT_METADATA_KEY] = dependency_context
+                metadata[SWARM_AGENT_DEPENDENCY_CONTEXT_KEYS_METADATA_KEY] = list(
+                    dependency_context
+                )
             nested_memory_config = self._build_nested_invocation_memory_config(
                 agent=agent,
                 swarm_scope=swarm_scope,
@@ -208,7 +233,7 @@ class DynamicToolFactory(
             )
             try:
                 response = agent.invoke(
-                    messages=[HumanMessage(content=prompt)],
+                    messages=[HumanMessage(content=nested_prompt)],
                     force_final_tool=force_final_tool,
                     metadata=metadata,
                     memory_config=nested_memory_config,
@@ -222,6 +247,15 @@ class DynamicToolFactory(
                 include_response=True,
             )
 
+        if team_dependencies:
+            apply_team_invocation_signature(invoke_agent, team_dependencies)
+
+        metadata = self._build_team_invocation_tool_metadata(
+            team_dependencies=team_dependencies,
+            team_execution_controls=team_execution_controls,
+            swarm_scope=swarm_scope,
+        )
+
         return AgentTool(
             tool_id=create_uuid(f"agent_invoke_{agent_id}"),
             name=agent_name,
@@ -229,7 +263,32 @@ class DynamicToolFactory(
             func=invoke_agent,
             tags=["dynamic", "agent_invocation"],
             target_agent_id=getattr(target_agent, "id", agent_id),
+            metadata=metadata,
         )
+
+    def _build_team_invocation_tool_metadata(
+        self,
+        *,
+        team_dependencies: list[Any],
+        team_execution_controls: list[Any],
+        swarm_scope: Any,
+    ) -> dict[str, Any]:
+        """Build metadata attached to generated Swarm agent invocation tools."""
+        metadata: dict[str, Any] = {}
+        if team_dependencies:
+            metadata[TEAM_DEPENDENCY_ARG_SCHEMAS_METADATA_KEY] = build_team_dependency_arg_schemas(
+                team_dependencies, swarm_scope
+            )
+            metadata[SWARM_AGENT_DEPENDENCY_CONTEXT_KEYS_METADATA_KEY] = [
+                getattr(dependency, "arg_name", "")
+                for dependency in team_dependencies
+                if getattr(dependency, "arg_name", "")
+            ]
+        if team_execution_controls:
+            metadata["execution_controls"] = build_execution_controls_metadata(
+                team_execution_controls
+            )
+        return metadata
 
     # MARK: - Scope Resolution
 

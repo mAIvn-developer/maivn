@@ -58,6 +58,41 @@ general = Agent(name='everything', description='Does all tasks')
 
 ## Tool Design
 
+### Choose the Registration Style That Fits the Module
+
+Use `@agent.toolify(...)` when the tool naturally belongs next to the agent definition:
+
+```python
+@agent.toolify(description='Fetch customer orders')
+def get_orders(customer_id: str) -> dict:
+    ...
+```
+
+Use `Agent(..., tools=[...])` when tools are already defined and you want the agent
+configuration to show its complete tool surface:
+
+```python
+def get_orders(customer_id: str) -> dict:
+    """Fetch customer orders."""
+    ...
+
+agent = Agent(
+    name='orders',
+    api_key='...',
+    tools=[get_orders],
+)
+```
+
+Use `agent.add_tool(...)` when tools are assembled conditionally or imported from another
+module:
+
+```python
+agent = Agent(name='orders', api_key='...')
+agent.add_tool(get_orders, description='Fetch customer orders')
+```
+
+All three styles use the same underlying tool registry and dependency decorators.
+
 ### Clear Descriptions
 
 Tool descriptions help the LLM decide when to use them:

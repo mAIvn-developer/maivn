@@ -12,7 +12,8 @@ The maivn SDK provides a clean, declarative interface for creating AI agents wit
 
 ## Features
 
-- **Declarative Tools**: Define tools with `@agent.toolify()` - functions or Pydantic models
+- **Declarative Tools**: Define tools with `@agent.toolify()`, `agent.add_tool(...)`,
+  or `Agent(..., tools=[...])` - functions or Pydantic models
 - **Dependency Graph**: Chain tools with `@depends_on_tool`, inject secrets with `@depends_on_private_data`
 - **Structured Output**: Use `final_tool=True` for guaranteed typed responses
 - **Multi-Agent**: Coordinate agents with `Swarm` and `@depends_on_agent`
@@ -62,6 +63,25 @@ def get_weather(city: str) -> dict:
 
 response = agent.invoke([HumanMessage(content='What is the weather in Austin?')])
 print(response.content)
+```
+
+You can also register tools without decorators:
+
+```python
+def get_weather(city: str) -> dict:
+    """Get current weather for a city."""
+    return {'city': city, 'temp': 72, 'condition': 'sunny'}
+
+agent = Agent(
+    name='weather_agent',
+    description='Provides weather information',
+    system_prompt='You are a helpful weather assistant.',
+    api_key='your-api-key',
+    tools=[get_weather],
+)
+
+# Or add tools after construction.
+agent.add_tool(get_weather)
 ```
 
 ### Fast Structured Output
@@ -289,7 +309,7 @@ execution for more deterministic runs.
 - [Multi-Agent](docs/guides/multi-agent.md) - Swarm orchestration
 - [Private Data](docs/guides/private-data.md) - Security and secrets
 - [System Tools](docs/guides/system-tools.md) - Built-in tools
-- [Maivn Studio](docs/guides/maivn-studio.md) - Studio UI + API reference
+- [mAIvn Studio](docs/guides/maivn-studio.md) - Studio UI + API reference
 
 ### Reference
 

@@ -46,11 +46,11 @@ Use the bridge audience to match the trust level of the frontend:
 - `EventBridge(..., audience="frontend_safe")` for end-user browser frontends
 - `EventBridge(..., audience="internal")` for trusted developer/admin frontends
 
-`frontend_safe` preserves the MAIVN event contract but sanitizes sensitive bridge-bound values such as raw redaction details, injected private-data values, and internal error details.
+`frontend_safe` preserves the mAIvn event contract but sanitizes sensitive bridge-bound values such as raw redaction details, injected private-data values, and internal error details.
 
 ## EventBridge normalization contract
 
-`EventBridge` standardizes known MAIVN app-facing event families before they enter bridge history or SSE replay.
+`EventBridge` standardizes known mAIvn app-facing event families before they enter bridge history or SSE replay.
 
 That normalization applies to both:
 
@@ -71,7 +71,7 @@ Known normalized families:
 - `final`
 - `error`
 
-For those event families, the bridge rebuilds packets through the shared MAIVN payload builders so the public envelope and nested descriptors stay consistent.
+For those event families, the bridge rebuilds packets through the shared mAIvn payload builders so the public envelope and nested descriptors stay consistent.
 
 ### Canonical identity behavior
 
@@ -87,7 +87,7 @@ This makes it safer for frontends to key cards, timelines, and activity chips of
 
 Unknown/custom event names still pass through unchanged.
 
-Use that passthrough behavior for domain-specific extensions. Use the typed helpers or shared payload builders for MAIVN contract events.
+Use that passthrough behavior for domain-specific extensions. Use the typed helpers or shared payload builders for mAIvn contract events.
 
 ## Ownership model
 
@@ -101,7 +101,7 @@ Use one clear owner per concern:
 
 Do not let two layers co-own the same event family. If live reporter callbacks already own `tool_event` or `status_message`, do not replay those same normalized events back through the reporter or bridge again. Pick one authoritative producer per family, then keep any remaining app-local dedupe as a narrow safety net.
 
-This is the model used by MAIVN Studio: Studio inherits the shared contract, keeps any compatibility parsing at the frontend ingress edge, and adds only a thin dedupe layer for overlapping logical deliveries such as interrupts or repeated identical status messages within a turn.
+This is the model used by mAIvn Studio: Studio inherits the shared contract, keeps any compatibility parsing at the frontend ingress edge, and adds only a thin dedupe layer for overlapping logical deliveries such as interrupts or repeated identical status messages within a turn.
 
 ## Recommended integration pattern
 
@@ -261,7 +261,7 @@ async def forward_normalized_event(
 ) -> NormalizedEventForwardingState
 ```
 
-Use this when your backend already owns the outer stream loop, has normalized events, and wants the shared MAIVN forwarding logic for assistant streaming state, tool lifecycle routing, enrichments, interrupts, and terminal events.
+Use this when your backend already owns the outer stream loop, has normalized events, and wants the shared mAIvn forwarding logic for assistant streaming state, tool lifecycle routing, enrichments, interrupts, and terminal events.
 
 ### `forward_normalized_stream()`
 
@@ -283,7 +283,7 @@ Per-stream forwarding state used by the replay helpers to preserve assistant tex
 
 ## Payload builders
 
-Use the payload builders when your own backend emits or forwards events to a frontend and you want to produce the canonical MAIVN app-facing event contract directly.
+Use the payload builders when your own backend emits or forwards events to a frontend and you want to produce the canonical mAIvn app-facing event contract directly.
 
 Available builders:
 
@@ -349,7 +349,7 @@ payload = {
 
 This keeps app-specific events contract-aware so frontends can dispatch on the standard envelope fields.
 
-Custom passthrough events are not rebuilt by `EventBridge`; only the known MAIVN contract families listed above are normalized automatically.
+Custom passthrough events are not rebuilt by `EventBridge`; only the known mAIvn contract families listed above are normalized automatically.
 
 ## Event deduplication and reconnection
 
@@ -367,7 +367,7 @@ For multi-turn sessions, reconnect the SSE when sending a follow-up message and 
 
 Internally, the bridge also deduplicates events that exist in both the history buffer and the live queue during history replay.
 
-If your application has two valid delivery paths that can surface the same logical event more than once, keep any extra dedupe in your app layer and scope it narrowly to that overlap. MAIVN Studio does this for logical interrupt duplicates and repeated identical status messages within a turn without changing the shared contract.
+If your application has two valid delivery paths that can surface the same logical event more than once, keep any extra dedupe in your app layer and scope it narrowly to that overlap. mAIvn Studio does this for logical interrupt duplicates and repeated identical status messages within a turn without changing the shared contract.
 
 Frontend consumers should also dedupe by SSE event ID before dispatching events into application state. That is transport-level protection against replay or double delivery, not a replacement for logical event normalization.
 

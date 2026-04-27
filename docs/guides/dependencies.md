@@ -43,6 +43,18 @@ def process_data(raw_data: dict) -> dict:
 
 When `process_data` is called, `fetch_data` runs first and its output is passed to `raw_data`.
 
+Dependency decorators are independent of the registration style. The same dependency graph can
+be registered through `Agent(..., tools=[...])` or `agent.add_tool(...)`:
+
+```python
+@depends_on_tool(fetch_data, arg_name='raw_data')
+def process_data(raw_data: dict) -> dict:
+    """Process fetched data."""
+    return {'processed': len(raw_data['records'])}
+
+agent = Agent(name='data_agent', api_key='...', tools=[fetch_data, process_data])
+```
+
 ### Multiple Tool Dependencies
 
 ```python
@@ -175,6 +187,35 @@ When a tool depends on an agent:
 1. The dependent agent is invoked
 2. Its full output (from its tools) is collected
 3. That output is passed to the dependent tool
+
+### Swarm Member Dependencies
+
+Use `swarm.member` when the dependency belongs to the swarm's generated agent invocation tool,
+rather than to a tool defined inside an agent.
+
+```python
+from maivn import Agent, Swarm, depends_on_tool
+
+swarm = Swarm(name='planning_team')
+
+@swarm.toolify(description='Load launch context')
+def load_context() -> dict:
+    return {'segment': 'regional clinics'}
+
+@swarm.member
+@depends_on_tool(load_context, arg_name='context')
+def researcher() -> Agent:
+    return Agent(name='researcher', api_key='...')
+
+editor = swarm.member.depends_on_agent(
+    researcher,
+    arg_name='research_notes',
+)(Agent(name='editor', api_key='...', use_as_final_output=True))
+```
+
+Member dependencies are exposed as arguments on the generated agent invocation tool. Use this for
+swarm-level context, agent-to-agent handoffs, execution controls, and interrupt inputs that should
+be resolved before a member agent is invoked.
 
 ## Private Data Dependencies
 

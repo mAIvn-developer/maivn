@@ -11,6 +11,7 @@ Multi-agent systems are useful when:
 
 The maivn SDK provides:
 - `Swarm` class for agent coordination
+- `swarm.member` for declarative swarm member registration
 - `@depends_on_agent` for agent-to-agent dependencies
 - `use_as_final_output` for designating the final agent
 
@@ -53,6 +54,34 @@ swarm = Swarm(
     agents=[researcher, analyst, writer],
 )
 ```
+
+### Member Registration
+
+Use `swarm.member` when you want the swarm to register agents near their definitions and attach
+member-level dependency metadata.
+
+```python
+from maivn import Agent, Swarm, depends_on_tool
+
+swarm = Swarm(name='content_team')
+
+@swarm.toolify(description='Load editorial context')
+def load_context() -> dict:
+    return {'audience': 'technical leaders'}
+
+@swarm.member
+@depends_on_tool(load_context, arg_name='context')
+def researcher() -> Agent:
+    return Agent(name='researcher', api_key='...')
+
+writer = swarm.member.depends_on_agent(
+    researcher,
+    arg_name='research_notes',
+)(Agent(name='writer', api_key='...', use_as_final_output=True))
+```
+
+The decorated factory returns the registered `Agent`, so it can be passed to
+`swarm.member.depends_on_agent(...)` or normal `@depends_on_agent(...)` dependencies.
 
 ## Agent Dependencies
 
@@ -229,6 +258,11 @@ swarm = Swarm(name='team', agents=[])
 # Add agents after creation
 swarm.add_agent(researcher)
 swarm.add_agent(analyst)
+
+# Or register agents declaratively
+@swarm.member
+def writer() -> Agent:
+    return Agent(name='writer', api_key='...')
 ```
 
 ### Listing Agents

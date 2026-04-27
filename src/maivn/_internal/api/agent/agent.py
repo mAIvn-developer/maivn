@@ -3,23 +3,31 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 from weakref import WeakValueDictionary
 
 from maivn_shared import (
+    BaseDependency,
     BaseMessage,
     MemoryConfig,
     SessionRequest,
     SessionResponse,
     SystemMessage,
 )
+from maivn_shared.domain.entities.dependencies import AwaitForDependency, ReevaluateDependency
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field, PrivateAttr, field_validator
 
 from maivn._internal.core.entities.sse_event import SSEEvent
+from maivn._internal.core.entities.tools import BaseTool
 from maivn._internal.core.interfaces import AgentOrchestratorInterface
+from maivn._internal.core.services.team_dependencies import (
+    add_team_dependency,
+    add_team_execution_control,
+    resolve_team_control_reference,
+)
 
 from ..base_scope import BaseScope
 from .hooks import (
@@ -92,10 +100,19 @@ class Agent(BaseScope):
         default="auto",
         description=("Control nested synthesis behavior for this agent when invoked by a Swarm."),
     )
+    tools: list[Any] = Field(
+        default_factory=list,
+        description="Tools registered on this agent at construction time.",
+        exclude=True,
+    )
 
     _swarm: Swarm | None = PrivateAttr(default=None)
     _orchestrator: AgentOrchestratorInterface | None = PrivateAttr(default=None)
     _closed: bool = PrivateAttr(default=False)
+    _team_dependencies: list[BaseDependency] = PrivateAttr(default_factory=list)
+    _team_execution_controls: list[AwaitForDependency | ReevaluateDependency] = PrivateAttr(
+        default_factory=list
+    )
 
     # MARK: - Properties
 
@@ -110,6 +127,7 @@ class Agent(BaseScope):
         """Initialize client from api_key if needed."""
         super().model_post_init(context)
         self._initialize_client()
+        self._register_initial_tools()
 
     def _initialize_client(self) -> None:
         """Initialize client from api_key or validate existing client."""
@@ -159,11 +177,74 @@ class Agent(BaseScope):
         _CLIENT_CACHE[cache_key] = client
         return client
 
+    # MARK: - Tool Management
+
+    def add_tool(
+        self,
+        tool: BaseTool | Callable[..., Any] | type[PydanticBaseModel],
+        name: str | None = None,
+        description: str | None = None,
+        *,
+        always_execute: bool = False,
+        final_tool: bool = False,
+        tags: list[str] | None = None,
+        before_execute: Callable[[dict[str, Any]], Any] | None = None,
+        after_execute: Callable[[dict[str, Any]], Any] | None = None,
+    ) -> BaseTool:
+        """Register a callable, Pydantic model, or prebuilt tool on this agent."""
+        registered_tool = super().add_tool(
+            tool=tool,
+            name=name,
+            description=description,
+            always_execute=always_execute,
+            final_tool=final_tool,
+            tags=tags,
+            before_execute=before_execute,
+            after_execute=after_execute,
+        )
+        self._remember_registered_tool(registered_tool)
+        return registered_tool
+
+    def _register_initial_tools(self) -> None:
+        initial_tools = list(self.tools)
+        self.tools = []
+        for tool in initial_tools:
+            self.add_tool(tool)
+
+    def _remember_registered_tool(self, tool: BaseTool) -> None:
+        tool_id = getattr(tool, "tool_id", None)
+        for registered_tool in self.tools:
+            if tool_id is not None and getattr(registered_tool, "tool_id", None) == tool_id:
+                return
+            if registered_tool is tool:
+                return
+        self.tools.append(tool)
+
     # MARK: - Swarm
 
     def get_swarm(self) -> Swarm | None:
         """Get parent swarm if agent belongs to one."""
         return self._swarm
+
+    def _add_team_dependency(self, dependency: BaseDependency) -> None:
+        """Attach dependency metadata for Swarm team invocation."""
+        add_team_dependency(self, dependency)
+
+    def _add_team_execution_control(
+        self,
+        control: AwaitForDependency | ReevaluateDependency,
+    ) -> None:
+        """Attach execution-control metadata for Swarm team invocation."""
+        add_team_execution_control(self, control)
+
+    def _resolve_team_control_reference(self, ref: Any) -> tuple[str, str]:
+        """Resolve Swarm agent/tool refs for team execution-control decorators."""
+        swarm = self.get_swarm()
+        if swarm is None:
+            raise ValueError(
+                "Team execution controls require the agent to be registered with a Swarm."
+            )
+        return resolve_team_control_reference(swarm, ref)
 
     # MARK: - Orchestration
 

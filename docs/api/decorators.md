@@ -392,6 +392,33 @@ def process(result_one: dict, api_key: str) -> dict:
 
 Both orders work correctly.
 
+The same dependency decorators also work before registering tools with
+`Agent(..., tools=[...])` or `agent.add_tool(...)`:
+
+```python
+@depends_on_tool(step_one, 'result_one')
+def process(result_one: dict) -> dict:
+    """Process the first step result."""
+    return {'processed': True}
+
+agent = Agent(name='processor', api_key='...', tools=[step_one, process])
+```
+
+For swarm member agents, stack dependency decorators before `@swarm.member` on a zero-argument
+agent factory, or use the builder form such as `swarm.member.depends_on_agent(...)`:
+
+```python
+@swarm.member
+@depends_on_tool(load_context, 'context')
+def researcher() -> Agent:
+    return Agent(name='researcher', api_key='...')
+
+writer = swarm.member.depends_on_agent(
+    researcher,
+    arg_name='research_notes',
+)(Agent(name='writer', api_key='...'))
+```
+
 ## Validation
 
 The decorators validate that `arg_name` exists in the function signature:

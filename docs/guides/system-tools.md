@@ -1,6 +1,6 @@
 # System Tools Guide
 
-The Maivn runtime provides built-in system tools for common capabilities like web search, code execution, artifact synthesis, and reasoning.
+The mAIvn runtime provides built-in system tools for common capabilities like web search, code execution, artifact synthesis, and reasoning.
 
 ## Overview
 

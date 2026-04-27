@@ -15,7 +15,8 @@ from maivn._internal.core.interfaces.repositories import (
     ToolRepoInterface,
 )
 from maivn._internal.core.interfaces.resolvers import ScopeResolverInterface
-from maivn._internal.core.services.toolify import ToolifyOptions
+from maivn._internal.core.registrars import ToolRegistrar
+from maivn._internal.core.services.toolify import ToolifyOptions, ToolifyService
 
 from .builders import (
     EventInvocationBuilder,
@@ -37,6 +38,8 @@ class BaseScopeToolingMixin:
     _tool_repo: ToolRepoInterface
     _dependency_repo: DependencyRepoInterface
     _resolver: ScopeResolverInterface
+    _tool_registrar: ToolRegistrar
+    _toolify_service: ToolifyService
     _compiled_tools_cache: list[FunctionTool | ModelTool | McpTool] | None
     _tools_dirty: bool
     _mcp_registry: McpRegistry
@@ -62,6 +65,45 @@ class BaseScopeToolingMixin:
             after_execute=after_execute,
         )
         return ToolifyDecoratorBuilder(scope=self, options=options)
+
+    def add_tool(
+        self,
+        tool: BaseTool | Callable[..., Any] | type[BaseModel],
+        name: str | None = None,
+        description: str | None = None,
+        *,
+        always_execute: bool = False,
+        final_tool: bool = False,
+        tags: list[str] | None = None,
+        before_execute: Callable[[dict[str, Any]], Any] | None = None,
+        after_execute: Callable[[dict[str, Any]], Any] | None = None,
+    ) -> BaseTool:
+        """Register a callable, Pydantic model, or prebuilt tool on this scope."""
+        options = ToolifyOptions(
+            name=name,
+            description=description,
+            always_execute=always_execute,
+            final_tool=final_tool,
+            tags=tags,
+            before_execute=before_execute,
+            after_execute=after_execute,
+        )
+        registered_tool = self._coerce_tool_for_registration(tool, options)
+        callback_source = self._get_tool_callback_source(tool=tool, registered_tool=registered_tool)
+
+        self._toolify_service.register_tool(
+            tool=registered_tool,
+            registrar=self._tool_registrar,
+            dependency_repo=self._dependency_repo,
+        )
+        self._toolify_service.setup_dependency_callback(
+            obj=callback_source,
+            tool=registered_tool,
+            dependency_repo=self._dependency_repo,
+        )
+        self._attach_registered_tool_id(callback_source, registered_tool)
+        self._tools_dirty = True
+        return registered_tool
 
     def structured_output(self, model: type[BaseModel]) -> StructuredOutputInvocationBuilder:
         return StructuredOutputInvocationBuilder(scope=self, model=model)
@@ -162,3 +204,57 @@ class BaseScopeToolingMixin:
 
         if errors:
             raise_validation_error(errors)
+
+    # MARK: - Registration Helpers
+
+    def _coerce_tool_for_registration(
+        self,
+        tool: BaseTool | Callable[..., Any] | type[BaseModel],
+        options: ToolifyOptions,
+    ) -> BaseTool:
+        if isinstance(tool, BaseTool):
+            self._apply_existing_tool_options(tool, options)
+            return tool
+
+        return self._toolify_service.create_tool(tool, options)
+
+    @staticmethod
+    def _apply_existing_tool_options(tool: BaseTool, options: ToolifyOptions) -> None:
+        if options.name is not None:
+            tool.name = options.name
+        if options.description is not None:
+            tool.description = options.description
+        if options.always_execute:
+            tool.always_execute = True
+        if options.final_tool:
+            tool.final_tool = True
+        if options.tags:
+            tool.tags = list(options.tags)
+        if options.before_execute is not None:
+            tool.before_execute = options.before_execute
+        if options.after_execute is not None:
+            tool.after_execute = options.after_execute
+
+    @staticmethod
+    def _get_tool_callback_source(
+        *,
+        tool: BaseTool | Callable[..., Any] | type[BaseModel],
+        registered_tool: BaseTool,
+    ) -> Any:
+        if not isinstance(tool, BaseTool):
+            return tool
+        if isinstance(registered_tool, FunctionTool):
+            return registered_tool.func
+        if isinstance(registered_tool, ModelTool):
+            return registered_tool.model
+        return registered_tool
+
+    @staticmethod
+    def _attach_registered_tool_id(obj: Any, tool: BaseTool) -> None:
+        tool_id = getattr(tool, "tool_id", None)
+        if tool_id is None:
+            return
+        try:
+            obj.tool_id = tool_id
+        except Exception:
+            pass

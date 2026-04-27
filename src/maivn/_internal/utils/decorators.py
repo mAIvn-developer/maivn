@@ -112,11 +112,9 @@ def depends_on_await_for(
     timing: ExecutionTiming = "after",
     instance_control: ExecutionInstanceControl = "each",
 ) -> Callable:
-    tool_id, tool_name = _resolve_tool_reference(tool_ref)
     return _create_execution_control_decorator(
         control_model=AwaitForDependency,
-        tool_id=tool_id,
-        tool_name=tool_name,
+        tool_ref=tool_ref,
         timing=timing,
         instance_control=instance_control,
     )
@@ -128,11 +126,9 @@ def depends_on_reevaluate(
     timing: ExecutionTiming = "after",
     instance_control: ExecutionInstanceControl = "each",
 ) -> Callable:
-    tool_id, tool_name = _resolve_tool_reference(tool_ref)
     return _create_execution_control_decorator(
         control_model=ReevaluateDependency,
-        tool_id=tool_id,
-        tool_name=tool_name,
+        tool_ref=tool_ref,
         timing=timing,
         instance_control=instance_control,
     )
@@ -159,6 +155,27 @@ def depends_on_interrupt(
     """
 
     def decorator(func: Callable) -> Callable:
+        if _attach_interrupt_team_dependency_if_supported(
+            func,
+            arg_name=arg_name,
+            input_handler=input_handler,
+            prompt=prompt,
+            input_type=input_type or "text",
+            choices=choices or [],
+        ):
+            return func
+
+        if _should_store_pending_team_dependency(func, arg_name):
+            dependency = InterruptDependency(
+                arg_name=arg_name,
+                prompt=prompt,
+                input_handler=input_handler,
+                input_type=input_type or "text",
+                choices=choices or [],
+            )
+            _attach_dependency(func, dependency)
+            return func
+
         _validate_arg_in_signature(func, arg_name)
 
         # Auto-detect input_type and choices from type annotations
@@ -181,10 +198,24 @@ def depends_on_interrupt(
 
 def _create_execution_control_decorator(
     control_model: type[AwaitForDependency] | type[ReevaluateDependency],
-    **model_kwargs: Any,
+    tool_ref: str | BaseTool | Callable,
+    *,
+    timing: ExecutionTiming,
+    instance_control: ExecutionInstanceControl,
 ) -> Callable[[Callable], Callable]:
     def decorator(func: Callable) -> Callable:
-        control = control_model(**model_kwargs)
+        resolver = getattr(func, "_resolve_team_control_reference", None)
+        if callable(resolver):
+            resolve_team_control = cast(Callable[[Any], tuple[str, str]], resolver)
+            tool_id, tool_name = resolve_team_control(tool_ref)
+        else:
+            tool_id, tool_name = _resolve_tool_reference(tool_ref)
+        control = control_model(
+            tool_id=tool_id,
+            tool_name=tool_name,
+            timing=timing,
+            instance_control=instance_control,
+        )
         _attach_execution_control(func, control)
         return func
 
@@ -260,6 +291,12 @@ def _create_dependency_decorator(
     """
 
     def decorator(func: Callable) -> Callable:
+        if _attach_team_dependency_if_supported(func, dependency_model, arg_name, model_kwargs):
+            return func
+        if _should_store_pending_team_dependency(func, arg_name):
+            dependency = dependency_model(arg_name=arg_name, **model_kwargs)
+            _attach_dependency(func, dependency)
+            return func
         _validate_arg_in_signature(func, arg_name)
         dependency = dependency_model(arg_name=arg_name, **model_kwargs)
         _attach_dependency(func, dependency)
@@ -339,6 +376,11 @@ def _attach_execution_control(
     func: Callable,
     control: AwaitForDependency | ReevaluateDependency,
 ) -> None:
+    register_team_control = getattr(func, "_add_team_execution_control", None)
+    if callable(register_team_control):
+        register_team_control(control)
+        return
+
     func_with_attrs = cast(Any, func)
 
     controls = list(getattr(func_with_attrs, "__maivn_execution_controls__", []))
@@ -374,6 +416,66 @@ def _attach_arg_policy(obj: Callable | type[BaseModel], policy: dict[str, str]) 
         pending = list(getattr(obj_with_attrs, "__maivn_pending_arg_policies__", []))
         pending.append(policy)
         obj_with_attrs.__maivn_pending_arg_policies__ = pending
+
+
+def _attach_team_dependency_if_supported(
+    target: Any,
+    dependency_model: type[DependencyT],
+    arg_name: str,
+    model_kwargs: dict[str, Any],
+) -> bool:
+    register_team_dependency = getattr(target, "_add_team_dependency", None)
+    if not callable(register_team_dependency):
+        return False
+
+    dependency = dependency_model(arg_name=arg_name, **model_kwargs)
+    register_team_dependency(dependency)
+    return True
+
+
+def _attach_interrupt_team_dependency_if_supported(
+    target: Any,
+    *,
+    arg_name: str,
+    input_handler: Callable[[str], Any],
+    prompt: str,
+    input_type: InputType,
+    choices: list[str],
+) -> bool:
+    register_team_dependency = getattr(target, "_add_team_dependency", None)
+    if not callable(register_team_dependency):
+        return False
+
+    dependency = InterruptDependency(
+        arg_name=arg_name,
+        prompt=prompt,
+        input_handler=input_handler,
+        input_type=input_type,
+        choices=choices,
+    )
+    register_team_dependency(dependency)
+    return True
+
+
+def _should_store_pending_team_dependency(target: Any, arg_name: str) -> bool:
+    if not callable(target):
+        return False
+    try:
+        signature = inspect.signature(target)
+    except (TypeError, ValueError):
+        return False
+    if arg_name in signature.parameters:
+        return False
+    return _returns_agent(target, signature)
+
+
+def _returns_agent(target: Callable, signature: inspect.Signature) -> bool:
+    annotation = signature.return_annotation
+    if annotation == inspect.Signature.empty:
+        return False
+    if isinstance(annotation, str):
+        return annotation == "Agent" or annotation.endswith(".Agent")
+    return getattr(annotation, "__name__", None) == "Agent"
 
 
 def _resolve_tool_reference(tool_ref: str | BaseTool | Callable) -> tuple[str, str]:
