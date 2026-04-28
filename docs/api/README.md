@@ -104,7 +104,7 @@ from maivn.messages import HumanMessage, AIMessage, SystemMessage
 
 - **Getting started?** See [Agent](agent.md) and [Decorators](decorators.md)
 - **Multi-agent systems?** See [Swarm](swarm.md)
-- **Frontend / backend event bridges and trust boundaries?** See [Events](events.md)
+- **Streaming events to your frontend?** Start with the [Frontend Events guide](../guides/frontend-events.md) — one-line FastAPI mount + client examples in JavaScript, TypeScript, Swift, Kotlin, Go, Python, Rust, .NET, and more. For the API reference and trust-boundary controls, see [Events](events.md)
 - **External tools?** See [MCP](mcp.md)
 - **Configuration?** See [Configuration](configuration.md)
 - **Debugging?** See [Logging](logging.md)

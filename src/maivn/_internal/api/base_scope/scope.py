@@ -72,7 +72,7 @@ def _private_data_list_to_dict(items: list[Any]) -> dict[str, Any]:
 
 def _resolve_max_concurrency(max_concurrency: int | None, input_count: int) -> int | None:
     if max_concurrency is not None and max_concurrency < 1:
-        raise ValueError('max_concurrency must be greater than 0.')
+        raise ValueError("max_concurrency must be greater than 0.")
     if input_count < 1:
         return 0
     if max_concurrency is None:
@@ -319,9 +319,9 @@ class BaseScope(
         input_item: Any,
         invoke_kwargs: dict[str, Any],
     ) -> SessionResponse:
-        invoke_fn = getattr(self, 'invoke', None)
+        invoke_fn = getattr(self, "invoke", None)
         if invoke_fn is None:
-            raise AttributeError('Scope does not support invoke().')
+            raise AttributeError("Scope does not support invoke().")
         return invoke_fn(input_item, **invoke_kwargs)
 
 
