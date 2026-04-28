@@ -126,6 +126,24 @@ If you are debugging duplicate activity in Studio, separate transport replay fro
 
 Studio suppresses the latter category in its app adapter while still relying on the shared `maivn.events` normalization and bridge contract underneath.
 
+## Batch Matrix Debugging
+
+Use Studio's Batch Matrix when you need to compare prompts, variants, models, or
+targeted tools in one grouped turn. Each matrix row becomes one batch item and
+can override `variant`, `model`, `reasoning`, `system_message`, and
+`targeted_tools` without changing the demo module.
+
+For a simple uniform batch, send `batch.messages`; Studio can call SDK
+`batch()` or `abatch()` directly. For row-level overrides, send `batch.rows`;
+Studio executes row-specific invocations under the configured `max_concurrency`
+while preserving input order in the grouped result.
+
+The batch SSE sequence is:
+
+- `batch_start`: pending row metadata
+- `batch_item_complete`: one completed row payload
+- `batch_complete`: aggregate status and all item results
+
 ## Runtime Patching Without Restart
 
 Studio supports live runtime edits:

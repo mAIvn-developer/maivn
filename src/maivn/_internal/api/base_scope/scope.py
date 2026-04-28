@@ -4,12 +4,15 @@ Defines shared tool registration, compilation, and dependency wiring for Agent/S
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Literal
 
 from maivn_shared import (
     MemoryConfig,
     PrivateData,
+    SessionResponse,
     SystemMessage,
     create_uuid,
 )
@@ -65,6 +68,16 @@ def _private_data_list_to_dict(items: list[Any]) -> dict[str, Any]:
             raise ValueError(f'duplicate private_data name: "{key}"')
         result[key] = pd.value
     return result
+
+
+def _resolve_max_concurrency(max_concurrency: int | None, input_count: int) -> int | None:
+    if max_concurrency is not None and max_concurrency < 1:
+        raise ValueError('max_concurrency must be greater than 0.')
+    if input_count < 1:
+        return 0
+    if max_concurrency is None:
+        return None
+    return min(max_concurrency, input_count)
 
 
 # MARK: Base Scope
@@ -234,6 +247,82 @@ class BaseScope(
     def id(self) -> str:
         name = self.name or self.__class__.__name__
         return create_uuid(f"{self.__class__.__name__}:{name}")
+
+    # MARK: - Batch Invocation
+
+    def batch(
+        self,
+        inputs: Iterable[Any],
+        *,
+        max_concurrency: int | None = None,
+        **invoke_kwargs: Any,
+    ) -> list[SessionResponse]:
+        """Invoke this scope for multiple inputs concurrently.
+
+        Args:
+            inputs: Iterable of first-argument values to pass to ``invoke``.
+            max_concurrency: Maximum number of invoke calls to run at once.
+            **invoke_kwargs: Keyword arguments shared by every invoke call.
+
+        Returns:
+            Responses in the same order as ``inputs``.
+        """
+        input_items = list(inputs)
+        max_workers = _resolve_max_concurrency(max_concurrency, len(input_items))
+        if max_workers == 0:
+            return []
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(self._invoke_batch_item, item, dict(invoke_kwargs))
+                for item in input_items
+            ]
+            return [future.result() for future in futures]
+
+    async def abatch(
+        self,
+        inputs: Iterable[Any],
+        *,
+        max_concurrency: int | None = None,
+        **invoke_kwargs: Any,
+    ) -> list[SessionResponse]:
+        """Asynchronously invoke this scope for multiple inputs concurrently.
+
+        Args:
+            inputs: Iterable of first-argument values to pass to ``invoke``.
+            max_concurrency: Maximum number of invoke calls to run at once.
+            **invoke_kwargs: Keyword arguments shared by every invoke call.
+
+        Returns:
+            Responses in the same order as ``inputs``.
+        """
+        input_items = list(inputs)
+        max_workers = _resolve_max_concurrency(max_concurrency, len(input_items))
+        if max_workers == 0:
+            return []
+
+        loop = asyncio.get_running_loop()
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            tasks = [
+                loop.run_in_executor(
+                    executor,
+                    self._invoke_batch_item,
+                    item,
+                    dict(invoke_kwargs),
+                )
+                for item in input_items
+            ]
+            return list(await asyncio.gather(*tasks))
+
+    def _invoke_batch_item(
+        self,
+        input_item: Any,
+        invoke_kwargs: dict[str, Any],
+    ) -> SessionResponse:
+        invoke_fn = getattr(self, 'invoke', None)
+        if invoke_fn is None:
+            raise AttributeError('Scope does not support invoke().')
+        return invoke_fn(input_item, **invoke_kwargs)
 
 
 # MARK: Model Rebuild

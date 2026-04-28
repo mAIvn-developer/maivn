@@ -131,6 +131,67 @@ response = swarm.events().invoke(
 )
 ```
 
+### batch() and abatch()
+
+Run multiple independent `Swarm.invoke()` calls concurrently and return
+responses in the same order as the input list. Each input item is passed as the
+first argument to `Swarm.invoke()`, so each item may be a single `BaseMessage`
+or a sequence of messages.
+
+```python
+def batch(
+    inputs: Iterable[Sequence[BaseMessage] | BaseMessage],
+    *,
+    max_concurrency: int | None = None,
+    **invoke_kwargs: Any,
+) -> list[SessionResponse]
+
+async def abatch(
+    inputs: Iterable[Sequence[BaseMessage] | BaseMessage],
+    *,
+    max_concurrency: int | None = None,
+    **invoke_kwargs: Any,
+) -> list[SessionResponse]
+```
+
+Use `max_concurrency` to cap simultaneous swarm executions. Any keyword
+argument accepted by `Swarm.invoke()` can be provided once and is shared by
+every batch item.
+
+```python
+from maivn.messages import HumanMessage
+
+requests = [
+    HumanMessage(content='Research topic A and write the brief'),
+    HumanMessage(content='Research topic B and write the brief'),
+    HumanMessage(content='Research topic C and write the brief'),
+]
+
+responses = swarm.batch(
+    requests,
+    max_concurrency=2,
+    force_final_tool=True,
+)
+```
+
+Async usage:
+
+```python
+responses = await swarm.abatch(
+    requests,
+    max_concurrency=2,
+    force_final_tool=True,
+)
+```
+
+Notes:
+
+- `batch()` and `abatch()` preserve input order even when calls complete out of order.
+- `max_concurrency` must be greater than zero.
+- Exceptions from any individual swarm invocation are raised to the caller.
+- Batch execution is for independent calls. Use a shared `thread_id` only when you
+  intentionally want concurrent calls to write to the same conversation thread.
+
 ### preview_redaction()
 
 Preview server-side redaction for a `RedactedMessage` without starting a swarm invocation.
@@ -478,6 +539,7 @@ TOOL CONFIGURATION ERROR
 | Scope              | Single agent + its tools | All agents + all tools   |
 | Agent dependencies | Resolved within swarm    | Fully coordinated        |
 | Final output       | Agent's `final_tool`     | Swarm's final agent/tool |
+| Batch execution    | `agent.batch()`          | `swarm.batch()`          |
 | Use case           | Single-agent tasks       | Multi-agent coordination |
 
 ## See Also

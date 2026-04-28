@@ -251,10 +251,14 @@ class Agent(BaseScope):
     def _get_orchestrator(self) -> AgentOrchestratorInterface:
         """Get or create cached orchestrator instance."""
         if self._orchestrator is None:
-            from maivn._internal.core.orchestrator.builder import OrchestratorBuilder
-
-            self._orchestrator = OrchestratorBuilder().with_agent(self).build()
+            self._orchestrator = self._build_orchestrator()
         return self._orchestrator
+
+    def _build_orchestrator(self) -> AgentOrchestratorInterface:
+        """Build a new orchestrator instance for this agent."""
+        from maivn._internal.core.orchestrator.builder import OrchestratorBuilder
+
+        return OrchestratorBuilder().with_agent(self).build()
 
     def invoke(
         self,
@@ -272,6 +276,39 @@ class Agent(BaseScope):
         allow_private_in_system_tools: bool | None = None,
     ) -> SessionResponse:
         """Invoke the agent through the AgentOrchestrator."""
+        return self._invoke_with_orchestrator(
+            self._get_orchestrator(),
+            messages,
+            force_final_tool=force_final_tool,
+            targeted_tools=targeted_tools,
+            structured_output=structured_output,
+            model=model,
+            reasoning=reasoning,
+            stream_response=stream_response,
+            thread_id=thread_id,
+            verbose=verbose,
+            metadata=metadata,
+            memory_config=memory_config,
+            allow_private_in_system_tools=allow_private_in_system_tools,
+        )
+
+    def _invoke_with_orchestrator(
+        self,
+        orchestrator: AgentOrchestratorInterface,
+        messages: Sequence[BaseMessage],
+        *,
+        force_final_tool: bool = False,
+        targeted_tools: list[str] | None = None,
+        structured_output: type[PydanticBaseModel] | None = None,
+        model: Literal["fast", "balanced", "max"] | None = None,
+        reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
+        stream_response: bool = True,
+        thread_id: str | None = None,
+        verbose: bool = False,
+        metadata: dict[str, Any] | None = None,
+        memory_config: MemoryConfig | dict[str, Any] | None = None,
+        allow_private_in_system_tools: bool | None = None,
+    ) -> SessionResponse:
         self._validate_invoke_params(force_final_tool, targeted_tools, structured_output)
         invocation_state = self._prepare_invocation_state(
             messages,
@@ -294,9 +331,7 @@ class Agent(BaseScope):
         }
 
         if not scope_hooks_enabled(invocation_state):
-            return self._get_orchestrator().invoke(
-                invocation_state.prepared_messages, **orchestrator_kwargs
-            )
+            return orchestrator.invoke(invocation_state.prepared_messages, **orchestrator_kwargs)
 
         payload = build_scope_hook_payload(self, invocation_state)
         run_scope_hooks(
@@ -306,9 +341,7 @@ class Agent(BaseScope):
         )
 
         try:
-            result = self._get_orchestrator().invoke(
-                invocation_state.prepared_messages, **orchestrator_kwargs
-            )
+            result = orchestrator.invoke(invocation_state.prepared_messages, **orchestrator_kwargs)
         except Exception as exc:  # noqa: BLE001
             payload["stage"] = "after"
             payload["error"] = exc
@@ -373,6 +406,26 @@ class Agent(BaseScope):
         return wrap_stream_with_hooks(stream_iter, self, invocation_state, payload)
 
     # MARK: - Invocation Helpers
+
+    def _invoke_batch_item(
+        self,
+        input_item: Any,
+        invoke_kwargs: dict[str, Any],
+    ) -> SessionResponse:
+        orchestrator = self._build_orchestrator()
+        try:
+            return self._invoke_with_orchestrator(
+                orchestrator,
+                input_item,
+                **invoke_kwargs,
+            )
+        finally:
+            close = getattr(orchestrator, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except (RuntimeError, OSError, AttributeError):
+                    pass
 
     def _prepare_invocation_state(
         self,

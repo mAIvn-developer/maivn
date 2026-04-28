@@ -8,6 +8,7 @@ The maivn SDK provides a clean, declarative interface for creating AI agents wit
 - **Dependency injection** between tools, agents, and external data
 - **Structured outputs** with guaranteed schema conformance
 - **Multi-agent orchestration** via Swarms
+- **Concurrent batch invocation** for independent Agent and Swarm requests
 - **MCP integration** for external tool servers
 
 ## Features
@@ -17,6 +18,7 @@ The maivn SDK provides a clean, declarative interface for creating AI agents wit
 - **Dependency Graph**: Chain tools with `@depends_on_tool`, inject secrets with `@depends_on_private_data`
 - **Structured Output**: Use `final_tool=True` for guaranteed typed responses
 - **Multi-Agent**: Coordinate agents with `Swarm` and `@depends_on_agent`
+- **Batch Invocation**: Run multiple independent `invoke()` calls with `batch()` or `abatch()`
 - **MCP Support**: Connect external MCP servers (stdio/HTTP) as tool providers
 - **Interrupts**: Collect user input mid-execution with `@depends_on_interrupt`
 - **System Tools**: Built-in `web_search`, `repl`, `think`
@@ -120,6 +122,29 @@ response = agent.invoke(
     [HumanMessage(content='Weather report for Austin')],
     force_final_tool=True,
 )
+```
+
+### Concurrent Batch Invocation
+
+Use `batch()` when you have multiple independent requests for the same agent or
+swarm. The SDK runs the underlying `invoke()` calls concurrently and returns
+responses in the same order as the inputs.
+
+```python
+batch_inputs = [
+    [HumanMessage(content='Summarize ticket A')],
+    [HumanMessage(content='Summarize ticket B')],
+    [HumanMessage(content='Summarize ticket C')],
+]
+
+responses = agent.batch(
+    batch_inputs,
+    max_concurrency=3,
+    force_final_tool=True,
+)
+
+# Async variant
+responses = await agent.abatch(batch_inputs, max_concurrency=3)
 ```
 
 ### Tool Dependencies

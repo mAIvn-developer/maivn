@@ -262,6 +262,70 @@ response = agent.invoke(
 response = agent.events().invoke([HumanMessage(content='Debug this')])
 ```
 
+### batch() and abatch()
+
+Run multiple independent `invoke()` calls concurrently and return responses in
+the same order as the input list. Each input item is passed as the first
+argument to `invoke()`, so for `Agent` each item is normally a
+`Sequence[BaseMessage]`.
+
+```python
+def batch(
+    inputs: Iterable[Sequence[BaseMessage]],
+    *,
+    max_concurrency: int | None = None,
+    **invoke_kwargs: Any,
+) -> list[SessionResponse]
+
+async def abatch(
+    inputs: Iterable[Sequence[BaseMessage]],
+    *,
+    max_concurrency: int | None = None,
+    **invoke_kwargs: Any,
+) -> list[SessionResponse]
+```
+
+Use `max_concurrency` to cap simultaneous executions. When omitted, the SDK
+uses Python's default thread-pool worker count. Any keyword argument accepted
+by `invoke()` can be provided once and is shared by every batch item.
+
+```python
+from maivn.messages import HumanMessage
+
+batch_inputs = [
+    [HumanMessage(content='Summarize ticket A')],
+    [HumanMessage(content='Summarize ticket B')],
+    [HumanMessage(content='Summarize ticket C')],
+]
+
+responses = agent.batch(
+    batch_inputs,
+    max_concurrency=3,
+    force_final_tool=True,
+)
+
+for response in responses:
+    print(response.result)
+```
+
+Async usage:
+
+```python
+responses = await agent.abatch(
+    batch_inputs,
+    max_concurrency=3,
+    force_final_tool=True,
+)
+```
+
+Notes:
+
+- `batch()` and `abatch()` preserve input order even when calls complete out of order.
+- `max_concurrency` must be greater than zero.
+- Exceptions from any individual invocation are raised to the caller.
+- Batch execution is for independent calls. Use a shared `thread_id` only when you
+  intentionally want concurrent calls to write to the same conversation thread.
+
 ### preview_redaction()
 
 Preview server-side redaction for a `RedactedMessage` without starting an invocation.
@@ -659,6 +723,7 @@ with Agent(name='temp', api_key='...') as agent:
 - Tool compilation (`compile_tools()`)
 - Tool validation (`validate_tool_configuration()`)
 - MCP server registration (`register_mcp_servers()`)
+- Batch invocation (`batch()` and `abatch()`)
 
 Both `Agent` and `Swarm` inherit these capabilities.
 
