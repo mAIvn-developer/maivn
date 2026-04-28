@@ -2,15 +2,23 @@
 
 Tiered API:
 
+- **Tier 0 - One-line FastAPI mount**: ``maivn.events.fastapi.mount_events``
+  wires ``GET /maivn/events/{session_id}`` into a FastAPI app. The fastest
+  path from "I emit events" to "my frontend reads them". Requires the
+  ``[fastapi]`` optional extra.
 - **Tier 1 - Stream consumption**: ``normalize_stream()`` for read-only
   consumers (webhooks, logging, analytics).
 - **Tier 1.5 - Stream replay**: ``forward_normalized_event()`` and
   ``forward_normalized_stream()`` for replaying normalized AppEvents into a
   reporter or UI bridge.
 - **Tier 2 - Frontend bridge**: ``EventBridge`` for building SSE/WebSocket
-  endpoints that forward events to a frontend.
+  endpoints by hand (Flask, raw ASGI, aiohttp, Django, …).
 - **Tier 3 - Builders**: ``build_*_payload()`` functions for custom reporters
   and advanced integrations.
+
+See ``docs/guides/frontend-events.md`` for end-to-end recipes including
+frontend client examples in JavaScript, TypeScript, Swift, Kotlin, Go,
+Python, Rust, .NET, and more.
 """
 
 from __future__ import annotations
@@ -50,7 +58,14 @@ from .._internal.utils.reporting.app_event_payloads import (
 )
 
 # Tier 2: Frontend bridge
-from ._bridge import BridgeAudience, BridgeRegistry, EventBridge, EventBridgeSecurityPolicy, UIEvent
+from ._bridge import (
+    BackpressurePolicy,
+    BridgeAudience,
+    BridgeRegistry,
+    EventBridge,
+    EventBridgeSecurityPolicy,
+    UIEvent,
+)
 
 # Tier 1: Models and stream consumption
 from ._forward import (
@@ -88,11 +103,12 @@ __all__ = [
     "NormalizedStreamState",
     "RawSSEEvent",
     # Tier 2: Frontend bridge
+    "BackpressurePolicy",
     "BridgeAudience",
+    "BridgeRegistry",
     "EventBridge",
     "EventBridgeSecurityPolicy",
     "UIEvent",
-    "BridgeRegistry",
     # Tier 3: Builders (advanced)
     "APP_EVENT_CONTRACT_VERSION",
     "build_agent_assignment_payload",

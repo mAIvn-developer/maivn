@@ -235,6 +235,18 @@ internal_bridge = EventBridge('session-1', audience='internal')
 
 Use `frontend_safe` when the event stream reaches end users. Use `internal` only for trusted tooling such as mAIvn Studio, Booth, or your own internal operator consoles.
 
+For the easiest possible end-to-end setup, use the FastAPI adapter — one line wires `GET /maivn/events/{session_id}` and your frontend (in any language) can consume it via `EventSource` or any SSE client:
+
+```python
+from fastapi import FastAPI
+from maivn.events.fastapi import mount_events
+
+app = FastAPI()
+mount_events(app, factory=lambda sid: EventBridge(sid, audience='frontend_safe'))
+```
+
+See the [frontend events guide](guides/frontend-events.md) for client examples in JavaScript, TypeScript, Swift, Kotlin, Go, Python, Rust, and more.
+
 ### Harden Third-Party stdio MCP Servers
 
 If you launch third-party MCP servers over stdio, prefer explicit environment passing instead of inheriting your full backend environment:

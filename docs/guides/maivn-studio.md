@@ -263,7 +263,7 @@ Common event types:
 For the canonical packet contract and bridge-family normalization details, see:
 
 - [Events](../api/events.md)
-- [Frontend Event Bridges](frontend-event-bridges.md)
+- [Frontend Events](frontend-events.md)
 
 ![Studio event stream view](/maivn_studio/maivn_studio_events.png "Live event stream in Studio")
 
@@ -299,7 +299,7 @@ For redaction workflows, Studio now keeps dedicated activity cards for preview a
 - merged private data after preview
 - matched and unmatched caller-supplied known PII values
 
-That full visibility is intentional in Studio because it is a developer-facing internal tool. Customer-facing frontends should not expose those raw fields; use the safe bridge audience described in [Frontend Event Bridges](frontend-event-bridges.md).
+That full visibility is intentional in Studio because it is a developer-facing internal tool. Customer-facing frontends should not expose those raw fields; use the safe bridge audience described in [Frontend Events](frontend-events.md).
 
 ## Related Guides
 

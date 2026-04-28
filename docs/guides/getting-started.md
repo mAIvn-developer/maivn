@@ -166,7 +166,30 @@ response = agent.events().invoke(
 )
 ```
 
-If you are sending execution events to a browser frontend, use `EventBridge` and pick the audience explicitly:
+If you are sending execution events to a browser frontend, the easiest path is the FastAPI helper — one line wires `GET /maivn/events/{session_id}` into your app:
+
+```python
+from fastapi import FastAPI
+from maivn.events.fastapi import mount_events, get_event_bridge
+
+app = FastAPI()
+mount_events(app)  # → GET /maivn/events/{session_id}
+
+@app.post("/start/{session_id}")
+async def start(session_id: str):
+    bridge = get_event_bridge(session_id)
+    await bridge.emit_status_message("orchestrator", "Working...")
+    await bridge.emit_final("Done!")
+    return {"ok": True}
+```
+
+Install the FastAPI extra:
+
+```bash
+pip install "maivn[fastapi]"
+```
+
+If you build your endpoint by hand (Flask, raw ASGI, aiohttp, …), construct an `EventBridge` directly and pick the audience explicitly:
 
 ```python
 from maivn.events import EventBridge
@@ -179,6 +202,8 @@ internal_bridge = EventBridge("session-1", audience="internal")
 ```
 
 Use `frontend_safe` for customer-facing browser sessions. Use `internal` for trusted tools such as mAIvn Studio, Booth, or your own internal debug consoles.
+
+Frontend client examples in JavaScript, TypeScript, Swift, Kotlin, Go, Python, Rust, .NET, and more live in the [frontend events guide](frontend-events.md).
 
 ## Built-in Capabilities
 
@@ -202,7 +227,7 @@ Now that you have a working agent, explore these topics:
 - [Memory and Recall Guide](memory-and-recall.md) - Summarize, retrieve, and index context across turns
 - [mAIvn Studio Guide](maivn-studio.md) - Run demos with UI + API and inspect live event streams
 - [Studio Authoring and Debugging](maivn-studio-authoring-and-debugging.md) - Make demos Studio-ready
-- [Frontend Event Bridges](frontend-event-bridges.md) - Stream safe app-facing events to browsers
+- [Frontend Events](frontend-events.md) - One-line backend mount + frontend client examples in JavaScript, TypeScript, Swift, Kotlin, Go, Python, Rust, .NET, and more
 
 ## Troubleshooting
 

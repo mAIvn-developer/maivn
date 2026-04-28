@@ -86,6 +86,7 @@ from ._internal.utils.logging import (
 from .events import (
     APP_EVENT_CONTRACT_VERSION,
     AppEvent,
+    BackpressurePolicy,
     BridgeAudience,
     BridgeRegistry,
     EventBridge,
@@ -123,6 +124,7 @@ __all__ = [
     # Event Contract
     "APP_EVENT_CONTRACT_VERSION",
     "AppEvent",
+    "BackpressurePolicy",
     "BridgeAudience",
     "BridgeRegistry",
     "EventBridge",

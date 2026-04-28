@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -13,6 +14,24 @@ _REDACTED_VALUE = "<redacted>"
 _INJECTED_DATA_FIELDS = frozenset({"private_data_injected", "interrupt_data_injected"})
 _REDACTION_DICT_FIELDS = frozenset({"added_private_data", "merged_private_data"})
 _REDACTION_LIST_FIELDS = frozenset({"matched_known_pii_values", "unmatched_known_pii_values"})
+_KNOWN_FRONTEND_SAFE_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        "tool_event",
+        "system_tool_complete",
+        "system_tool_start",
+        "system_tool_chunk",
+        "agent_assignment",
+        "final",
+        "enrichment",
+        "error",
+        "assistant_chunk",
+        "status_message",
+        "interrupt_required",
+        "session_start",
+        "session_end",
+    }
+)
+_logger = logging.getLogger("maivn.events._bridge.security")
 
 
 def _validate_audience(value: str) -> BridgeAudience:
@@ -31,16 +50,17 @@ class EventBridgeSecurityPolicy:
     def __post_init__(self) -> None:
         object.__setattr__(self, "audience", _validate_audience(self.audience))
 
-    @classmethod
-    def internal(cls) -> EventBridgeSecurityPolicy:
-        return cls(audience="internal")
-
-    @classmethod
-    def frontend_safe(cls) -> EventBridgeSecurityPolicy:
-        return cls(audience="frontend_safe")
-
     def sanitize_event(self, event_type: str, data: dict[str, Any]) -> dict[str, Any]:
-        """Return a bridge-safe payload for the configured audience."""
+        """Return a bridge-safe payload for the configured audience.
+
+        For ``frontend_safe`` bridges, unknown event types are not
+        passed through verbatim. Instead they go through a generic
+        injected-fields scrubber that summarizes any fields named in
+        :data:`_INJECTED_DATA_FIELDS` and removes top-level error
+        details. This is a defense-in-depth fallback so a third-party
+        emitter pushing a custom event type cannot accidentally leak
+        injected private data to the frontend.
+        """
         if self.audience == "internal":
             return data
 
@@ -66,8 +86,51 @@ class EventBridgeSecurityPolicy:
             safe_payload = _sanitize_enrichment_payload(safe_payload)
         elif normalized_event_type == "error":
             safe_payload = _sanitize_error_payload(safe_payload)
+        elif normalized_event_type not in _KNOWN_FRONTEND_SAFE_EVENT_TYPES:
+            _logger.warning(
+                "Unknown event type %r emitted to frontend_safe bridge; "
+                "applying generic injected-fields sanitization. "
+                "Add the type to _KNOWN_FRONTEND_SAFE_EVENT_TYPES or extend "
+                "sanitize_event() if it needs custom handling.",
+                event_type,
+            )
+            safe_payload = _sanitize_unknown_payload(safe_payload)
 
         return safe_payload
+
+
+def _sanitize_unknown_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Best-effort scrub of an unknown event payload for frontend audiences.
+
+    Walks the payload depth-first and summarizes any field whose name
+    matches a known injected-data field (``private_data_injected``,
+    ``interrupt_data_injected``). Leaves other fields intact so the
+    frontend can still render the event, but prevents accidental
+    exfiltration of injected secrets through custom event types.
+    """
+    return _scrub_injected_fields_recursive(payload)
+
+
+def _scrub_injected_fields_recursive(value: Any) -> Any:
+    if isinstance(value, dict):
+        scrubbed: dict[str, Any] = {}
+        changed = False
+        for key, item in value.items():
+            if key in _INJECTED_DATA_FIELDS:
+                scrubbed[key] = _summarize_injected_payload(item)
+                changed = True
+                continue
+            new_item = _scrub_injected_fields_recursive(item)
+            if new_item is not item:
+                changed = True
+            scrubbed[key] = new_item
+        return scrubbed if changed else value
+    if isinstance(value, list):
+        new_list = [_scrub_injected_fields_recursive(item) for item in value]
+        if any(new is not orig for new, orig in zip(new_list, value, strict=True)):
+            return new_list
+        return value
+    return value
 
 
 def _sanitize_tool_event_payload(payload: dict[str, Any]) -> dict[str, Any]:

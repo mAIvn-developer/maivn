@@ -7,7 +7,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from .emitters import (
     emit_agent_assignment,
@@ -24,9 +24,60 @@ from .emitters import (
 )
 from .runtime.identity import AssignmentAndScopeResolver, BridgeIdentityState, ToolIdentityResolver
 from .runtime.normalization import BridgePayloadNormalizer
+from .schema import ValidationMode, validate_event
 from .security import BridgeAudience, EventBridgeSecurityPolicy
-from .serialization import logger, safe_json_dumps
+from .serialization import build_safe_event_payload, logger
 from .streaming import generate_sse_events, reopen_bridge
+
+BackpressurePolicy = Literal["block", "drop_oldest", "drop_newest"]
+_VALID_BACKPRESSURE: frozenset[str] = frozenset({"block", "drop_oldest", "drop_newest"})
+_VALID_VALIDATION_MODES: frozenset[str] = frozenset({"off", "warn", "strict"})
+
+
+# MARK: Dedup helpers
+
+
+def _normalize_dedup_part(value: str | None) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip().lower()
+
+
+def _build_interrupt_fingerprint(
+    *,
+    prompt: str,
+    data_key: str,
+    arg_name: str | None = None,
+) -> tuple[str, str]:
+    """Stable fingerprint for an interrupt's logical identity.
+
+    Uses ``arg_name`` when present so reporter-emitted events that carry
+    an explicit argument name match SDK-emitted events that fall back to
+    ``data_key``.
+    """
+    return (
+        _normalize_dedup_part(prompt),
+        _normalize_dedup_part(arg_name) or _normalize_dedup_part(data_key),
+    )
+
+
+def _build_status_fingerprint(data: dict[str, Any]) -> tuple[str, str] | None:
+    """Fingerprint for a ``status_message`` payload, or ``None`` if uniqueable."""
+    message = data.get("message")
+    if not isinstance(message, str):
+        return None
+    normalized_message = message.strip()
+    if not normalized_message:
+        return None
+
+    assistant_id = data.get("assistant_id")
+    normalized_assistant_id = (
+        assistant_id.strip().lower()
+        if isinstance(assistant_id, str) and assistant_id.strip()
+        else ""
+    )
+    return normalized_assistant_id, normalized_message
+
 
 # MARK: UIEvent
 
@@ -47,7 +98,12 @@ class UIEvent:
             self.timestamp = datetime.now(UTC).isoformat()
 
     def to_sse(self) -> dict[str, Any]:
-        """Build an ``EventSourceResponse``-compatible payload."""
+        """Build an ``EventSourceResponse``-compatible payload.
+
+        On serialization failure the payload preserves the original event id
+        and type so reconnect cursors and frontend dispatchers stay correct
+        even when the data itself cannot be serialized.
+        """
         payload = {
             "id": self.id,
             "type": self.type,
@@ -57,7 +113,12 @@ class UIEvent:
         return {
             "event": self.type,
             "id": self.id,
-            "data": safe_json_dumps(payload),
+            "data": build_safe_event_payload(
+                payload,
+                event_id=self.id,
+                event_type=self.type,
+                timestamp=self.timestamp,
+            ),
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -85,24 +146,59 @@ class EventBridge:
         max_history: int = 500,
         heartbeat_interval: float = 15.0,
         audience: BridgeAudience = "internal",
-        security_policy: EventBridgeSecurityPolicy | None = None,
+        queue_maxsize: int = 0,
+        backpressure: BackpressurePolicy = "block",
+        schema_validation: ValidationMode = "warn",
+        dedupe_interrupts: bool = True,
+        dedupe_status_messages: bool = False,
+        reset_on_session_start: bool = True,
     ) -> None:
-        if security_policy is not None and audience != "internal":
-            raise ValueError("Specify either audience or security_policy, not both")
+        if max_history < 1:
+            raise ValueError("max_history must be >= 1")
+        if heartbeat_interval <= 0:
+            raise ValueError("heartbeat_interval must be > 0")
+        if queue_maxsize < 0:
+            raise ValueError("queue_maxsize must be >= 0 (0 = unbounded)")
+        if backpressure not in _VALID_BACKPRESSURE:
+            raise ValueError(
+                f"backpressure must be one of {sorted(_VALID_BACKPRESSURE)}, got {backpressure!r}"
+            )
+        if schema_validation not in _VALID_VALIDATION_MODES:
+            raise ValueError(
+                f"schema_validation must be one of {sorted(_VALID_VALIDATION_MODES)}, "
+                f"got {schema_validation!r}"
+            )
+
         self.session_id = session_id
         self._max_history = max_history
         self._heartbeat_interval = heartbeat_interval
-        self._queue: asyncio.Queue[UIEvent] = asyncio.Queue()
+        self._queue_maxsize = queue_maxsize
+        self._backpressure: BackpressurePolicy = backpressure
+        self._schema_validation: ValidationMode = schema_validation
+        self._queue: asyncio.Queue[UIEvent] = asyncio.Queue(maxsize=queue_maxsize)
         self._closed = False
         self._event_history: list[UIEvent] = []
-        self._security_policy = security_policy or EventBridgeSecurityPolicy(audience=audience)
+        # Total events ever appended to history; lets us detect when older
+        # events have aged out of the buffer so reconnects with a missing
+        # cursor can be diagnosed.
+        self._history_evictions = 0
+        self._security_policy = EventBridgeSecurityPolicy(audience=audience)
         self.audience = self._security_policy.audience
         self._identity_state = BridgeIdentityState()
         self._tool_identity_resolver = ToolIdentityResolver(self._identity_state)
         self._assignment_scope_resolver = AssignmentAndScopeResolver(self._identity_state)
         self._payload_normalizer = BridgePayloadNormalizer(self._identity_state)
+        # Dedup of overlapping logical emissions. Reset by reopen() and (when
+        # ``reset_on_session_start`` is set) on the ``session_start`` packet,
+        # whichever comes first.
+        self._dedupe_interrupts = dedupe_interrupts
+        self._dedupe_status_messages = dedupe_status_messages
+        self._reset_on_session_start = reset_on_session_start
+        self._emitted_interrupt_fingerprints: set[tuple[str, str]] = set()
+        self._last_status_fingerprint: tuple[str, str] | None = None
 
     async def _emit_normalized(self, event_type: str, data: dict[str, Any]) -> None:
+        validate_event(event_type, data, mode=self._schema_validation)
         bridge_safe_data = self._security_policy.sanitize_event(event_type, data)
         await self._emit_packet(event_type, bridge_safe_data)
 
@@ -114,14 +210,120 @@ class EventBridge:
         event = UIEvent(type=event_type, data=data)
         self._event_history.append(event)
         if len(self._event_history) > self._max_history:
-            del self._event_history[: -self._max_history]
-        await self._queue.put(event)
+            evicted = len(self._event_history) - self._max_history
+            self._history_evictions += evicted
+            del self._event_history[:evicted]
+
+        await self._enqueue_event(event)
         logger.debug("Emitted %s event for session %s", event_type, self.session_id)
+
+    async def _enqueue_event(self, event: UIEvent) -> None:
+        """Place an event on the live queue, applying the backpressure policy."""
+        if self._queue_maxsize == 0:
+            self._queue.put_nowait(event)
+            return
+
+        if self._backpressure == "block":
+            await self._queue.put(event)
+            return
+
+        if self._backpressure == "drop_newest":
+            try:
+                self._queue.put_nowait(event)
+            except asyncio.QueueFull:
+                logger.warning(
+                    "Dropping newest event for session %s (queue full, type=%s)",
+                    self.session_id,
+                    event.type,
+                )
+            return
+
+        # drop_oldest
+        while True:
+            try:
+                self._queue.put_nowait(event)
+                return
+            except asyncio.QueueFull:
+                try:
+                    dropped = self._queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    # Queue is full and empty simultaneously is impossible, but
+                    # being defensive avoids an infinite loop.
+                    return
+                logger.warning(
+                    "Dropping oldest event for session %s (queue full, type=%s)",
+                    self.session_id,
+                    dropped.type,
+                )
 
     async def emit(self, event_type: str, data: dict[str, Any]) -> None:
         """Emit an event to the UI stream."""
+        if self._reset_on_session_start and event_type == "session_start":
+            self._reset_dedup_state()
+        if (
+            self._dedupe_status_messages
+            and event_type == "status_message"
+            and self._should_drop_status_message(data)
+        ):
+            return
         normalized_data = self._payload_normalizer.normalize_payload(event_type, data)
+        if event_type == "interrupt_required" and self._should_drop_interrupt_payload(
+            normalized_data
+        ):
+            return
         await self._emit_normalized(event_type, normalized_data)
+
+    # MARK: Dedup state
+
+    def _reset_dedup_state(self) -> None:
+        """Clear interrupt + status_message dedup state. Called on ``reopen()``
+        and on ``session_start`` (when enabled).
+        """
+        self._emitted_interrupt_fingerprints.clear()
+        self._last_status_fingerprint = None
+
+    def _should_drop_interrupt(
+        self,
+        *,
+        prompt: str,
+        data_key: str,
+        arg_name: str | None,
+    ) -> bool:
+        if not self._dedupe_interrupts:
+            return False
+        fingerprint = _build_interrupt_fingerprint(
+            prompt=prompt,
+            data_key=data_key,
+            arg_name=arg_name,
+        )
+        if fingerprint in self._emitted_interrupt_fingerprints:
+            return True
+        self._emitted_interrupt_fingerprints.add(fingerprint)
+        return False
+
+    def _should_drop_interrupt_payload(self, data: dict[str, Any]) -> bool:
+        prompt = data.get("prompt")
+        data_key = data.get("data_key")
+        if not isinstance(prompt, str) or not isinstance(data_key, str):
+            return False
+
+        arg_name = data.get("arg_name")
+        return self._should_drop_interrupt(
+            prompt=prompt,
+            data_key=data_key,
+            arg_name=arg_name if isinstance(arg_name, str) else None,
+        )
+
+    def _should_drop_status_message(self, data: dict[str, Any]) -> bool:
+        if not self._dedupe_status_messages:
+            return False
+        fingerprint = _build_status_fingerprint(data)
+        if fingerprint is None:
+            return False
+        if fingerprint == self._last_status_fingerprint:
+            return True
+        self._last_status_fingerprint = fingerprint
+        return False
 
     # MARK: Tool Events
 
@@ -231,6 +433,10 @@ class EventBridge:
         message: str,
     ) -> None:
         """Emit a standalone status message."""
+        if self._dedupe_status_messages and self._should_drop_status_message(
+            {"assistant_id": assistant_id, "message": message}
+        ):
+            return
         await emit_status_message(self._emit_normalized, assistant_id=assistant_id, message=message)
 
     async def emit_interrupt_required(
@@ -247,7 +453,16 @@ class EventBridge:
         input_type: str = "text",
         choices: list[str] | None = None,
     ) -> None:
-        """Emit an interrupt request for user input."""
+        """Emit an interrupt request for user input.
+
+        Logical duplicates (same prompt + arg_name/data_key) are dropped
+        per turn when ``dedupe_interrupts`` is enabled (default). The
+        reporter path and the contract-stream replay can otherwise produce
+        different interrupt IDs for the same prompt/field pair, which would
+        surface as duplicate prompts in the frontend.
+        """
+        if self._should_drop_interrupt(prompt=prompt, data_key=data_key, arg_name=arg_name):
+            return
         await emit_interrupt_required(
             self._emit_normalized,
             interrupt_id=interrupt_id,
@@ -333,22 +548,57 @@ class EventBridge:
     async def generate_sse(
         self,
         last_event_id: str | None = None,
+        *,
+        heartbeat_interval: float | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
-        """Generate SSE events for streaming to client."""
-        async for event in generate_sse_events(self, last_event_id=last_event_id):
+        """Generate SSE events for streaming to client.
+
+        Keep-alives are emitted as SSE comment frames (``: keepalive ...\\n\\n``)
+        that browsers silently ignore — frontends do not need to subscribe
+        to or filter a heartbeat event type.
+
+        ``heartbeat_interval`` overrides the bridge default for this stream
+        only — useful when a specific client lives behind a proxy with an
+        aggressive idle timeout.
+        """
+        async for event in generate_sse_events(
+            self,
+            last_event_id=last_event_id,
+            heartbeat_interval=heartbeat_interval,
+        ):
             yield event
 
     def get_history(self) -> list[dict[str, Any]]:
         """Get event history as list of dicts."""
         return [event.to_dict() for event in self._event_history]
 
+    def _reset_identity_state(self) -> None:
+        """Drop all tool / assignment / scope identity aliases.
+
+        Identity state lasts for the logical lifetime of a turn. ``reopen()``
+        resets it as part of the new-turn lifecycle; there is no use case
+        for clearing identity without also clearing history + queue, so
+        this stays internal.
+        """
+        self._identity_state = BridgeIdentityState()
+        self._tool_identity_resolver = ToolIdentityResolver(self._identity_state)
+        self._assignment_scope_resolver = AssignmentAndScopeResolver(self._identity_state)
+        self._payload_normalizer = BridgePayloadNormalizer(self._identity_state)
+
     def close(self) -> None:
         """Close the event bridge."""
         self._closed = True
 
     def reopen(self) -> None:
-        """Reopen a closed bridge for a new turn."""
+        """Reopen a closed bridge for a new turn.
+
+        Clears history, the live queue, identity-state aliases, and dedup
+        state so the next turn starts from a clean slate.
+        """
         reopen_bridge(self)
+        self._reset_identity_state()
+        self._reset_dedup_state()
+        self._history_evictions = 0
 
 
 # MARK: BridgeRegistry

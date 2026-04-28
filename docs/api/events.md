@@ -2,6 +2,8 @@
 
 Public event contract for streaming SDK execution state into your backend and frontend.
 
+> **Looking for a step-by-step guide with frontend client examples in JavaScript, TypeScript, Swift, Kotlin, Go, Python, Rust, and more?** See [`guides/frontend-events.md`](../guides/frontend-events.md). This page is the API reference; the guide is the recipe book.
+
 ## Quick Start
 
 **Tier 1 - Consume a stream (3 lines):**
@@ -13,7 +15,31 @@ for event in normalize_stream(agent.stream(messages)):
     send_to_webhook(event.model_dump())
 ```
 
-**Tier 2 - Build an SSE endpoint (5 lines):**
+**Tier 2 - Stream events to a frontend (one-line FastAPI mount):**
+
+```python
+from fastapi import FastAPI
+from maivn.events.fastapi import get_event_bridge, mount_events
+
+app = FastAPI()
+mount_events(app)  # → GET /maivn/events/{session_id}
+
+@app.post("/start/{session_id}")
+async def start(session_id: str):
+    bridge = get_event_bridge(session_id)
+    await bridge.emit_tool_event(tool_name="search", tool_id="t1", status="executing")
+    await bridge.emit_tool_event(tool_name="search", tool_id="t1", status="completed", result={"ok": True})
+    await bridge.emit_final("Done")
+    return {"ok": True}
+```
+
+Install the optional extra to pull in `fastapi` + `sse-starlette`:
+
+```bash
+pip install "maivn[fastapi]"
+```
+
+**Tier 2 (lower-level) - Build an SSE endpoint by hand:**
 
 ```python
 from maivn.events import EventBridge
@@ -25,6 +51,8 @@ await bridge.emit_tool_event(tool_name="search", tool_id="t1", status="completed
 async for sse in bridge.generate_sse(last_event_id=request_last_event_id):
     yield sse
 ```
+
+Use the lower-level path when your framework isn't FastAPI (Flask, raw ASGI, aiohttp, Django, …) — see the guide's [Other frameworks](../guides/frontend-events.md#other-frameworks) section.
 
 ## Overview
 
@@ -47,6 +75,32 @@ Use the bridge audience to match the trust level of the frontend:
 - `EventBridge(..., audience="internal")` for trusted developer/admin frontends
 
 `frontend_safe` preserves the mAIvn event contract but sanitizes sensitive bridge-bound values such as raw redaction details, injected private-data values, and internal error details.
+
+## EventBridge constructor knobs
+
+`EventBridge` accepts the following keyword arguments — most production deployments only need the first two:
+
+| Argument | Default | Purpose |
+|----------|---------|---------|
+| `audience` | `"internal"` | `"frontend_safe"` redacts injected private data and error details before they hit history or the wire. Use it for end-user browsers. |
+| `max_history` | `500` | Cap on the per-session history buffer. Reconnects with a stale `Last-Event-ID` past this point get a logged warning. |
+| `heartbeat_interval` | `15.0` (seconds) | Idle interval between SSE keep-alives. Tighten when behind aggressive proxies (Cloudflare, AWS ALB). |
+| `queue_maxsize` | `0` (unbounded) | Bounds the live queue so a slow consumer can't OOM the process. Pair with `backpressure`. |
+| `backpressure` | `"block"` | `block` (await producer), `drop_oldest` (favor recency), `drop_newest` (favor order). |
+| `schema_validation` | `"warn"` | `off` skips validation, `warn` logs malformed events, `strict` raises `EventSchemaError`. |
+| `dedupe_interrupts` | `True` | Collapses repeated `interrupt_required` events by `(prompt, arg_name \| data_key)`. The reporter path and contract-stream replay can otherwise surface the same prompt twice. |
+| `dedupe_status_messages` | `False` | When enabled, collapses an immediately-repeated `status_message` (same assistant + text). Opt in for apps that surface the same status through multiple reporting paths. |
+| `reset_on_session_start` | `True` | Reset interrupt + status dedup state on the `session_start` packet. Disable for apps that drive turn boundaries through `reopen()` only. |
+
+`EventBridge.generate_sse(...)` accepts a per-stream `heartbeat_interval` override (useful when one specific client lives behind a proxy with an aggressive idle timeout). Keep-alives are always emitted as SSE comment frames that browsers silently ignore — frontends do not need to subscribe to or filter a heartbeat event type.
+
+## Dedup behavior
+
+The bridge always dedupes `interrupt_required` events by `(prompt, arg_name | data_key)`. The reporter path and the contract-stream replay can otherwise surface the same prompt twice — without dedup, a frontend would render two prompts for one logical interrupt.
+
+`status_message` dedup is opt-in (`dedupe_status_messages=True`) for apps that surface the same status through multiple reporting paths. Most apps emit deliberate status updates that can legitimately repeat, so the default is off.
+
+Both dedup channels reset on `reopen()` and on the `session_start` packet (controlled by `reset_on_session_start`). Set the appropriate flags to `False` in tests and analytics scenarios that need to observe every emit.
 
 ## EventBridge normalization contract
 
@@ -363,7 +417,7 @@ async def stream(session_id: str, last_event_id: str | None = None):
     return EventSourceResponse(bridge.generate_sse(last_event_id=last_event_id))
 ```
 
-For multi-turn sessions, reconnect the SSE when sending a follow-up message and pass the last seen event ID. Between turns the HTTP connection may go stale (browser timeouts, proxy drops). See the [frontend event bridges guide](../guides/frontend-event-bridges.md) for complete frontend integration examples.
+For multi-turn sessions, reconnect the SSE when sending a follow-up message and pass the last seen event ID. Between turns the HTTP connection may go stale (browser timeouts, proxy drops). See the [frontend events guide](../guides/frontend-events.md) for complete frontend integration examples in JavaScript, TypeScript, Swift, Kotlin, Go, Python, Rust, .NET, and more.
 
 Internally, the bridge also deduplicates events that exist in both the history buffer and the live queue during history replay.
 

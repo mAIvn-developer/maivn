@@ -41,12 +41,19 @@ def test_ui_event_serialization_falls_back_on_payload_errors() -> None:
         timestamp="2026-03-19T00:00:00+00:00",
     )
 
-    parsed = json.loads(event.to_sse()["data"])
+    sse_payload = event.to_sse()
+    parsed = json.loads(sse_payload["data"])
 
-    assert parsed == {
-        "event": "error",
-        "message": "Failed to serialize event payload",
-    }
+    # Fallback envelope preserves id/type/timestamp so the frontend's
+    # Last-Event-ID cursor and dispatcher remain correct.
+    assert sse_payload["event"] == "tool_event"
+    assert sse_payload["id"] == "evt-2"
+    assert parsed["id"] == "evt-2"
+    assert parsed["type"] == "tool_event"
+    assert parsed["timestamp"] == "2026-03-19T00:00:00+00:00"
+    assert parsed["data"]["serialization_error"] is True
+    assert "error_class" in parsed["data"]
+    assert isinstance(parsed["data"]["message"], str)
 
 
 def test_event_bridge_replays_only_unseen_history() -> None:
@@ -108,19 +115,22 @@ def test_event_bridge_replays_new_turn_when_resume_cursor_is_stale() -> None:
     assert second_payload["data"]["error"] == "stop"
 
 
-def test_event_bridge_emits_heartbeat_when_idle() -> None:
+def test_event_bridge_emits_comment_frame_keepalive_when_idle() -> None:
     async def _run() -> dict[str, str]:
         bridge = EventBridge("session-3", heartbeat_interval=0.001)
         generator = bridge.generate_sse()
-        heartbeat = await anext(generator)
+        keepalive = await anext(generator)
         bridge.close()
         await generator.aclose()
-        return heartbeat
+        return keepalive
 
-    event = asyncio.run(_run())
+    frame = asyncio.run(_run())
 
-    assert event["event"] == "heartbeat"
-    assert "timestamp" in json.loads(event["data"])
+    # Comment frames carry no event/data; browsers ignore them entirely,
+    # so frontends never need to subscribe to or filter a heartbeat type.
+    assert "comment" in frame
+    assert frame["comment"].startswith("keepalive ")
+    assert "event" not in frame
 
 
 def test_bridge_registry_replaces_existing_session_bridge() -> None:
