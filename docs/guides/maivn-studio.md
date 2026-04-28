@@ -164,11 +164,58 @@ Create-session request supports:
 - `private_data`
 - `structured_output`
 - `invocation`
+- `batch`
 - `attachments`
 
 Attachment note: Studio API attachments require `content_base64` plus optional metadata fields (`name`, `mime_type`, `sharing_scope`, `binding_type`, `source_url`, `source_type`, `description`, `tags`).
 
 ![Studio chat input and run controls](/maivn_studio/maivn_studio_chat_input.png "Session creation starts from the Studio chat input")
+
+### Batch Matrix Sessions
+
+Studio can create one grouped batch turn by passing `batch` to
+`POST /api/sessions`. The preferred Studio payload is `batch.rows`; each row is a
+Batch Matrix item with its own prompt and optional overrides:
+
+- `label`
+- `message`
+- `variant`
+- `model`
+- `reasoning`
+- `system_message`
+- `targeted_tools`
+
+```json
+{
+  "demo_id": "batch-invocation",
+  "message": "1. API 500\n2. API 429",
+  "batch": {
+    "enabled": true,
+    "rows": [
+      {
+        "label": "API 500",
+        "message": "Summarize incident BATCH-1001",
+        "variant": "agent-sync",
+        "targeted_tools": ["emit_incident_summary"]
+      },
+      {
+        "label": "API 429",
+        "message": "Summarize incident BATCH-1002",
+        "variant": "swarm-sync",
+        "system_message": "Prioritize incident triage details."
+      }
+    ],
+    "max_concurrency": 2,
+    "async_mode": true
+  }
+}
+```
+
+`batch.messages` remains supported for simple uniform batches. Uniform batches
+use the same top-level variant and invocation settings for every item and can run
+through SDK `batch()` or `abatch()`. Matrix rows with row-level overrides use
+row-specific invocations while preserving the same ordering and concurrency
+semantics.
 
 ## SSE Event Stream
 
@@ -206,6 +253,9 @@ Common event types:
 - `interrupt_required`
 - `turn_complete`
 - `final`
+- `batch_start`
+- `batch_item_complete`
+- `batch_complete`
 - `error`
 - `session_end`
 - `heartbeat`
