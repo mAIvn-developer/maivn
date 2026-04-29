@@ -26,6 +26,8 @@ from maivn._internal.core.services.dependency_execution_service import Dependenc
 if TYPE_CHECKING:
     from ..tool_execution_service import ToolExecutionService
 
+_DEFAULT_AGENT_DEPENDENCY_PROMPT = "Execute the requested task based on the current context."
+
 
 class DependencyResolver:
     """Resolves tool dependencies before execution."""
@@ -187,13 +189,9 @@ class DependencyResolver:
         """
         try:
             metadata = context.metadata or {}
-            default_prompt = metadata.get(
-                "agent_prompt",
-                load_prompt(
-                    "shared/AGENT_DEPENDENCY_DEFAULT.md",
-                    "maivn_internal_shared.prompts",
-                ),
-            )
+            default_prompt = metadata.get("agent_prompt")
+            if default_prompt is None:
+                default_prompt = self._load_default_agent_dependency_prompt()
 
             result = executor.execute_tool_call(
                 tool_id=dependency.agent_id,
@@ -212,6 +210,20 @@ class DependencyResolver:
                     e,
                 )
             return self._dependency_service.execute_dependency(dependency, context)
+
+    def _load_default_agent_dependency_prompt(self) -> str:
+        try:
+            return load_prompt(
+                "shared/AGENT_DEPENDENCY_DEFAULT.md",
+                "maivn_internal_shared.prompts",
+            )
+        except FileNotFoundError as e:
+            if self._logger:
+                self._logger.warning(
+                    "Default agent dependency prompt was unavailable; using built-in fallback: %s",
+                    e,
+                )
+            return _DEFAULT_AGENT_DEPENDENCY_PROMPT
 
     def _resolve_tool_dependency(
         self,
