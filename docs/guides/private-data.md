@@ -120,28 +120,45 @@ response = agent.invoke([
 
 ### Detected PII Types
 
-| Type          | Examples                            |
-| ------------- | ----------------------------------- |
-| `email`       | `user@example.com`                  |
-| `phone`       | `+1-555-123-4567`, `(555) 123-4567` |
-| `ssn`         | `123-45-6789`                       |
-| `credit_card` | `4111-1111-1111-1111`               |
-| `iban`        | `DE89370400440532013000`            |
-| `swift`       | `DEUTDEFF`                          |
-| `person`      | Names detected by NLP               |
-| `location`    | Addresses, cities detected by NLP   |
-| `ip_address`  | `192.168.1.1`                       |
-| `account_id`  | `account id: ABC123`                |
+The detection pipeline targets HIPAA Safe Harbor identifiers plus the
+common PCI / banking / governmental categories. Each pattern is paired with
+a structural validator so structurally-similar non-PII (order numbers,
+internal product codes) is not flagged.
+
+| Type | Examples | Validator |
+| --- | --- | --- |
+| `email` | `user@example.com` | structural |
+| `phone` | `+1-555-123-4567`, `(555) 123-4567` | NANP / E.164 boundaries |
+| `ssn` | `123-45-6789`, `123 45 6789`, `123.45.6789` | reject reserved areas (`000`, `666`, `9xx`) |
+| `credit_card` | `4111-1111-1111-1111` | Luhn (mod-10) checksum required |
+| `iban` | `DE89370400440532013000` | per-country length + ISO 13616 mod-97 |
+| `swift` | `DEUTDEFF`, `DEUTDEFF500` | ISO 3166 country code + length 8 or 11 |
+| `account_id` | `account id: ABC123` | label-anchored |
+| `medical_record_number` | `MRN: AB-12345`, `Medical Record Number 0019283` | label-anchored |
+| `vehicle_id` | `1HGCM82633A004352` (VIN) | ISO 3779 alphabet + 17 chars |
+| `health_plan_id` | `Member ID: HP-994221`, `Policy Number ...` | label-anchored |
+| `person` | Names detected by NLP | per-entity confidence |
+| `location` | Addresses, cities | per-entity confidence |
+| `date` / `datetime` | `2025-04-29`, `April 29, 2025` | per-entity confidence |
+| `ip_address` | `192.168.1.1` | per-entity confidence |
+| `url` | `https://...` | per-entity confidence |
+| `license_id` | Driver license / professional license numbers | Presidio |
+| `passport_id` | US passport numbers | Presidio |
+| `bank_account` | US bank account / routing numbers | Presidio |
 
 ### Key Naming Convention
 
-Redacted values are stored with keys in the format `pii_{type}_{counter}`:
+Redacted values are stored with keys whose format depends on how the value
+was registered:
 
-- `pii_email_1`, `pii_email_2` for multiple emails
-- `pii_phone_1` for phone numbers
-- `pii_ssn_1` for social security numbers
+| How registered | Key shape | Example |
+| --- | --- | --- |
+| Auto-detected by NLP / regex | `pii_{type}_{counter}` | `pii_email_1`, `pii_ssn_1` |
+| Declared via `PrivateData(name=...)` | `user_{sanitized_name}` | `user_patient_name` |
 
-The same value appearing multiple times uses the same key.
+The `user_` prefix on user-supplied names prevents a caller from squatting
+on a future auto-allocated `pii_*` slot. The same value appearing multiple
+times reuses the same key.
 
 ### Accessing Redacted Values in Tools
 
@@ -200,17 +217,22 @@ response = agent.invoke([
 
 **What the LLM sees** (message content with placeholders):
 ```
-Process claim CLM-2026-4401 for {_{patient_name}_}, DOB {_{patient_dob}_}.
+Process claim CLM-2026-4401 for {_{user_patient_name}_}, DOB {_{user_patient_dob}_}.
 ```
 
 **What the schema includes** (no values, just metadata):
 ```json
 {
-  "patient_name": {"data_type": "string", "label": "Patient Name", "pii_type": "person"},
-  "patient_dob": {"data_type": "string", "label": "Date of Birth", "inferred_format": "date"},
-  "member_id": {"data_type": "string", "label": "Member ID"}
+  "user_patient_name": {"data_type": "string", "label": "Patient Name", "pii_type": "person"},
+  "user_patient_dob": {"data_type": "string", "label": "Date of Birth", "inferred_format": "date"},
+  "user_member_id": {"data_type": "string", "label": "Member ID"}
 }
 ```
+
+> **Note**: User-declared `name` values are prefixed with `user_` server-side
+> so they cannot collide with auto-generated `pii_*` slots. Tools that
+> consume the value via `@depends_on_private_data(data_key=...)` should use
+> the prefixed key (`user_patient_name`).
 
 ### Using PrivateData with Scope private_data
 
@@ -240,12 +262,137 @@ agent.private_data = {
 
 | Feature | Raw String | PrivateData |
 |---------|-----------|-------------|
-| Auto-detected key name | `pii_person_1` | `patient_name` (custom) |
+| Auto-detected key name | `pii_person_1` | `user_patient_name` (custom) |
 | Entity type | Inferred from regex | Explicitly declared |
 | Schema label | None | `"Patient Name"` |
 | Schema description | None | Custom description |
 | Format hint | Inferred | Explicitly declared |
 | Tool result redaction | Yes | Yes |
+
+## Suppressing Redaction with `PIIWhitelist`
+
+Some categories of detected PII are not actually private in every
+deployment — public marketing URLs, an organization's own published
+support email, or identifiers that a downstream tool *needs* to receive
+in cleartext. The `PIIWhitelist` model lets you mark these spans as safe
+without weakening the rest of the pipeline.
+
+The whitelist is evaluated **after** detection (so the audit trail still
+records that PII was present) but **before** registration into
+`private_data` (so no placeholder substitution happens for the approved
+span).
+
+### Example
+
+```python
+from maivn import PIIWhitelist, PIIWhitelistEntry, RedactedMessage
+
+whitelist = PIIWhitelist(
+    entries=[
+        # Allow URLs in non-PHI contexts.
+        PIIWhitelistEntry(
+            entity_type='url',
+            justification='Public marketing URLs are needed for citations.',
+        ),
+        # Allow a specific known-safe email.
+        PIIWhitelistEntry(
+            value='support@maivn.io',
+            justification='Public support address listed on docs site.',
+        ),
+        # Allow values matching a narrow regex (use sparingly).
+        PIIWhitelistEntry(
+            pattern=r'^https://docs\.maivn\.io/.*',
+            justification='Public docs URLs only.',
+        ),
+    ],
+    phi_mode=False,  # set True for any deployment that handles PHI
+)
+
+response = agent.invoke([
+    RedactedMessage(
+        content='See https://docs.maivn.io/x and email support@maivn.io',
+        pii_whitelist=whitelist,
+    ),
+])
+```
+
+### Entry Shapes
+
+Each `PIIWhitelistEntry` sets **exactly one** of:
+
+| Field | Match Behavior | Use When |
+| --- | --- | --- |
+| `entity_type` | Suppresses every detected span of this category | You trust an entire category in a non-PHI context |
+| `value` | Case-insensitive exact match against the detected span | One known-safe specific value |
+| `pattern` | Anchored regex match against the detected span | A bounded family of values (e.g. one domain) |
+
+The `justification` field is **required** (≥8 chars) and recorded in
+every audit emission for the suppressed span (SOC-2 / ISO 27001 evidence).
+
+### PHI Mode (`phi_mode=True`)
+
+When `phi_mode=True`, the whitelist refuses to construct any
+`entity_type` entry that names a HIPAA Safe Harbor identifier category.
+This is enforced at construction time (Pydantic validator) so your
+application fails loud rather than shipping a non-compliant policy:
+
+```python
+from maivn import PIIWhitelist, PIIWhitelistEntry
+
+# This raises ValueError — `ssn` is a Safe Harbor identifier.
+PIIWhitelist(
+    entries=[PIIWhitelistEntry(entity_type='ssn', justification='nope')],
+    phi_mode=True,
+)
+
+# This is fine — value/pattern entries are still permitted in PHI mode
+# because they target a single approved instance, not a whole category.
+PIIWhitelist(
+    entries=[
+        PIIWhitelistEntry(
+            value='hospital-public@example.org',
+            justification='Hospital published support address; legal-approved.',
+        ),
+    ],
+    phi_mode=True,
+)
+```
+
+The `HIPAA_SAFE_HARBOR_CATEGORIES` constant is exported from `maivn` so
+you can validate your own policy ahead of construction:
+
+```python
+from maivn import HIPAA_SAFE_HARBOR_CATEGORIES
+print(sorted(HIPAA_SAFE_HARBOR_CATEGORIES))
+# ['account_id', 'biometric_id', 'certificate_id', 'date', 'datetime',
+#  'device_id', 'email', 'fax', 'health_plan_id', 'ip_address',
+#  'license_id', 'medical_record_number', 'person', 'phone', 'ssn',
+#  'swift', 'url', 'vehicle_id', 'iban', 'credit_card']
+```
+
+### Where to Set It
+
+The whitelist transports inside `RedactedMessage` (per-message override)
+and at `SessionRequest.pii_whitelist` (whole session). The per-message
+override wins when both are set.
+
+```python
+# Session-level (applies to every RedactedMessage in the session):
+client = Client(api_key='...')
+client.session_request_defaults.pii_whitelist = whitelist
+
+# Per-message (applies to just this message):
+RedactedMessage(content='...', pii_whitelist=whitelist)
+```
+
+### Compliance Posture
+
+| Framework | Behavior |
+| --- | --- |
+| HIPAA Safe Harbor | `phi_mode=True` refuses entity_type whitelist entries for any of the 18 Safe Harbor categories. Use `value` / `pattern` for specific approved instances. |
+| SOC-2 / ISO 27001 | `justification` is required (≥8 chars) and included in every `WHITELIST_SUPPRESSED` audit record. |
+| FedRAMP AC-3 | `PIIWhitelist` and `PIIWhitelistEntry` are frozen Pydantic models — immutable post-construction. Replacement is the only change mechanism. |
+| Tamper-evidence | Each suppression emits an `ACCESSED` audit record with `action=WHITELIST_SUPPRESSED`, the entity type, the justification, and the span length (no raw value). |
 
 ## Placeholder Syntax
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 # MARK: - Shared Models
 from maivn_shared import (
+    HIPAA_SAFE_HARBOR_CATEGORIES,
     MemoryConfig,
     MemoryInsightExtractionConfig,
     MemoryLevel,
@@ -14,6 +15,8 @@ from maivn_shared import (
     MemoryRetrievalConfig,
     MemorySharingScope,
     MemorySkillExtractionConfig,
+    PIIWhitelist,
+    PIIWhitelistEntry,
     PrivateData,
     RedactedMessage,
     RedactionPreviewRequest,
@@ -182,6 +185,9 @@ __all__ = [
     "MemoryUnboundResourceCandidate",
     "ProjectMemoryResources",
     # Shared Models
+    "HIPAA_SAFE_HARBOR_CATEGORIES",
+    "PIIWhitelist",
+    "PIIWhitelistEntry",
     "PrivateData",
     "MemoryConfig",
     "MemoryInsightExtractionConfig",
