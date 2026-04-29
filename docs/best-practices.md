@@ -219,6 +219,64 @@ agent.private_data = {
 }
 ```
 
+### PII Whitelist: Use Sparingly, Justify Always
+
+`PIIWhitelist` lets a `RedactedMessage` opt out of redacting specific
+spans (public URLs, your own published support address, etc.). Treat it
+as a narrow exception, not a default:
+
+```python
+from maivn import PIIWhitelist, PIIWhitelistEntry, RedactedMessage
+
+# Good: narrow value entry, real justification, PHI-safe.
+RedactedMessage(
+    content='Reach us at support@maivn.io.',
+    pii_whitelist=PIIWhitelist(
+        entries=[
+            PIIWhitelistEntry(
+                value='support@maivn.io',
+                justification='Public support address listed on docs site.',
+            ),
+        ],
+        phi_mode=False,
+    ),
+)
+
+# Avoid: broad entity_type whitelist with weak justification.
+PIIWhitelist(
+    entries=[
+        PIIWhitelistEntry(entity_type='email', justification='easier'),
+    ],
+)
+```
+
+### Always Set `phi_mode=True` in PHI Deployments
+
+If your deployment ever handles Protected Health Information, set
+`phi_mode=True` on every `PIIWhitelist`. The validator will refuse any
+entity-type whitelist for HIPAA Safe Harbor categories at construction
+time:
+
+```python
+from maivn import HIPAA_SAFE_HARBOR_CATEGORIES, PIIWhitelist, PIIWhitelistEntry
+
+# Validate at boot rather than at request time.
+def build_whitelist(entries: list[PIIWhitelistEntry]) -> PIIWhitelist:
+    for entry in entries:
+        if entry.entity_type and entry.entity_type in HIPAA_SAFE_HARBOR_CATEGORIES:
+            raise ValueError(
+                f"Refusing PHI-unsafe whitelist entry: {entry.entity_type}"
+            )
+    return PIIWhitelist(entries=entries, phi_mode=True)
+```
+
+### Always Provide a Real `justification`
+
+The `justification` is required (≥8 chars) and is recorded in every
+`WHITELIST_SUPPRESSED` audit event for the suppressed span. Auditors
+read it. Write a real reason — "approved by legal", "public address per
+RFC 1234", "B2B research session, no PHI in scope".
+
 ### Match EventBridge Audience to the Frontend
 
 Treat browser event streams as a trust boundary:

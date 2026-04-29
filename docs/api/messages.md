@@ -11,6 +11,12 @@ from maivn.messages import (
     SystemMessage,
     RedactedMessage,
     BaseMessage,
+    PrivateData,
+)
+from maivn import (
+    PIIWhitelist,
+    PIIWhitelistEntry,
+    HIPAA_SAFE_HARBOR_CATEGORIES,
 )
 ```
 
@@ -189,9 +195,17 @@ Message type for handling sensitive data with automatic PII detection. When you 
 RedactedMessage(
     content: str,
     known_pii_values: list[str | PrivateData] | None = None,
+    pii_whitelist: PIIWhitelist | None = None,
     attachments: list[dict[str, Any]] | None = None,
 )
 ```
+
+The optional `pii_whitelist` field carries a `PIIWhitelist` describing
+entity categories, literal values, or regex patterns whose detected spans
+should be left in cleartext (audited end-to-end). See
+[PIIWhitelist](#piiwhitelist) below or the
+[Private Data Guide](../guides/private-data.md#suppressing-redaction-with-piiwhitelist)
+for usage and HIPAA `phi_mode` semantics.
 
 ### Automatic PII Detection
 
@@ -206,18 +220,31 @@ Model-visible runtimes only see the redacted version with placeholders unless th
 
 ### Detected PII Types
 
-| Type          | Examples                            |
-| ------------- | ----------------------------------- |
-| `email`       | `user@example.com`                  |
-| `phone`       | `+1-555-123-4567`, `(555) 123-4567` |
-| `ssn`         | `123-45-6789`                       |
-| `credit_card` | `4111-1111-1111-1111`               |
-| `iban`        | `DE89370400440532013000`            |
-| `swift`       | `DEUTDEFF`                          |
-| `person`      | Names detected by NLP               |
-| `location`    | Addresses, cities detected by NLP   |
-| `ip_address`  | `192.168.1.1`                       |
-| `account_id`  | `account id: ABC123`                |
+The detection pipeline targets HIPAA Safe Harbor identifiers plus the
+common PCI / banking / governmental categories. Each pattern is paired
+with a structural validator so structurally-similar non-PII (order
+numbers, internal product codes) is not flagged.
+
+| Type | Examples | Validator |
+| --- | --- | --- |
+| `email` | `user@example.com` | structural |
+| `phone` | `+1-555-123-4567`, `(555) 123-4567` | NANP / E.164 boundaries |
+| `ssn` | `123-45-6789`, `123 45 6789`, `123.45.6789` | reject reserved areas (`000`, `666`, `9xx`) |
+| `credit_card` | `4111-1111-1111-1111` | Luhn (mod-10) checksum |
+| `iban` | `DE89370400440532013000` | per-country length + ISO 13616 mod-97 |
+| `swift` | `DEUTDEFF`, `DEUTDEFF500` | ISO 3166 country code + length 8 / 11 |
+| `account_id` | `account id: ABC123` | label-anchored |
+| `medical_record_number` | `MRN: AB-12345` | label-anchored |
+| `vehicle_id` | `1HGCM82633A004352` (VIN) | ISO 3779 alphabet, 17 chars |
+| `health_plan_id` | `Member ID: HP-994221` | label-anchored |
+| `person` | Names detected by NLP | per-entity confidence |
+| `location` | Addresses, cities | per-entity confidence |
+| `date` / `datetime` | `2025-04-29` | per-entity confidence |
+| `ip_address` | `192.168.1.1` | per-entity confidence |
+| `url` | `https://...` | per-entity confidence |
+| `license_id` | Driver / professional license | Presidio |
+| `passport_id` | US passport numbers | Presidio |
+| `bank_account` | US bank account / routing numbers | Presidio |
 
 ### Example
 
@@ -308,6 +335,76 @@ def send_email(message: str, email: str) -> dict:
 ```
 
 See [Private Data Guide](../guides/private-data.md) for more details on the security model.
+
+## PIIWhitelist
+
+Configuration model for suppressing redaction of approved PII spans. The
+whitelist is evaluated **after** detection (so the audit trail still
+records that PII was present) but **before** registration into
+`private_data`, leaving the matched span in cleartext.
+
+```python
+from maivn import PIIWhitelist, PIIWhitelistEntry
+
+PIIWhitelist(
+    entries: list[PIIWhitelistEntry] = [],
+    phi_mode: bool = False,
+)
+
+PIIWhitelistEntry(
+    entity_type: str | None = None,    # one-of
+    pattern: str | None = None,         # one-of
+    value: str | None = None,           # one-of
+    justification: str = ...,           # required, >= 8 chars
+    label: str | None = None,
+)
+```
+
+### Compliance Knobs
+
+- `phi_mode=True` refuses entity_type whitelist entries for any HIPAA
+  Safe Harbor identifier category (raises `ValueError` at construction).
+  Use `value` / `pattern` entries for individual approved instances.
+- `justification` is required (≥8 chars) and recorded in every
+  `WHITELIST_SUPPRESSED` audit emission (SOC-2 / ISO 27001 evidence).
+- Both `PIIWhitelist` and `PIIWhitelistEntry` are frozen Pydantic
+  models — immutable post-construction.
+
+### HIPAA_SAFE_HARBOR_CATEGORIES
+
+```python
+from maivn import HIPAA_SAFE_HARBOR_CATEGORIES
+```
+
+Frozenset of canonical entity-type names blocked by `phi_mode=True`.
+Use it to validate your own policy before constructing a `PIIWhitelist`.
+
+### Example
+
+```python
+from maivn import PIIWhitelist, PIIWhitelistEntry, RedactedMessage
+
+whitelist = PIIWhitelist(
+    entries=[
+        PIIWhitelistEntry(
+            entity_type='url',
+            justification='Public marketing URLs needed for citations.',
+        ),
+        PIIWhitelistEntry(
+            value='support@maivn.io',
+            justification='Public support address listed on docs site.',
+        ),
+    ],
+)
+
+message = RedactedMessage(
+    content='See https://maivn.io and email support@maivn.io',
+    pii_whitelist=whitelist,
+)
+```
+
+See [Private Data Guide § Suppressing Redaction with PIIWhitelist](../guides/private-data.md#suppressing-redaction-with-piiwhitelist)
+for full usage and compliance posture.
 
 ## BaseMessage
 
