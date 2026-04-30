@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from maivn_shared import HumanMessage, create_uuid
+from maivn_shared import HumanMessage, SwarmConfig, create_uuid
 
 from maivn._internal.api.agent import Agent
 from maivn._internal.api.client import Client
@@ -119,7 +119,7 @@ def test_member_execution_controls_use_generated_agent_tool_reference() -> None:
     assert controls["reevaluate"][0]["tool_name"] == "researcher"
 
 
-def test_member_dependency_context_reaches_nested_agent_prompt_and_metadata(
+def test_member_dependency_context_reaches_nested_agent_prompt_and_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     swarm = Swarm(name="swarm")
@@ -131,7 +131,7 @@ def test_member_dependency_context_reaches_nested_agent_prompt_and_metadata(
     analyst = swarm.member.depends_on_tool(load_account, "account")(_make_agent("analyst"))
     tool = DynamicToolFactory().create_swarm_agent_invocation_tools(swarm)[0]
     observed_messages: list[list[HumanMessage]] = []
-    observed_metadata: list[dict[str, Any]] = []
+    observed_swarm_configs: list[SwarmConfig] = []
 
     class _Response:
         result = {"ok": True}
@@ -141,7 +141,7 @@ def test_member_dependency_context_reaches_nested_agent_prompt_and_metadata(
     def _fake_invoke(self, **kwargs):  # noqa: ANN001
         assert self is analyst
         observed_messages.append(kwargs["messages"])
-        observed_metadata.append(kwargs["metadata"])
+        observed_swarm_configs.append(kwargs["swarm_config"])
         return _Response()
 
     monkeypatch.setattr(Agent, "invoke", _fake_invoke)
@@ -149,7 +149,8 @@ def test_member_dependency_context_reaches_nested_agent_prompt_and_metadata(
     tool.func(prompt="summarize", account={"id": "acct-1"})
 
     assert "Dependency context:" in observed_messages[0][0].content
-    assert observed_metadata[0]["swarm_agent_dependency_context"] == {"account": {"id": "acct-1"}}
+    assert observed_swarm_configs[0].agent_dependency_context == {"account": {"id": "acct-1"}}
+    assert observed_swarm_configs[0].agent_dependency_context_keys == ["account"]
 
 
 def test_member_rejects_private_data_dependency_on_agents() -> None:

@@ -24,6 +24,37 @@ def _make_client() -> Client:
     return Client.from_configuration(api_key="key", configuration=config)
 
 
+def test_agent_compile_state_uses_execution_config_for_timezone_context() -> None:
+    client = _make_client()
+    client._client_timezone = "America/Chicago"  # noqa: SLF001
+    agent = Agent(name="agent", client=client)
+
+    state = agent.compile_state([HumanMessage(content="hello")])
+
+    assert state.execution_config is not None
+    assert state.execution_config.client_timezone == "America/Chicago"
+    assert state.execution_config.sdk_deployment_timezone == "UTC"
+    assert "client_timezone" not in (state.metadata or {})
+
+
+def test_agent_compile_state_uses_orchestration_config_for_loop_controls() -> None:
+    agent = Agent(
+        name="agent",
+        client=_make_client(),
+        orchestration_config={"allow_reevaluate_loop": True},
+    )
+
+    state = agent.compile_state(
+        [HumanMessage(content="hello")],
+        orchestration_config={"max_cycles": 2},
+    )
+
+    assert state.orchestration_config is not None
+    assert state.orchestration_config.allow_reevaluate_loop is True
+    assert state.orchestration_config.max_cycles == 2
+    assert "allow_reevaluate_loop" not in (state.metadata or {})
+
+
 def test_swarm_prepares_messages_with_system_prompt() -> None:
     agent = Agent(name="agent", client=_make_client())
     swarm = Swarm(name="swarm", agents=[agent], system_prompt="Hello")
@@ -102,11 +133,11 @@ def test_swarm_memory_config_override_entry_agent_defaults() -> None:
     state = SessionRequest(memory_config=MemoryConfig(level="none"))
     swarm._enrich_state_metadata(state)
 
-    assert state.metadata is not None
     assert isinstance(state.memory_config, MemoryConfig)
     assert state.memory_config.level == "glimpse"
-    assert state.metadata["memory_defined_skills"][0]["sharing_scope"] == "swarm"
-    assert state.metadata["memory_defined_skills"][0]["origin"] == "user_defined"
+    assert state.memory_assets_config is not None
+    assert state.memory_assets_config.defined_skills[0].sharing_scope == "swarm"
+    assert state.memory_assets_config.defined_skills[0].origin == "user_defined"
 
 
 def test_swarm_enrich_state_metadata_encodes_inline_resources() -> None:
@@ -127,12 +158,11 @@ def test_swarm_enrich_state_metadata_encodes_inline_resources() -> None:
     state = SessionRequest(metadata={})
     swarm._enrich_state_metadata(state)
 
-    assert state.metadata is not None
-    resources = state.metadata.get("memory_bound_resources")
-    assert isinstance(resources, list)
-    assert resources[0]["name"] == "swarm-runbook.txt"
-    assert resources[0]["binding_type"] == "swarm"
-    assert base64.b64decode(resources[0]["content_base64"]) == b"swarm runbook content"
+    assert state.memory_assets_config is not None
+    resources = state.memory_assets_config.bound_resources
+    assert resources[0].name == "swarm-runbook.txt"
+    assert resources[0].binding_type == "swarm"
+    assert base64.b64decode(resources[0].content_base64 or "") == b"swarm runbook content"
 
 
 def test_agent_compile_state_includes_memory_assets() -> None:
@@ -158,15 +188,13 @@ def test_agent_compile_state_includes_memory_assets() -> None:
 
     state = agent.compile_state([HumanMessage(content="hello")])
 
-    assert state.metadata is not None
     assert isinstance(state.memory_config, MemoryConfig)
     assert state.memory_config.level == "focus"
-    skills = state.metadata.get("memory_defined_skills")
-    assert isinstance(skills, list)
-    assert skills[0]["skill_id"] == "compile-skill"
-    resources = state.metadata.get("memory_bound_resources")
-    assert isinstance(resources, list)
-    assert resources[0]["resource_id"] == "compile-doc"
+    assert state.memory_assets_config is not None
+    skills = state.memory_assets_config.defined_skills
+    assert skills[0].skill_id == "compile-skill"
+    resources = state.memory_assets_config.bound_resources
+    assert resources[0].resource_id == "compile-doc"
 
 
 def test_agent_invoke_rejects_reserved_memory_metadata_keys() -> None:
@@ -188,6 +216,16 @@ def test_agent_stream_rejects_reserved_memory_metadata_keys() -> None:
                 [HumanMessage(content="hello")],
                 metadata={"memory_summarization_enabled": False},
             )
+        )
+
+
+def test_agent_invoke_rejects_reserved_session_control_metadata_keys() -> None:
+    agent = Agent(name="agent", client=_make_client())
+
+    with pytest.raises(ValueError, match="use typed session config fields instead"):
+        agent.invoke(
+            [HumanMessage(content="hello")],
+            metadata={"allowed_system_tools": ["web_search"]},
         )
 
 

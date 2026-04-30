@@ -27,6 +27,19 @@ from maivn import (
     ConfigurationBuilder,
     MaivnConfiguration,
     get_configuration,
+    MemoryAssetsConfig,
+    MemoryConfig,
+    MemoryInsightExtractionConfig,
+    MemoryResourceConfig,
+    MemoryRetrievalConfig,
+    MemorySkillConfig,
+    MemorySkillExtractionConfig,
+    SessionExecutionConfig,
+    SessionOrchestrationConfig,
+    StructuredOutputConfig,
+    SwarmAgentConfig,
+    SwarmConfig,
+    SystemToolsConfig,
 
     # Logging
     configure_logging,
@@ -90,11 +103,18 @@ from maivn.messages import HumanMessage, AIMessage, SystemMessage
 
 ### Configuration
 
-| Item                                                          | Description                          | Reference     |
-| ------------------------------------------------------------- | ------------------------------------ | ------------- |
-| [MaivnConfiguration](configuration.md#maivnconfiguration)     | Top-level configuration model        | Configuration |
-| [ConfigurationBuilder](configuration.md#configurationbuilder) | Build configuration from environment | Configuration |
-| [get_configuration()](configuration.md#get_configuration)     | Get current configuration            | Configuration |
+| Item                                                          | Description                                      | Reference     |
+| ------------------------------------------------------------- | ------------------------------------------------ | ------------- |
+| [MaivnConfiguration](configuration.md#maivnconfiguration)     | Top-level SDK environment/configuration model    | Configuration |
+| [ConfigurationBuilder](configuration.md#configurationbuilder) | Build SDK configuration from environment         | Configuration |
+| [get_configuration()](configuration.md#get_configuration)     | Get current SDK configuration                    | Configuration |
+| [MemoryConfig](session-config.md#memoryconfig)                | Memory retrieval, summarization, and persistence | Session Config |
+| [SystemToolsConfig](session-config.md#systemtoolsconfig)      | System-tool allowlists and approvals             | Session Config |
+| [SessionOrchestrationConfig](session-config.md#sessionorchestrationconfig) | Reevaluate-loop and orchestration cycle controls | Session Config |
+| [MemoryAssetsConfig](session-config.md#memoryassetsconfig)    | Per-request user-defined skills and resources    | Session Config |
+| [SwarmConfig](session-config.md#swarmconfig)                  | Typed swarm transport config                     | Session Config |
+| [StructuredOutputConfig](session-config.md#structuredoutputconfig) | Structured-output transport intent           | Session Config |
+| [SessionExecutionConfig](session-config.md#sessionexecutionconfig) | SDK execution transport details              | Session Config |
 
 ### Messages
 
@@ -129,7 +149,7 @@ from maivn.messages import HumanMessage, AIMessage, SystemMessage
 - **Multi-agent systems?** See [Swarm](swarm.md)
 - **Streaming events to your frontend?** Start with the [Frontend Events guide](../guides/frontend-events.md) — one-line FastAPI mount + client examples in JavaScript, TypeScript, Swift, Kotlin, Go, Python, Rust, .NET, and more. For the API reference and trust-boundary controls, see [Events](events.md)
 - **External tools?** See [MCP](mcp.md)
-- **Configuration?** See [Configuration](configuration.md)
+- **Configuration?** See [Configuration](configuration.md) for SDK environment settings and [Session Config Models](session-config.md) for invocation runtime controls.
 - **Scheduling cron jobs?** See [Scheduling](scheduling.md) and the [Scheduled Invocation guide](../guides/scheduled-invocation.md)
 - **Debugging?** See [Logging](logging.md)
 
@@ -152,6 +172,9 @@ from maivn import (
     depends_on_agent,
     depends_on_private_data,
     depends_on_interrupt,
+    MemoryConfig,
+    SystemToolsConfig,
+    SessionOrchestrationConfig,
     configure_logging,
 )
 from maivn.messages import HumanMessage, SystemMessage

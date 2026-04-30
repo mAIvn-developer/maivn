@@ -31,8 +31,9 @@ def test_structured_output_builder_forwards_invocation_flags_and_metadata() -> N
         reasoning="medium",
         thread_id="thread-1",
         verbose=True,
-        metadata={"allowed_system_tools": []},
         memory_config={"level": "glimpse"},
+        system_tools_config={"allowed_tools": []},
+        orchestration_config={"max_cycles": 1},
         allow_private_in_system_tools=True,
     )
 
@@ -41,6 +42,8 @@ def test_structured_output_builder_forwards_invocation_flags_and_metadata() -> N
     call = scope.calls[0]
     assert call["structured_output"] is _StructuredPayload
     assert call["force_final_tool"] is True
-    assert call["metadata"] == {"allowed_system_tools": []}
+    assert call["metadata"] is None
     assert call["memory_config"] == {"level": "glimpse"}
+    assert call["system_tools_config"] == {"allowed_tools": []}
+    assert call["orchestration_config"] == {"max_cycles": 1}
     assert call["allow_private_in_system_tools"] is True

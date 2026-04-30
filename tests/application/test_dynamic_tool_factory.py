@@ -123,20 +123,23 @@ def test_dynamic_tool_invocation_sets_nested_stream_context(monkeypatch) -> None
     def _fake_invoke(self, **kwargs):  # noqa: ANN001
         _ = (self, kwargs)
         observed.append(allow_nested_response_stream.get())
-        metadata = kwargs.get("metadata") if isinstance(kwargs, dict) else None
+        swarm_config = kwargs.get("swarm_config") if isinstance(kwargs, dict) else None
+        memory_assets_config = (
+            kwargs.get("memory_assets_config") if isinstance(kwargs, dict) else None
+        )
         memory_config = kwargs.get("memory_config") if isinstance(kwargs, dict) else None
-        if isinstance(metadata, dict):
-            nested_modes.append(metadata.get("swarm_included_nested_synthesis"))
-            delivery_mode = metadata.get("maivn_sdk_delivery_mode")
+        if swarm_config is not None:
+            nested_modes.append(getattr(swarm_config, "included_nested_synthesis", None))
+            delivery_mode = getattr(swarm_config, "sdk_delivery_mode", None)
             nested_delivery_modes.append(delivery_mode if isinstance(delivery_mode, str) else None)
             nested_memory_levels.append(getattr(memory_config, "level", None))
-            skill_payloads = metadata.get("memory_defined_skills")
+            skill_payloads = getattr(memory_assets_config, "defined_skills", None)
             if isinstance(skill_payloads, list):
                 nested_skill_ids.append(
                     [
-                        str(item.get("skill_id"))
+                        str(getattr(item, "skill_id", None))
                         for item in skill_payloads
-                        if isinstance(item, dict) and isinstance(item.get("skill_id"), str)
+                        if isinstance(getattr(item, "skill_id", None), str)
                     ]
                 )
             else:
@@ -213,11 +216,8 @@ def test_dynamic_tool_invocation_propagates_memory_recall_turn_active(monkeypatc
 
     def _fake_invoke(self, **kwargs):  # noqa: ANN001
         _ = self
-        metadata = kwargs.get("metadata")
-        if isinstance(metadata, dict):
-            observed_recall_flags.append(metadata.get("memory_recall_turn_active"))
-        else:
-            observed_recall_flags.append(None)
+        memory_assets_config = kwargs.get("memory_assets_config")
+        observed_recall_flags.append(getattr(memory_assets_config, "recall_turn_active", None))
         return _Response()
 
     monkeypatch.setattr(Agent, "invoke", _fake_invoke)

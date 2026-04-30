@@ -99,6 +99,10 @@ result = agent.invoke(
 - `skills`: user-defined reusable skill payloads
 - `resources`: bound resource payloads (inline content, file, URL, or document reference)
 
+The SDK packages these assets as typed `MemoryAssetsConfig` on the request rather than
+requiring you to pass `memory_defined_skills` or `memory_bound_resources` through
+free-form invocation metadata.
+
 ```python
 agent = Agent(
     name="deploy_agent",
@@ -280,7 +284,8 @@ Nested extraction fields:
 
 Notes:
 
-- Reserved memory-control keys are not allowed in invocation `metadata`; use `memory_config`.
+- Reserved memory-control keys are not allowed in invocation `metadata`; use `memory_config`
+  or scope-level `skills`/`resources`.
 - Prefer stable `thread_id` reuse across turns.
 - `insight_extraction.sharing_scope` only accepts `agent` or `swarm` for AI-generated insights.
 - Promote durable lessons to `project` or `org` from the Developer Portal when broader reuse is warranted.

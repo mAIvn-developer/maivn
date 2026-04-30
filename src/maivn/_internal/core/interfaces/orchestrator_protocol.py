@@ -5,7 +5,16 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 from typing import Any, Literal, Protocol
 
-from maivn_shared import BaseMessage, MemoryConfig, SessionRequest, SessionResponse
+from maivn_shared import (
+    BaseMessage,
+    MemoryAssetsConfig,
+    MemoryConfig,
+    SessionOrchestrationConfig,
+    SessionRequest,
+    SessionResponse,
+    SwarmConfig,
+    SystemToolsConfig,
+)
 from pydantic import BaseModel
 
 from maivn._internal.core import SSEEvent
@@ -35,6 +44,10 @@ class AgentOrchestratorInterface(Protocol):
         thread_id: str | None = None,
         metadata: dict[str, Any] | None = None,
         memory_config: MemoryConfig | None = None,
+        system_tools_config: SystemToolsConfig | None = None,
+        orchestration_config: SessionOrchestrationConfig | None = None,
+        memory_assets_config: MemoryAssetsConfig | None = None,
+        swarm_config: SwarmConfig | None = None,
     ) -> SessionRequest:
         """Compile messages and tools into a SessionRequest.
 
@@ -50,6 +63,10 @@ class AgentOrchestratorInterface(Protocol):
             thread_id: Optional thread identifier for conversation continuity.
             metadata: Optional metadata to merge into the session request.
             memory_config: Optional memory configuration.
+            system_tools_config: Optional system-tool configuration.
+            orchestration_config: Optional orchestration loop controls.
+            memory_assets_config: Optional memory asset payloads.
+            swarm_config: Optional swarm orchestration configuration.
 
         Returns:
             SessionRequest ready for submission.
@@ -71,6 +88,10 @@ class AgentOrchestratorInterface(Protocol):
         verbose: bool = False,
         metadata: dict[str, Any] | None = None,
         memory_config: MemoryConfig | None = None,
+        system_tools_config: SystemToolsConfig | None = None,
+        orchestration_config: SessionOrchestrationConfig | None = None,
+        memory_assets_config: MemoryAssetsConfig | None = None,
+        swarm_config: SwarmConfig | None = None,
     ) -> SessionResponse:
         """Execute agent invocation.
 
@@ -86,6 +107,10 @@ class AgentOrchestratorInterface(Protocol):
             verbose: If True, enables verbose output during execution.
             metadata: Optional metadata to merge into the session request.
             memory_config: Optional memory configuration.
+            system_tools_config: Optional system-tool configuration.
+            orchestration_config: Optional orchestration loop controls.
+            memory_assets_config: Optional memory asset payloads.
+            swarm_config: Optional swarm orchestration configuration.
 
         Returns:
             SessionResponse with results.
@@ -105,6 +130,10 @@ class AgentOrchestratorInterface(Protocol):
         verbose: bool = False,
         metadata: dict[str, Any] | None = None,
         memory_config: MemoryConfig | None = None,
+        system_tools_config: SystemToolsConfig | None = None,
+        orchestration_config: SessionOrchestrationConfig | None = None,
+        memory_assets_config: MemoryAssetsConfig | None = None,
+        swarm_config: SwarmConfig | None = None,
     ) -> Iterator[SSEEvent]:
         """Stream raw SSE events while executing an agent invocation.
 

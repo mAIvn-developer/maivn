@@ -184,7 +184,7 @@ def compose_artifact_policy(
 ### Example
 
 ```python
-from maivn import Agent, compose_artifact_policy
+from maivn import Agent, SystemToolsConfig, compose_artifact_policy
 from maivn.messages import HumanMessage
 
 agent = Agent(name='artifact_agent', api_key='...')
@@ -197,10 +197,10 @@ def validate_query_artifact(query: str) -> dict:
 response = agent.invoke(
     [HumanMessage(content='Compose and validate the SQL query artifact')],
     force_final_tool=True,
-    metadata={
-        'allowed_system_tools': ['compose_artifact'],
-        'approved_compose_artifact_targets': ['validate_query_artifact.query'],
-    },
+    system_tools_config=SystemToolsConfig(
+        allowed_tools=['compose_artifact'],
+        approved_compose_artifact_targets=['validate_query_artifact.query'],
+    ),
 )
 ```
 
@@ -209,7 +209,7 @@ response = agent.invoke(
 - `forbid`: runtime rejects downstream arg values that originate from `compose_artifact`
 - `allow`: `compose_artifact` may be used but is not required
 - `require`: runtime rejects direct/manual arg values that do not originate from `compose_artifact`
-- `approval='explicit'`: `compose_artifact` must also be approved in invocation metadata for that arg target
+- `approval='explicit'`: `compose_artifact` must also be approved in invocation `system_tools_config` for that arg target
 
 This decorator is metadata-driven and can be stacked before or after `@agent.toolify(...)`.
 

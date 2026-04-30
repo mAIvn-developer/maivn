@@ -6,6 +6,7 @@ from typing import Any, Protocol, cast
 
 from maivn_shared import MemoryConfig
 from maivn_shared.domain.entities.memory_config import is_reserved_memory_metadata_key
+from maivn_shared.domain.entities.session_config import is_reserved_session_config_metadata_key
 
 _SUPPORTED_SKILL_SHARING_SCOPES = frozenset({"agent", "swarm", "project", "org"})
 _DEFAULT_SKILL_SHARING_SCOPE = "project"
@@ -53,6 +54,17 @@ class BaseScopeMemoryMixin:
             raise ValueError(
                 "Reserved memory metadata keys are not allowed in metadata; "
                 f"use memory_config instead ({joined})"
+            )
+        reserved_session_keys = sorted(
+            key
+            for key in metadata
+            if isinstance(key, str) and is_reserved_session_config_metadata_key(key)
+        )
+        if reserved_session_keys:
+            joined = ", ".join(reserved_session_keys)
+            raise ValueError(
+                "Reserved session-control metadata keys are not allowed in metadata; "
+                f"use typed session config fields instead ({joined})"
             )
 
     # MARK: - Normalization Helpers

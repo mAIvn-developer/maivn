@@ -86,8 +86,8 @@ Prompt discovery order:
 Invocation defaults:
 
 - `DEMO_INVOCATION` lets demos prefill execution options in UI/API.
-- Supported keys: `model`, `reasoning`, `force_final_tool`, `targeted_tools`, `metadata`, `memory_config`, `allow_private_in_system_tools`.
-- This is the right place to preload system-tool controls such as `allowed_system_tools` or `approved_compose_artifact_targets` for Studio users.
+- Supported keys: `model`, `reasoning`, `force_final_tool`, `targeted_tools`, `metadata`, `memory_config`, `system_tools_config`, `orchestration_config`, `allow_private_in_system_tools`.
+- This is the right place to preload system-tool controls such as `allowed_tools` or `approved_compose_artifact_targets` for Studio users.
 
 Variant behavior:
 
@@ -99,8 +99,8 @@ For example, the standalone `compose_artifact` demo can expose:
 ```python
 DEMO_INVOCATION = {
     "force_final_tool": True,
-    "metadata": {
-        "allowed_system_tools": ["compose_artifact"],
+    "system_tools_config": {
+        "allowed_tools": ["compose_artifact"],
         "approved_compose_artifact_targets": ["validate_query_artifact.query"],
     },
 }

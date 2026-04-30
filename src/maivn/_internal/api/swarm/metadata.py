@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from maivn_shared import (
-    SWARM_INVOCATION_INTENT_METADATA_KEY,
+    MemoryAssetsConfig,
     MemoryConfig,
     SessionRequest,
+    SwarmAgentConfig,
+    SwarmConfig,
     SystemMessage,
     create_uuid,
 )
@@ -26,53 +28,62 @@ def enrich_state_metadata(
     *,
     memory_config: MemoryConfig | dict[str, Any] | None = None,
 ) -> None:
-    """Enrich state metadata with swarm information."""
-    metadata = dict(state.metadata) if state.metadata else {}
-
-    metadata[SWARM_INVOCATION_INTENT_METADATA_KEY] = True
-    metadata["swarm_id"] = swarm.id
-    metadata["swarm_name"] = swarm.name or swarm.__class__.__name__
-
-    if swarm.description:
-        metadata["swarm_description"] = swarm.description
-
-    _add_system_prompt_metadata(swarm, metadata)
+    """Enrich state with typed swarm and memory asset configuration."""
+    invocation_tool_map = _build_invocation_tool_map(swarm)
+    roster: list[SwarmAgentConfig] = [
+        _build_agent_roster_entry(swarm, agent, invocation_tool_map) for agent in swarm.agents
+    ]
 
     resolved_swarm_memory_config = swarm.resolve_memory_config(memory_config)
     state.memory_config = MemoryConfig.merge(
         state.memory_config if isinstance(state.memory_config, MemoryConfig) else None,
         resolved_swarm_memory_config,
     )
-    swarm.apply_memory_assets_to_metadata(
-        metadata,
-        overwrite=True,
-        default_swarm_id=swarm.id,
+    _apply_swarm_memory_assets_config(swarm, state)
+    state.swarm_config = SwarmConfig(
+        invocation_intent=True,
+        swarm_id=swarm.id,
+        swarm_name=swarm.name or swarm.__class__.__name__,
+        swarm_description=swarm.description,
+        swarm_system_prompt=_resolve_system_prompt(swarm),
+        agent_roster=roster,
+        agent_invocation_tool_map=invocation_tool_map,
     )
-    _add_agent_roster_metadata(swarm, metadata)
-
-    state.metadata = metadata
 
 
-def _add_system_prompt_metadata(swarm: Swarm, metadata: dict[str, Any]) -> None:
-    """Add system prompt to metadata if present."""
+def _resolve_system_prompt(swarm: Swarm) -> str | None:
+    """Return the swarm system prompt text if present."""
     system_prompt = getattr(swarm, "system_prompt", None)
     if isinstance(system_prompt, SystemMessage):
-        metadata["swarm_system_prompt"] = system_prompt.content
-    elif isinstance(system_prompt, str) and system_prompt.strip():
-        metadata["swarm_system_prompt"] = system_prompt
+        return system_prompt.content if isinstance(system_prompt.content, str) else None
+    if isinstance(system_prompt, str) and system_prompt.strip():
+        return system_prompt
+    return None
+
+
+# MARK: Config Helpers
+
+
+def _apply_swarm_memory_assets_config(swarm: Swarm, state: SessionRequest) -> None:
+    skills, resources = swarm.build_memory_asset_payloads(default_swarm_id=swarm.id)
+    existing = (
+        state.memory_assets_config
+        if isinstance(state.memory_assets_config, MemoryAssetsConfig)
+        else None
+    )
+    defined_skills = skills or (existing.defined_skills if existing is not None else [])
+    bound_resources = resources or (existing.bound_resources if existing is not None else [])
+    config = MemoryAssetsConfig.model_validate(
+        {
+            "defined_skills": defined_skills,
+            "bound_resources": bound_resources,
+        }
+    )
+    if config.is_configured():
+        state.memory_assets_config = config
 
 
 # MARK: Agent Roster
-
-
-def _add_agent_roster_metadata(swarm: Swarm, metadata: dict[str, Any]) -> None:
-    """Add agent roster and invocation tool map to metadata."""
-    invocation_tool_map = _build_invocation_tool_map(swarm)
-    roster = [
-        _build_agent_roster_entry(swarm, agent, invocation_tool_map) for agent in swarm.agents
-    ]
-    metadata["swarm_agent_roster"] = roster
-    metadata["swarm_agent_invocation_tool_map"] = invocation_tool_map
 
 
 def _build_invocation_tool_map(swarm: Swarm) -> dict[str, str]:
@@ -89,7 +100,7 @@ def _build_agent_roster_entry(
     swarm: Swarm,
     agent: Agent,
     invocation_tool_map: dict[str, str],
-) -> dict[str, Any]:
+) -> SwarmAgentConfig:
     """Build a roster entry for an agent."""
     agent_id = getattr(agent, "id", None)
     agent_name = getattr(agent, "name", None)
@@ -120,7 +131,7 @@ def _build_agent_roster_entry(
     }
     _apply_agent_memory_config(roster_entry, agent)
     _apply_agent_memory_assets(roster_entry, agent, swarm)
-    return roster_entry
+    return SwarmAgentConfig.model_validate(roster_entry)
 
 
 # MARK: Roster Helpers
@@ -174,7 +185,7 @@ def _apply_agent_memory_assets(
         roster_entry["memory_bound_resources"] = resource_payloads
 
 
-def _normalize_included_nested_synthesis(value: Any) -> bool | str:
+def _normalize_included_nested_synthesis(value: Any) -> bool | Literal["auto"]:
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
@@ -191,7 +202,7 @@ def _normalize_included_nested_synthesis(value: Any) -> bool | str:
 def _build_included_nested_synthesis_guidance(
     *,
     agent: Agent,
-    included_nested_synthesis: bool | str,
+    included_nested_synthesis: bool | Literal["auto"],
     has_final_tool: bool,
     tool_count: int,
 ) -> str:

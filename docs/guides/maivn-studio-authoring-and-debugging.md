@@ -60,15 +60,18 @@ Supported keys:
 - `targeted_tools`
 - `metadata`
 - `memory_config`
+- `system_tools_config`
+- `orchestration_config`
 - `allow_private_in_system_tools`
 
-Use `metadata` when the demo depends on system-tool runtime boundaries. For example, a Studio-friendly `compose_artifact` demo can pre-approve its intended target arg:
+Use `system_tools_config` when the demo depends on system-tool runtime boundaries.
+For example, a Studio-friendly `compose_artifact` demo can pre-approve its intended target arg:
 
 ```python
 DEMO_INVOCATION = {
     'force_final_tool': True,
-    'metadata': {
-        'allowed_system_tools': ['compose_artifact'],
+    'system_tools_config': {
+        'allowed_tools': ['compose_artifact'],
         'approved_compose_artifact_targets': ['validate_query_artifact.query'],
     },
 }

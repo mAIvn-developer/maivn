@@ -16,7 +16,6 @@ from maivn_shared import (
 from maivn._internal.core.entities import AgentTool, BaseTool, FunctionTool
 from maivn._internal.core.services.team_dependencies import (
     SWARM_AGENT_DEPENDENCY_CONTEXT_KEYS_METADATA_KEY,
-    SWARM_AGENT_DEPENDENCY_CONTEXT_METADATA_KEY,
     TEAM_DEPENDENCY_ARG_SCHEMAS_METADATA_KEY,
     apply_team_invocation_signature,
     build_execution_controls_metadata,
@@ -202,19 +201,24 @@ class DynamicToolFactory(
                 if included_nested_synthesis is not None
                 else agent_default_nested_synthesis
             )
-            metadata = self._build_nested_invocation_metadata(
+            swarm_config = self._build_nested_invocation_swarm_config(
                 agent=agent,
-                swarm_scope=swarm_scope,
                 agent_id=agent_id,
                 use_as_final_output=use_as_final_output,
                 resolved_nested_synthesis=resolved_nested_synthesis,
-                memory_recall_turn_active=memory_recall_turn_active,
             )
             if dependency_context:
-                metadata[SWARM_AGENT_DEPENDENCY_CONTEXT_METADATA_KEY] = dependency_context
-                metadata[SWARM_AGENT_DEPENDENCY_CONTEXT_KEYS_METADATA_KEY] = list(
-                    dependency_context
+                swarm_config = swarm_config.model_copy(
+                    update={
+                        "agent_dependency_context": dependency_context,
+                        "agent_dependency_context_keys": list(dependency_context),
+                    }
                 )
+            memory_assets_config = self._build_nested_invocation_memory_assets_config(
+                agent=agent,
+                swarm_scope=swarm_scope,
+                memory_recall_turn_active=memory_recall_turn_active,
+            )
             nested_memory_config = self._build_nested_invocation_memory_config(
                 agent=agent,
                 swarm_scope=swarm_scope,
@@ -235,8 +239,9 @@ class DynamicToolFactory(
                 response = agent.invoke(
                     messages=[HumanMessage(content=nested_prompt)],
                     force_final_tool=force_final_tool,
-                    metadata=metadata,
                     memory_config=nested_memory_config,
+                    memory_assets_config=memory_assets_config,
+                    swarm_config=swarm_config,
                     model=model,  # type: ignore[arg-type]
                 )
             finally:

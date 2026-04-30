@@ -188,6 +188,8 @@ def test_scope_hooks_receive_merged_metadata() -> None:
         context = payload.get("context")
         seen["metadata"] = getattr(context, "metadata", None)
         seen["memory_config"] = getattr(context, "memory_config", None)
+        seen["system_tools_config"] = getattr(context, "system_tools_config", None)
+        seen["memory_assets_config"] = getattr(context, "memory_assets_config", None)
 
     class DummyOrchestrator:
         def invoke(self, *args: Any, **kwargs: Any) -> SessionResponse:
@@ -229,17 +231,19 @@ def test_scope_hooks_receive_merged_metadata() -> None:
     assert isinstance(memory_config, MemoryConfig)
     assert memory_config.level == "glimpse"
     assert metadata.get("existing") == "value"
-    assert metadata.get("allow_private_data_in_system_tools") is True
-    assert metadata.get("allow_private_data_placeholders_in_system_tools") is True
-    skills = metadata.get("memory_defined_skills")
-    assert isinstance(skills, list)
-    assert skills[0]["skill_id"] == "skill-123"
-    assert skills[0]["origin"] == "user_defined"
-    assert skills[0]["confidence"] == 1.0
-    assert skills[0]["sharing_scope"] == "agent"
-    resources = metadata.get("memory_bound_resources")
-    assert isinstance(resources, list)
-    assert resources[0]["resource_id"] == "doc-123"
+    system_tools_config = seen.get("system_tools_config")
+    assert system_tools_config is not None
+    assert system_tools_config.allow_private_data is True
+    assert system_tools_config.allow_private_data_placeholders is True
+    memory_assets_config = seen.get("memory_assets_config")
+    assert memory_assets_config is not None
+    skills = memory_assets_config.defined_skills
+    assert skills[0].skill_id == "skill-123"
+    assert skills[0].origin == "user_defined"
+    assert skills[0].confidence == 1.0
+    assert skills[0].sharing_scope == "agent"
+    resources = memory_assets_config.bound_resources
+    assert resources[0].resource_id == "doc-123"
 
 
 def test_scope_hooks_encode_inline_resource_content() -> None:
@@ -247,7 +251,7 @@ def test_scope_hooks_encode_inline_resource_content() -> None:
 
     def capture_hook(payload: dict[str, Any]) -> None:
         context = payload.get("context")
-        seen["metadata"] = getattr(context, "metadata", None)
+        seen["memory_assets_config"] = getattr(context, "memory_assets_config", None)
 
     class DummyOrchestrator:
         def invoke(self, *args: Any, **kwargs: Any) -> SessionResponse:
@@ -268,13 +272,12 @@ def test_scope_hooks_encode_inline_resource_content() -> None:
 
     agent.invoke([HumanMessage(content="hello")])
 
-    metadata = seen.get("metadata")
-    assert isinstance(metadata, dict)
-    resources = metadata.get("memory_bound_resources")
-    assert isinstance(resources, list)
-    assert resources[0]["name"] == "deploy-notes.txt"
-    assert resources[0]["binding_type"] == "agent"
-    assert base64.b64decode(resources[0]["content_base64"]) == b"deploy checklist"
+    memory_assets_config = seen.get("memory_assets_config")
+    assert memory_assets_config is not None
+    resources = memory_assets_config.bound_resources
+    assert resources[0].name == "deploy-notes.txt"
+    assert resources[0].binding_type == "agent"
+    assert base64.b64decode(resources[0].content_base64 or "") == b"deploy checklist"
 
 
 def test_scope_hooks_do_not_inject_empty_bound_resources() -> None:
@@ -282,7 +285,7 @@ def test_scope_hooks_do_not_inject_empty_bound_resources() -> None:
 
     def capture_hook(payload: dict[str, Any]) -> None:
         context = payload.get("context")
-        seen["metadata"] = getattr(context, "metadata", None)
+        seen["memory_assets_config"] = getattr(context, "memory_assets_config", None)
 
     class DummyOrchestrator:
         def invoke(self, *args: Any, **kwargs: Any) -> SessionResponse:
@@ -302,12 +305,11 @@ def test_scope_hooks_do_not_inject_empty_bound_resources() -> None:
 
     agent.invoke([HumanMessage(content="hello")])
 
-    metadata = seen.get("metadata")
-    assert isinstance(metadata, dict)
-    assert "memory_bound_resources" not in metadata
-    skills = metadata.get("memory_defined_skills")
-    assert isinstance(skills, list)
-    assert skills[0]["skill_id"] == "skill-no-docs"
+    memory_assets_config = seen.get("memory_assets_config")
+    assert memory_assets_config is not None
+    assert memory_assets_config.bound_resources == []
+    skills = memory_assets_config.defined_skills
+    assert skills[0].skill_id == "skill-no-docs"
 
 
 def test_scope_hooks_receive_stream_final_response() -> None:

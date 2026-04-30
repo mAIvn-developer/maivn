@@ -5,7 +5,13 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import Any, Literal, cast
 
-from maivn_shared import BaseMessage, MemoryConfig, SessionResponse
+from maivn_shared import (
+    BaseMessage,
+    MemoryConfig,
+    SessionOrchestrationConfig,
+    SessionResponse,
+    SystemToolsConfig,
+)
 from maivn_shared.domain.entities.dependencies import ExecutionInstanceControl, ExecutionTiming
 from pydantic import BaseModel
 
@@ -192,6 +198,8 @@ class StructuredOutputInvocationBuilder:
         verbose: bool = False,
         metadata: dict[str, Any] | None = None,
         memory_config: MemoryConfig | dict[str, Any] | None = None,
+        system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
+        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
         allow_private_in_system_tools: bool | None = None,
     ) -> SessionResponse:
         invoke_fn = self._get_invoke_function()
@@ -206,6 +214,8 @@ class StructuredOutputInvocationBuilder:
             verbose=verbose,
             metadata=metadata,
             memory_config=memory_config,
+            system_tools_config=system_tools_config,
+            orchestration_config=orchestration_config,
             allow_private_in_system_tools=allow_private_in_system_tools,
         )
 

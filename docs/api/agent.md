@@ -5,7 +5,14 @@ The `Agent` class is the primary interface for building agentic systems with mai
 ## Import
 
 ```python
-from maivn import Agent
+from maivn import (
+    Agent,
+    MemoryAssetsConfig,
+    MemoryConfig,
+    SessionOrchestrationConfig,
+    SwarmConfig,
+    SystemToolsConfig,
+)
 ```
 
 ## Constructor
@@ -24,6 +31,8 @@ Agent(
     included_nested_synthesis: bool | Literal['auto'] = 'auto',
     private_data: dict = {},
     memory_config: MemoryConfig | dict[str, Any] = {},
+    system_tools_config: SystemToolsConfig | dict[str, Any] = {},
+    orchestration_config: SessionOrchestrationConfig | dict[str, Any] = {},
     skills: list[dict[str, Any]] = [],
     resources: list[dict[str, Any]] = [],
     tags: list[str] = [],
@@ -49,8 +58,10 @@ Agent(
 | `included_nested_synthesis` | `bool \| Literal['auto']`        | `'auto'`   | Nested synthesis mode for Swarm invocations: `True` always includes synthesized response, `False` returns tool results only, `'auto'` lets orchestrator/runtime decide |
 | `private_data`              | `dict`                           | `{}`       | Server-side secret data for dependency injection                                                                                                                       |
 | `memory_config`             | `MemoryConfig \| dict[str, Any]` | `{}`       | Default typed memory configuration applied on every invocation from this scope                                                                                         |
-| `skills`                    | `list[dict[str, Any]]`           | `[]`       | Optional user-defined memory skill payloads merged into invocation metadata                                                                                            |
-| `resources`                 | `list[dict[str, Any]]`           | `[]`       | Optional bound resource payloads merged into invocation metadata                                                                                                       |
+| `system_tools_config`       | `SystemToolsConfig \| dict`      | `{}`       | Default typed system-tool allowlists and approval controls applied on every invocation                                                                                  |
+| `orchestration_config`      | `SessionOrchestrationConfig \| dict` | `{}`   | Default typed orchestration loop controls applied on every invocation                                                                                                   |
+| `skills`                    | `list[dict[str, Any]]`           | `[]`       | Optional user-defined memory skill payloads surfaced through `MemoryAssetsConfig`                                                                                      |
+| `resources`                 | `list[dict[str, Any]]`           | `[]`       | Optional bound resource payloads surfaced through `MemoryAssetsConfig`                                                                                                 |
 | `tags`                      | `list[str]`                      | `[]`       | Tags for organization and filtering                                                                                                                                    |
 | `before_execute`            | `Callable \| None`               | `None`     | Hook called before execution                                                                                                                                           |
 | `after_execute`             | `Callable \| None`               | `None`     | Hook called after execution                                                                                                                                            |
@@ -113,14 +124,30 @@ Notes:
 ### Skills and Resources
 
 `skills` and `resources` let you attach memory assets to the scope.
-The SDK normalizes these payloads and injects them into invocation metadata as:
+The SDK normalizes these payloads into `MemoryAssetsConfig` on each request.
+The server projects that typed config into its internal runtime metadata after validation.
 
-- `memory_defined_skills`
-- `memory_bound_resources`
-
-Use this for scope-bound runbooks/checklists without hand-building metadata per call.
+Use this for scope-bound runbooks/checklists without hand-building request metadata per call.
 
 Legacy note: `documents` remains accepted as a compatibility alias for older SDK code.
+
+### Invocation Config Objects
+
+`Agent` accepts typed config objects at two layers:
+
+- Scope defaults on the `Agent(...)` constructor, merged into every call.
+- Per-call overrides on `invoke()`, `stream()`, `ainvoke()`, `astream()`, and `compile_state()`.
+
+Use these fields for runtime controls. Request `metadata` is reserved for application labels,
+correlation IDs, and other user-owned data.
+
+| Component | Constructor field | Invocation field | Reference |
+| --------- | ----------------- | ---------------- | --------- |
+| Memory behavior | `memory_config` | `memory_config` | [`MemoryConfig`](session-config.md#memoryconfig) |
+| System tools | `system_tools_config` | `system_tools_config` | [`SystemToolsConfig`](session-config.md#systemtoolsconfig) |
+| Orchestration loop | `orchestration_config` | `orchestration_config` | [`SessionOrchestrationConfig`](session-config.md#sessionorchestrationconfig) |
+| Memory assets | `skills`, `resources` | `memory_assets_config` | [`MemoryAssetsConfig`](session-config.md#memoryassetsconfig) |
+| Swarm transport | n/a | `swarm_config` | [`SwarmConfig`](session-config.md#swarmconfig) |
 
 ## Methods
 
@@ -169,12 +196,18 @@ def invoke(
     messages: Sequence[BaseMessage],
     force_final_tool: bool = False,
     targeted_tools: list[str] | None = None,
+    structured_output: type[BaseModel] | None = None,
     model: Literal['fast', 'balanced', 'max'] | None = None,
     reasoning: Literal['minimal', 'low', 'medium', 'high'] | None = None,
+    stream_response: bool = True,
     thread_id: str | None = None,
     verbose: bool = False,
     metadata: dict[str, Any] | None = None,
     memory_config: MemoryConfig | dict[str, Any] | None = None,
+    system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
+    orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
+    memory_assets_config: MemoryAssetsConfig | dict[str, Any] | None = None,
+    swarm_config: SwarmConfig | dict[str, Any] | None = None,
     allow_private_in_system_tools: bool | None = None,
 ) -> SessionResponse
 ```
@@ -186,12 +219,18 @@ def invoke(
 | `messages`                      | `Sequence[BaseMessage]`                  | Required | Messages to send to the agent                                                             |
 | `force_final_tool`              | `bool`                                   | `False`  | Return result from `final_tool=True` tool                                                 |
 | `targeted_tools`                | `list[str] \| None`                      | `None`   | Run only these tools (plus dependencies)                                                  |
+| `structured_output`             | `type[BaseModel] \| None`                | `None`   | Advanced direct structured-output schema. Prefer `agent.structured_output(Model).invoke(...)` for public use. |
 | `model`                         | `Literal`                                | `None`   | LLM selection hint: `'fast'`, `'balanced'`, `'max'`                                       |
 | `reasoning`                     | `Literal`                                | `None`   | Reasoning level: `'minimal'` to `'high'`                                                  |
+| `stream_response`               | `bool`                                   | `True`   | Request streamed model output from the server transport                                   |
 | `thread_id`                     | `str \| None`                            | `None`   | Thread ID for multi-turn conversations                                                    |
 | `verbose`                       | `bool`                                   | `False`  | Legacy terminal tracing flag. Prefer `events().invoke(...)`.                              |
-| `metadata`                      | `dict \| None`                           | `None`   | Additional application metadata for the session, including supported runtime control keys |
+| `metadata`                      | `dict \| None`                           | `None`   | Application metadata only. Reserved runtime-control keys are rejected.                    |
 | `memory_config`                 | `MemoryConfig \| dict[str, Any] \| None` | `None`   | Per-invocation memory override merged over scope defaults                                 |
+| `system_tools_config`           | `SystemToolsConfig \| dict \| None`      | `None`   | Per-invocation system-tool allowlist and approval controls                                |
+| `orchestration_config`          | `SessionOrchestrationConfig \| dict \| None` | `None` | Per-invocation orchestration loop controls such as reevaluate-loop and cycle limits       |
+| `memory_assets_config`          | `MemoryAssetsConfig \| dict \| None`     | `None`   | Advanced per-invocation memory skills/resources payload                                  |
+| `swarm_config`                  | `SwarmConfig \| dict \| None`            | `None`   | Advanced swarm transport config used for nested agent invocations                        |
 | `allow_private_in_system_tools` | `bool \| None`                           | `None`   | Optional override to allow raw private data access in system tools (advanced use only)    |
 
 #### Returns
@@ -202,12 +241,20 @@ def invoke(
 - `tool_results`: Results from executed tools
 - `metadata`: Response metadata
 
-#### Common metadata keys
+#### Typed runtime controls
 
-| Key                                 | Type                | Purpose                                                                    |
-| ----------------------------------- | ------------------- | -------------------------------------------------------------------------- |
-| `allowed_system_tools`              | `list[str]`         | Restrict which system tools may run for this invocation                    |
-| `approved_compose_artifact_targets` | `list[str] \| bool` | Explicitly approve `compose_artifact` targets such as `tool_name.arg_name` |
+Use typed config fields for runtime controls:
+
+| Field                 | Type                | Purpose                                                                    |
+| --------------------- | ------------------- | -------------------------------------------------------------------------- |
+| `memory_config`       | `MemoryConfig`      | Retrieval, summarization, and persistence behavior                         |
+| `system_tools_config` | `SystemToolsConfig` | System-tool allowlists, private-data controls, and compose-artifact approvals |
+| `orchestration_config` | `SessionOrchestrationConfig` | Reevaluate-loop and orchestration cycle controls                  |
+| `memory_assets_config` | `MemoryAssetsConfig` | Per-call user-defined skills and bound resources                         |
+| `swarm_config` | `SwarmConfig` | Internal typed transport for nested swarm/member invocations                       |
+
+The SDK still returns response metadata, but request `metadata` is for application-specific
+labels and correlation data only.
 
 #### Raises
 
@@ -218,6 +265,7 @@ def invoke(
 #### Examples
 
 ````python
+from maivn import SystemToolsConfig
 from maivn.messages import HumanMessage
 
 # Basic invocation
@@ -252,10 +300,10 @@ response = agent.invoke(
 response = agent.invoke(
     [HumanMessage(content='Compose and validate the SQL artifact')],
     force_final_tool=True,
-    metadata={
-        'allowed_system_tools': ['compose_artifact'],
-        'approved_compose_artifact_targets': ['validate_query_artifact.query'],
-    },
+    system_tools_config=SystemToolsConfig(
+        allowed_tools=['compose_artifact'],
+        approved_compose_artifact_targets=['validate_query_artifact.query'],
+    ),
 )
 
 # Event tracing for debugging
@@ -399,13 +447,40 @@ def stream(
     targeted_tools: list[str] | None = None,
     model: Literal['fast', 'balanced', 'max'] | None = None,
     reasoning: Literal['minimal', 'low', 'medium', 'high'] | None = None,
+    stream_response: bool = True,
+    status_messages: bool = False,
     thread_id: str | None = None,
     verbose: bool = False,
     metadata: dict[str, Any] | None = None,
     memory_config: MemoryConfig | dict[str, Any] | None = None,
+    system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
+    orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
+    memory_assets_config: MemoryAssetsConfig | dict[str, Any] | None = None,
+    swarm_config: SwarmConfig | dict[str, Any] | None = None,
     allow_private_in_system_tools: bool | None = None,
 ) -> Iterator[SSEEvent]
 ```
+
+#### Parameters
+
+| Parameter                       | Type                                     | Default  | Description                                                                            |
+| ------------------------------- | ---------------------------------------- | -------- | -------------------------------------------------------------------------------------- |
+| `messages`                      | `Sequence[BaseMessage]`                  | Required | Messages to send to the agent                                                          |
+| `force_final_tool`              | `bool`                                   | `False`  | Return result from the `final_tool=True` tool                                           |
+| `targeted_tools`                | `list[str] \| None`                      | `None`   | Run only these tools, plus dependencies                                                 |
+| `model`                         | `Literal['fast', 'balanced', 'max'] \| None` | `None` | LLM selection hint                                                                      |
+| `reasoning`                     | `Literal['minimal', 'low', 'medium', 'high'] \| None` | `None` | Reasoning level                                                        |
+| `stream_response`               | `bool`                                   | `True`   | Request streamed model output from the server transport                                 |
+| `status_messages`               | `bool`                                   | `False`  | Opt into normalized status-message events for frontend progress displays                |
+| `thread_id`                     | `str \| None`                            | `None`   | Thread ID for multi-turn conversations                                                  |
+| `verbose`                       | `bool`                                   | `False`  | Legacy terminal tracing flag. Prefer `events().stream(...)`.                            |
+| `metadata`                      | `dict[str, Any] \| None`                 | `None`   | Application metadata only. Reserved runtime-control keys are rejected.                  |
+| `memory_config`                 | `MemoryConfig \| dict[str, Any] \| None` | `None`   | Per-invocation memory override merged over scope defaults                               |
+| `system_tools_config`           | `SystemToolsConfig \| dict[str, Any] \| None` | `None` | Per-invocation system-tool allowlist and approval controls                              |
+| `orchestration_config`          | `SessionOrchestrationConfig \| dict[str, Any] \| None` | `None` | Per-invocation orchestration loop controls                              |
+| `memory_assets_config`          | `MemoryAssetsConfig \| dict[str, Any] \| None` | `None` | Advanced per-invocation memory skills/resources payload                                |
+| `swarm_config`                  | `SwarmConfig \| dict[str, Any] \| None`  | `None`   | Advanced swarm transport config used for nested agent invocations                       |
+| `allow_private_in_system_tools` | `bool \| None`                           | `None`   | Optional override to allow raw private data access in system tools                      |
 
 The iterator yields each SSE event as it arrives, including:
 
@@ -597,10 +672,28 @@ def compile_state(
     messages: Sequence[BaseMessage],
     targeted_tools: list[str] | None = None,
     memory_config: MemoryConfig | dict[str, Any] | None = None,
+    system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
+    orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
+    memory_assets_config: MemoryAssetsConfig | dict[str, Any] | None = None,
+    swarm_config: SwarmConfig | dict[str, Any] | None = None,
+    stream_response: bool = True,
 ) -> SessionRequest
 ```
 
 Useful for debugging or inspecting what would be sent to the server.
+
+#### Parameters
+
+| Parameter | Type | Default | Description |
+| --------- | ---- | ------- | ----------- |
+| `messages` | `Sequence[BaseMessage]` | Required | Messages to compile into the request |
+| `targeted_tools` | `list[str] \| None` | `None` | Restrict compiled tool selection to named tools plus dependencies |
+| `memory_config` | `MemoryConfig \| dict[str, Any] \| None` | `None` | Per-call memory override merged over scope defaults |
+| `system_tools_config` | `SystemToolsConfig \| dict[str, Any] \| None` | `None` | System-tool controls for the compiled request |
+| `orchestration_config` | `SessionOrchestrationConfig \| dict[str, Any] \| None` | `None` | Orchestration loop controls for the compiled request |
+| `memory_assets_config` | `MemoryAssetsConfig \| dict[str, Any] \| None` | `None` | Per-call memory skills/resources payload |
+| `swarm_config` | `SwarmConfig \| dict[str, Any] \| None` | `None` | Internal typed swarm transport config |
+| `stream_response` | `bool` | `True` | Whether the compiled request asks the server for streamed response content |
 
 ### list_tools()
 
@@ -642,10 +735,17 @@ def structured_output(model: type[BaseModel]) -> StructuredOutputInvocationBuild
 | Parameter   | Type                                          | Default  | Description                                                  |
 | ----------- | --------------------------------------------- | -------- | ------------------------------------------------------------ |
 | `messages`  | `Sequence[BaseMessage]`                       | Required | Messages to send                                             |
+| `force_final_tool` | `bool`                                 | `False`  | Force the structured-output schema as the final output tool   |
 | `model`     | `Literal['fast', 'balanced', 'max']`          | `None`   | LLM selection hint                                           |
 | `reasoning` | `Literal['minimal', 'low', 'medium', 'high']` | `None`   | Reasoning level                                              |
+| `stream_response` | `bool`                                 | `True`   | Request streamed model output from the server transport       |
 | `thread_id` | `str \| None`                                 | `None`   | Thread ID for conversations                                  |
 | `verbose`   | `bool`                                        | `False`  | Legacy terminal tracing flag. Prefer `events().invoke(...)`. |
+| `metadata` | `dict[str, Any] \| None`                       | `None`   | Application metadata only; reserved runtime-control keys are rejected |
+| `memory_config` | `MemoryConfig \| dict[str, Any] \| None` | `None`   | Per-call memory override merged over scope defaults           |
+| `system_tools_config` | `SystemToolsConfig \| dict[str, Any] \| None` | `None` | Per-call system-tool controls                        |
+| `orchestration_config` | `SessionOrchestrationConfig \| dict[str, Any] \| None` | `None` | Per-call orchestration loop controls        |
+| `allow_private_in_system_tools` | `bool \| None`             | `None`   | Optional override to allow raw private data access in system tools |
 
 #### Why Use This?
 
