@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
-from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from collections.abc import AsyncIterator
 from typing import Any, Literal
 
+from .dedup import build_interrupt_fingerprint, build_status_fingerprint
 from .emitters import (
     emit_agent_assignment,
     emit_assistant_chunk,
@@ -22,113 +20,19 @@ from .emitters import (
     emit_system_tool_start,
     emit_tool_event,
 )
+from .queueing import enqueue_event
+from .registry import BridgeRegistry
 from .runtime.identity import AssignmentAndScopeResolver, BridgeIdentityState, ToolIdentityResolver
 from .runtime.normalization import BridgePayloadNormalizer
 from .schema import ValidationMode, validate_event
 from .security import BridgeAudience, EventBridgeSecurityPolicy
-from .serialization import build_safe_event_payload, logger
+from .serialization import logger
 from .streaming import generate_sse_events, reopen_bridge
+from .ui_event import UIEvent
 
 BackpressurePolicy = Literal["block", "drop_oldest", "drop_newest"]
 _VALID_BACKPRESSURE: frozenset[str] = frozenset({"block", "drop_oldest", "drop_newest"})
 _VALID_VALIDATION_MODES: frozenset[str] = frozenset({"off", "warn", "strict"})
-
-
-# MARK: Dedup helpers
-
-
-def _normalize_dedup_part(value: str | None) -> str:
-    if not isinstance(value, str):
-        return ""
-    return value.strip().lower()
-
-
-def _build_interrupt_fingerprint(
-    *,
-    prompt: str,
-    data_key: str,
-    arg_name: str | None = None,
-) -> tuple[str, str]:
-    """Stable fingerprint for an interrupt's logical identity.
-
-    Uses ``arg_name`` when present so reporter-emitted events that carry
-    an explicit argument name match SDK-emitted events that fall back to
-    ``data_key``.
-    """
-    return (
-        _normalize_dedup_part(prompt),
-        _normalize_dedup_part(arg_name) or _normalize_dedup_part(data_key),
-    )
-
-
-def _build_status_fingerprint(data: dict[str, Any]) -> tuple[str, str] | None:
-    """Fingerprint for a ``status_message`` payload, or ``None`` if uniqueable."""
-    message = data.get("message")
-    if not isinstance(message, str):
-        return None
-    normalized_message = message.strip()
-    if not normalized_message:
-        return None
-
-    assistant_id = data.get("assistant_id")
-    normalized_assistant_id = (
-        assistant_id.strip().lower()
-        if isinstance(assistant_id, str) and assistant_id.strip()
-        else ""
-    )
-    return normalized_assistant_id, normalized_message
-
-
-# MARK: UIEvent
-
-
-@dataclass
-class UIEvent:
-    """A single event to be delivered to the frontend via SSE."""
-
-    type: str
-    data: dict[str, Any]
-    id: str = ""
-    timestamp: str = ""
-
-    def __post_init__(self) -> None:
-        if not self.id:
-            self.id = str(uuid.uuid4())
-        if not self.timestamp:
-            self.timestamp = datetime.now(UTC).isoformat()
-
-    def to_sse(self) -> dict[str, Any]:
-        """Build an ``EventSourceResponse``-compatible payload.
-
-        On serialization failure the payload preserves the original event id
-        and type so reconnect cursors and frontend dispatchers stay correct
-        even when the data itself cannot be serialized.
-        """
-        payload = {
-            "id": self.id,
-            "type": self.type,
-            "data": self.data,
-            "timestamp": self.timestamp,
-        }
-        return {
-            "event": self.type,
-            "id": self.id,
-            "data": build_safe_event_payload(
-                payload,
-                event_id=self.id,
-                event_type=self.type,
-                timestamp=self.timestamp,
-            ),
-        }
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize for history/snapshot APIs."""
-        return {
-            "id": self.id,
-            "type": self.type,
-            "data": self.data,
-            "timestamp": self.timestamp,
-        }
 
 
 # MARK: EventBridge
@@ -219,42 +123,7 @@ class EventBridge:
 
     async def _enqueue_event(self, event: UIEvent) -> None:
         """Place an event on the live queue, applying the backpressure policy."""
-        if self._queue_maxsize == 0:
-            self._queue.put_nowait(event)
-            return
-
-        if self._backpressure == "block":
-            await self._queue.put(event)
-            return
-
-        if self._backpressure == "drop_newest":
-            try:
-                self._queue.put_nowait(event)
-            except asyncio.QueueFull:
-                logger.warning(
-                    "Dropping newest event for session %s (queue full, type=%s)",
-                    self.session_id,
-                    event.type,
-                )
-            return
-
-        # drop_oldest
-        while True:
-            try:
-                self._queue.put_nowait(event)
-                return
-            except asyncio.QueueFull:
-                try:
-                    dropped = self._queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    # Queue is full and empty simultaneously is impossible, but
-                    # being defensive avoids an infinite loop.
-                    return
-                logger.warning(
-                    "Dropping oldest event for session %s (queue full, type=%s)",
-                    self.session_id,
-                    dropped.type,
-                )
+        await enqueue_event(self, event)
 
     async def emit(self, event_type: str, data: dict[str, Any]) -> None:
         """Emit an event to the UI stream."""
@@ -291,7 +160,7 @@ class EventBridge:
     ) -> bool:
         if not self._dedupe_interrupts:
             return False
-        fingerprint = _build_interrupt_fingerprint(
+        fingerprint = build_interrupt_fingerprint(
             prompt=prompt,
             data_key=data_key,
             arg_name=arg_name,
@@ -317,7 +186,7 @@ class EventBridge:
     def _should_drop_status_message(self, data: dict[str, Any]) -> bool:
         if not self._dedupe_status_messages:
             return False
-        fingerprint = _build_status_fingerprint(data)
+        fingerprint = build_status_fingerprint(data)
         if fingerprint is None:
             return False
         if fingerprint == self._last_status_fingerprint:
@@ -599,39 +468,6 @@ class EventBridge:
         self._reset_identity_state()
         self._reset_dedup_state()
         self._history_evictions = 0
-
-
-# MARK: BridgeRegistry
-
-
-class BridgeRegistry:
-    """Manages a collection of EventBridge instances keyed by session ID."""
-
-    def __init__(self) -> None:
-        self._bridges: dict[str, EventBridge] = {}
-
-    def get(self, session_id: str) -> EventBridge | None:
-        """Get an event bridge by session ID."""
-        return self._bridges.get(session_id)
-
-    def create(
-        self,
-        session_id: str,
-        *,
-        factory: Callable[[str], EventBridge] | None = None,
-    ) -> EventBridge:
-        """Create a new event bridge for a session."""
-        if session_id in self._bridges:
-            self._bridges[session_id].close()
-        bridge = factory(session_id) if factory else EventBridge(session_id)
-        self._bridges[session_id] = bridge
-        return bridge
-
-    def remove(self, session_id: str) -> None:
-        """Remove and close an event bridge."""
-        if session_id in self._bridges:
-            self._bridges[session_id].close()
-            del self._bridges[session_id]
 
 
 __all__ = [

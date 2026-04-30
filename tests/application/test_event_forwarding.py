@@ -356,7 +356,7 @@ def test_forward_normalized_stream_replays_bridge_semantics() -> None:
                 tool_type="system",
             )
         ),
-        _event(build_system_tool_chunk_payload(tool_id="sys-2", text="pondering")),
+        _event(build_system_tool_chunk_payload(tool_id="sys-2", text="pondering", progress=0.0)),
         _event(
             build_tool_event_payload(
                 tool_name="think",
@@ -419,6 +419,7 @@ def test_forward_normalized_stream_replays_bridge_semantics() -> None:
     ]
     assert history[0]["data"]["session"]["id"] == "sess-2"
     assert history[4]["data"]["event_name"] == "system_tool_start"
+    assert history[5]["data"]["chunk"]["progress"] == 0.0
     assert history[6]["data"]["event_name"] == "system_tool_complete"
     assert history[7]["data"]["tool"]["type"] == "model"
     assert history[7]["data"]["tool"]["status"] == "completed"

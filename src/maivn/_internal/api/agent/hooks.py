@@ -12,7 +12,7 @@ from maivn._internal.core.entities.execution_context import ExecutionContext
 from maivn._internal.core.entities.sse_event import SSEEvent
 
 if TYPE_CHECKING:
-    from .agent import _InvocationState
+    from .invocation_state import InvocationState
 
 logger = logging.getLogger(__name__)
 
@@ -20,14 +20,14 @@ logger = logging.getLogger(__name__)
 # MARK: Hook State
 
 
-def scope_hooks_enabled(invocation_state: _InvocationState) -> bool:
+def scope_hooks_enabled(invocation_state: InvocationState) -> bool:
     """Check if scope-level hooks should be fired."""
     return invocation_state.agent_mode == "scope" or invocation_state.swarm_mode == "scope"
 
 
 def build_scope_hook_payload(
     agent: Any,
-    invocation_state: _InvocationState,
+    invocation_state: InvocationState,
 ) -> dict[str, Any]:
     """Build the initial payload dict for scope hooks."""
     context = ExecutionContext(
@@ -56,7 +56,7 @@ def build_scope_hook_payload(
 
 def get_before_scope_hooks(
     agent: Any,
-    invocation_state: _InvocationState,
+    invocation_state: InvocationState,
 ) -> list[Callable[..., Any] | None]:
     """Collect before-execute hooks from swarm and agent."""
     return [
@@ -69,7 +69,7 @@ def get_before_scope_hooks(
 
 def get_after_scope_hooks(
     agent: Any,
-    invocation_state: _InvocationState,
+    invocation_state: InvocationState,
 ) -> list[Callable[..., Any] | None]:
     """Collect after-execute hooks from agent and swarm."""
     return [
@@ -105,7 +105,7 @@ def run_scope_hooks(
 def wrap_stream_with_hooks(
     stream_iter: Iterator[SSEEvent],
     agent: Any,
-    invocation_state: _InvocationState,
+    invocation_state: InvocationState,
     payload: dict[str, Any],
 ) -> Iterator[SSEEvent]:
     """Wrap a stream iterator with before/after scope hooks."""
