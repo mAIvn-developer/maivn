@@ -262,6 +262,16 @@ response = agent.invoke(
 response = agent.events().invoke([HumanMessage(content='Debug this')])
 ```
 
+### ainvoke()
+
+Async wrapper around `invoke()`. Same parameters and return value; the
+synchronous call is dispatched to a worker thread so it can be awaited
+inside an event loop.
+
+```python
+response = await agent.ainvoke([HumanMessage(content='Summarize Q1')])
+```
+
 ### batch() and abatch()
 
 Run multiple independent `invoke()` calls concurrently and return responses in
@@ -430,6 +440,46 @@ raw_events = agent.stream(
 for event in normalize_stream(raw_events, default_agent_name="assistant"):
     send_to_frontend(event.model_dump())
 ```
+
+### astream()
+
+Async wrapper around `stream()`. Yields `SSEEvent` instances from the
+worker thread back into the caller's event loop:
+
+```python
+async for event in agent.astream([HumanMessage(content='Walk me through it')]):
+    handle(event)
+```
+
+### cron(), every(), at()
+
+Build a chainable schedule that runs `invoke` / `stream` / `batch` /
+`ainvoke` / `astream` / `abatch` on a cadence. Inherited from
+`BaseScope`, so every `Agent` exposes them.
+
+```python
+from datetime import timedelta
+from maivn import JitterSpec, Retry
+
+job = agent.cron(
+    '0 9 * * MON-FRI',                  # weekdays at 09:00
+    tz='America/New_York',
+    jitter=JitterSpec.symmetric(timedelta(minutes=10)),
+    retry=Retry(max_attempts=3, backoff='exponential', base=timedelta(seconds=30)),
+).invoke([HumanMessage(content='Compose the daily ops briefing.')])
+
+job.on_fire(lambda r: print(f'fired at {r.fired_at}, jitter={r.jitter_offset}'))
+job.on_error(lambda r: alert(r.error))
+```
+
+`every(interval, ...)` schedules at a fixed cadence; `at(when, ...)` is
+one-shot. All three return a `CronInvocationBuilder` whose terminal
+methods start the job and return a `ScheduledJob` handle.
+
+See the [Scheduling reference](scheduling.md) for the full builder,
+jitter, retry, and lifecycle surface, and the
+[Scheduled Invocation guide](../guides/scheduled-invocation.md) for
+patterns and the production checklist.
 
 ### events()
 

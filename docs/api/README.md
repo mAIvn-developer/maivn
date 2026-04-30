@@ -32,6 +32,17 @@ from maivn import (
     configure_logging,
     get_logger,
 
+    # Scheduling
+    JitterSpec,
+    Retry,
+    ScheduledJob,
+    RunRecord,
+    CronSchedule,
+    IntervalSchedule,
+    AtSchedule,
+    list_jobs,
+    stop_all_jobs,
+
     # Events
     AppEvent,
     RawSSEEvent,
@@ -100,6 +111,18 @@ from maivn.messages import HumanMessage, AIMessage, SystemMessage
 | [configure_logging()](logging.md#configure_logging) | Initialize SDK logging  | Logging   |
 | [get_logger()](logging.md#get_logger)               | Get SDK logger instance | Logging   |
 
+### Scheduling
+
+| Item | Description | Reference |
+| --- | --- | --- |
+| [`scope.cron(...)`](scheduling.md#cron) / [`every(...)`](scheduling.md#every) / [`at(...)`](scheduling.md#at) | Build a scheduled invocation | Scheduling |
+| [`CronInvocationBuilder`](scheduling.md#croninvocationbuilder) | Chainable builder over `invoke` / `stream` / `batch` and async variants | Scheduling |
+| [`JitterSpec`](scheduling.md#jitterspec) | Bounded randomness around fire times | Scheduling |
+| [`Retry`](scheduling.md#retry) | Retry policy with constant / linear / exponential backoff | Scheduling |
+| [`ScheduledJob`](scheduling.md#scheduledjob) | Lifecycle handle returned by terminal builder calls | Scheduling |
+| [`RunRecord`](scheduling.md#runrecord) | Outcome of a single fire | Scheduling |
+| [`list_jobs()` / `stop_all_jobs()`](scheduling.md#module-level-helpers) | Process-wide registry helpers | Scheduling |
+
 ## Quick Navigation
 
 - **Getting started?** See [Agent](agent.md) and [Decorators](decorators.md)
@@ -107,6 +130,7 @@ from maivn.messages import HumanMessage, AIMessage, SystemMessage
 - **Streaming events to your frontend?** Start with the [Frontend Events guide](../guides/frontend-events.md) — one-line FastAPI mount + client examples in JavaScript, TypeScript, Swift, Kotlin, Go, Python, Rust, .NET, and more. For the API reference and trust-boundary controls, see [Events](events.md)
 - **External tools?** See [MCP](mcp.md)
 - **Configuration?** See [Configuration](configuration.md)
+- **Scheduling cron jobs?** See [Scheduling](scheduling.md) and the [Scheduled Invocation guide](../guides/scheduled-invocation.md)
 - **Debugging?** See [Logging](logging.md)
 
 ## Import Patterns

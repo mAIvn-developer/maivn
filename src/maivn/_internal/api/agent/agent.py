@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 from weakref import WeakValueDictionary
@@ -404,6 +405,93 @@ class Agent(BaseScope):
 
         payload = build_scope_hook_payload(self, invocation_state)
         return wrap_stream_with_hooks(stream_iter, self, invocation_state, payload)
+
+    async def ainvoke(
+        self,
+        messages: Sequence[BaseMessage],
+        force_final_tool: bool = False,
+        targeted_tools: list[str] | None = None,
+        structured_output: type[PydanticBaseModel] | None = None,
+        model: Literal["fast", "balanced", "max"] | None = None,
+        reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
+        stream_response: bool = True,
+        thread_id: str | None = None,
+        verbose: bool = False,
+        metadata: dict[str, Any] | None = None,
+        memory_config: MemoryConfig | dict[str, Any] | None = None,
+        allow_private_in_system_tools: bool | None = None,
+    ) -> SessionResponse:
+        """Async wrapper around :meth:`invoke` that runs the synchronous call in a thread."""
+        return await asyncio.to_thread(
+            self.invoke,
+            messages,
+            force_final_tool=force_final_tool,
+            targeted_tools=targeted_tools,
+            structured_output=structured_output,
+            model=model,
+            reasoning=reasoning,
+            stream_response=stream_response,
+            thread_id=thread_id,
+            verbose=verbose,
+            metadata=metadata,
+            memory_config=memory_config,
+            allow_private_in_system_tools=allow_private_in_system_tools,
+        )
+
+    async def astream(
+        self,
+        messages: Sequence[BaseMessage],
+        force_final_tool: bool = False,
+        targeted_tools: list[str] | None = None,
+        model: Literal["fast", "balanced", "max"] | None = None,
+        reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
+        stream_response: bool = True,
+        status_messages: bool = False,
+        thread_id: str | None = None,
+        verbose: bool = False,
+        metadata: dict[str, Any] | None = None,
+        memory_config: MemoryConfig | dict[str, Any] | None = None,
+        allow_private_in_system_tools: bool | None = None,
+    ) -> AsyncIterator[SSEEvent]:
+        """Async wrapper around :meth:`stream` that yields events from a worker thread."""
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+        sentinel = object()
+
+        def _drain() -> None:
+            try:
+                iterator = self.stream(
+                    messages,
+                    force_final_tool=force_final_tool,
+                    targeted_tools=targeted_tools,
+                    model=model,
+                    reasoning=reasoning,
+                    stream_response=stream_response,
+                    status_messages=status_messages,
+                    thread_id=thread_id,
+                    verbose=verbose,
+                    metadata=metadata,
+                    memory_config=memory_config,
+                    allow_private_in_system_tools=allow_private_in_system_tools,
+                )
+                for event in iterator:
+                    asyncio.run_coroutine_threadsafe(queue.put(event), loop).result()
+            except Exception as exc:  # noqa: BLE001
+                asyncio.run_coroutine_threadsafe(queue.put(exc), loop).result()
+            finally:
+                asyncio.run_coroutine_threadsafe(queue.put(sentinel), loop).result()
+
+        worker = asyncio.get_running_loop().run_in_executor(None, _drain)
+        try:
+            while True:
+                item = await queue.get()
+                if item is sentinel:
+                    break
+                if isinstance(item, BaseException):
+                    raise item
+                yield item
+        finally:
+            await worker
 
     # MARK: - Invocation Helpers
 

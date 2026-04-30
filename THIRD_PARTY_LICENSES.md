@@ -16,7 +16,7 @@ First-party `maivn-*` packages are excluded from the third-party inventory.
 
 | Scope | Packages | Permissive | Weak Copyleft | Strong Copyleft | Non-OSI | Unknown |
 |-------|----------|------------|----------------|------------------|---------|---------|
-| Runtime | 36 | 34 | 2 | 0 | 0 | 0 |
+| Runtime | 39 | 37 | 2 | 0 | 0 | 0 |
 | Dev-only | 13 | 13 | 0 | 0 | 0 | 0 |
 
 ---
@@ -35,6 +35,7 @@ First-party `maivn-*` packages are excluded from the third-party inventory.
 | anyio | 4.13.0 | MIT | Permissive |   |
 | certifi | 2026.2.25 | Mozilla Public License 2.0 (MPL 2.0) | Weak Copyleft |   |
 | charset-normalizer | 3.4.6 | MIT | Permissive |   |
+| croniter | 6.2.2 | MIT | Permissive |   |
 | docstring-parser | 0.17.0 | MIT License | Permissive |   |
 | h11 | 0.16.0 | MIT License | Permissive |   |
 | httpcore | 1.0.9 | BSD-3-Clause | Permissive |   |
@@ -53,11 +54,13 @@ First-party `maivn-*` packages are excluded from the third-party inventory.
 | pydantic | 2.13.3 | MIT | Permissive |   |
 | pydantic-core | 2.46.3 | MIT | Permissive |   |
 | pygments | 2.20.0 | BSD-2-Clause | Permissive |   |
+| python-dateutil | 2.9.0.post0 | BSD License OR Apache Software License | Permissive |   |
 | python-dotenv | 1.2.2 | BSD-3-Clause | Permissive |   |
 | pyyaml | 6.0.3 | MIT License | Permissive |   |
 | requests | 2.33.1 | Apache Software License | Permissive |   |
 | requests-toolbelt | 1.0.0 | Apache Software License | Permissive |   |
 | rich | 14.3.4 | MIT License | Permissive |   |
+| six | 1.17.0 | MIT License | Permissive |   |
 | tenacity | 9.1.4 | Apache Software License | Permissive |   |
 | typing-extensions | 4.15.0 | PSF-2.0 | Permissive |   |
 | typing-inspection | 0.4.2 | MIT | Permissive |   |
