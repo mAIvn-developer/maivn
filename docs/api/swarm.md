@@ -131,6 +131,15 @@ response = swarm.events().invoke(
 )
 ```
 
+### ainvoke()
+
+Async wrapper around `invoke()`. Same parameters and return value;
+suitable for awaiting inside an event loop.
+
+```python
+response = await swarm.ainvoke(HumanMessage(content='Plan the launch'))
+```
+
 ### batch() and abatch()
 
 Run multiple independent `Swarm.invoke()` calls concurrently and return
@@ -258,6 +267,46 @@ for event in normalize_stream(
 ):
     post_to_ui(event.model_dump())
 ```
+
+### astream()
+
+Async wrapper around `stream()`. Yields `SSEEvent` instances back into
+the caller's event loop:
+
+```python
+async for event in swarm.astream(HumanMessage(content='Run the workflow')):
+    handle(event)
+```
+
+### cron(), every(), at()
+
+Build a chainable schedule that runs the swarm on a cadence. Inherited
+from `BaseScope`, identical surface to `Agent.cron(...)`.
+
+```python
+from datetime import timedelta
+from maivn import JitterSpec
+
+job = swarm.cron(
+    '*/15 * * * *',
+    tz='UTC',
+    jitter=JitterSpec(min=timedelta(0), max=timedelta(seconds=90)),
+    overlap_policy='skip',     # never let a fire collide with a slow run
+    max_overlap=1,
+).invoke(HumanMessage(content='Run the briefing pipeline'))
+
+job.on_success(lambda r: log.info('briefing succeeded in %s', r.duration))
+```
+
+`every(interval, ...)` and `at(when, ...)` are also available. Each
+returns a `CronInvocationBuilder` whose terminal methods (`invoke`,
+`stream`, `batch`, `ainvoke`, `astream`, `abatch`) start the job and
+return a `ScheduledJob`.
+
+See the [Scheduling reference](scheduling.md) for the full builder,
+jitter, retry, and lifecycle surface, and the
+[Scheduled Invocation guide](../guides/scheduled-invocation.md) for
+patterns and the production checklist.
 
 ### events()
 

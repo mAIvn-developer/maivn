@@ -19,6 +19,8 @@ The maivn SDK provides a clean, declarative interface for creating AI agents wit
 - **Structured Output**: Use `final_tool=True` for guaranteed typed responses
 - **Multi-Agent**: Coordinate agents with `Swarm` and `@depends_on_agent`
 - **Batch Invocation**: Run multiple independent `invoke()` calls with `batch()` or `abatch()`
+- **Scheduled Invocation**: Run any agent or swarm on a `cron(...)`, `every(...)`, or `at(...)` schedule with bounded jitter, retry/backoff, misfire and overlap policies
+- **Async Surface**: `ainvoke()` / `astream()` mirror `invoke()` / `stream()` for native asyncio code
 - **MCP Support**: Connect external MCP servers (stdio/HTTP) as tool providers
 - **Interrupts**: Collect user input mid-execution with `@depends_on_interrupt`
 - **System Tools**: Built-in `web_search`, `repl`, `think`
@@ -147,6 +149,33 @@ responses = agent.batch(
 responses = await agent.abatch(batch_inputs, max_concurrency=3)
 ```
 
+### Scheduled Invocation
+
+Run any agent or swarm on a cadence with optional jitter and retry. The
+builder mirrors `invoke` / `stream` / `batch` and the async variants:
+
+```python
+from datetime import timedelta
+from maivn import JitterSpec, Retry
+
+job = agent.cron(
+    '0 9 * * MON-FRI',                  # weekdays at 09:00
+    tz='America/New_York',
+    jitter=JitterSpec.symmetric(timedelta(minutes=10)),  # ±10 min uniform
+    retry=Retry(max_attempts=3, backoff='exponential', base=timedelta(seconds=30)),
+).invoke([HumanMessage(content='Compose the daily ops briefing.')])
+
+job.on_fire(lambda r: print(f'fired at {r.fired_at}, jitter={r.jitter_offset}'))
+job.on_error(lambda r: alert(r.error))
+
+# ... later
+job.stop(drain=True)
+```
+
+`scope.every(timedelta(minutes=15))` and `scope.at(when)` are also
+available. See the [Scheduled Invocation guide](docs/guides/scheduled-invocation.md)
+and [Scheduling reference](docs/api/scheduling.md) for the full surface.
+
 ### Tool Dependencies
 
 ```python
@@ -257,6 +286,10 @@ The maivn server only receives tool schemas (names, descriptions, parameters) an
 | `BaseScope`     | Base class for Agent/Swarm                     |
 | `MCPServer`     | MCP server configuration                       |
 | `MCPAutoSetup`  | Auto-setup for uvx-based MCP servers           |
+| `ScheduledJob`  | Lifecycle handle returned by `cron/every/at`    |
+| `JitterSpec`    | Bounded randomness for scheduled fires          |
+| `Retry`         | Retry policy with constant/linear/exp backoff   |
+| `RunRecord`     | Outcome of a single scheduled fire              |
 
 ### Decorators
 
@@ -324,6 +357,7 @@ execution for more deterministic runs.
 - [MCP](docs/api/mcp.md) - MCP server integration
 - [Messages](docs/api/messages.md) - Message types
 - [Logging](docs/api/logging.md) - Logging system
+- [Scheduling](docs/api/scheduling.md) - `cron/every/at`, jitter, retry, `ScheduledJob`
 
 ### Guides
 
@@ -334,6 +368,7 @@ execution for more deterministic runs.
 - [Multi-Agent](docs/guides/multi-agent.md) - Swarm orchestration
 - [Private Data](docs/guides/private-data.md) - Security and secrets
 - [System Tools](docs/guides/system-tools.md) - Built-in tools
+- [Scheduled Invocation](docs/guides/scheduled-invocation.md) - Cron, jitter, retry, lifecycle
 - [mAIvn Studio](docs/guides/maivn-studio.md) - Studio UI + API reference
 
 ### Reference

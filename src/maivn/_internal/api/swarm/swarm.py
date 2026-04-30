@@ -4,7 +4,8 @@ Provides DI-friendly registries and shared tool access for groups of agents.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+import asyncio
+from collections.abc import AsyncIterator, Iterator, Sequence
 from typing import TYPE_CHECKING, Any
 
 from maivn_shared import (
@@ -197,6 +198,89 @@ class Swarm(BaseScope):
             thread_id=thread_id,
             verbose=verbose,
         )
+
+    async def ainvoke(
+        self,
+        messages: Sequence[BaseMessage] | BaseMessage,
+        *,
+        model: Any = None,
+        reasoning: Any = None,
+        force_final_tool: bool = False,
+        stream_response: bool = True,
+        thread_id: str | None = None,
+        verbose: bool = False,
+        metadata: dict[str, Any] | None = None,
+        memory_config: MemoryConfig | dict[str, Any] | None = None,
+        allow_private_in_system_tools: bool | None = None,
+    ) -> SessionResponse:
+        """Async wrapper around :meth:`invoke`."""
+        return await asyncio.to_thread(
+            self.invoke,
+            messages,
+            model=model,
+            reasoning=reasoning,
+            force_final_tool=force_final_tool,
+            stream_response=stream_response,
+            thread_id=thread_id,
+            verbose=verbose,
+            metadata=metadata,
+            memory_config=memory_config,
+            allow_private_in_system_tools=allow_private_in_system_tools,
+        )
+
+    async def astream(
+        self,
+        messages: Sequence[BaseMessage] | BaseMessage,
+        *,
+        model: Any = None,
+        reasoning: Any = None,
+        force_final_tool: bool = False,
+        stream_response: bool = True,
+        status_messages: bool = False,
+        thread_id: str | None = None,
+        verbose: bool = False,
+        metadata: dict[str, Any] | None = None,
+        memory_config: MemoryConfig | dict[str, Any] | None = None,
+        allow_private_in_system_tools: bool | None = None,
+    ) -> AsyncIterator[SSEEvent]:
+        """Async wrapper around :meth:`stream`."""
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+        sentinel = object()
+
+        def _drain() -> None:
+            try:
+                iterator = self.stream(
+                    messages,
+                    model=model,
+                    reasoning=reasoning,
+                    force_final_tool=force_final_tool,
+                    stream_response=stream_response,
+                    status_messages=status_messages,
+                    thread_id=thread_id,
+                    verbose=verbose,
+                    metadata=metadata,
+                    memory_config=memory_config,
+                    allow_private_in_system_tools=allow_private_in_system_tools,
+                )
+                for event in iterator:
+                    asyncio.run_coroutine_threadsafe(queue.put(event), loop).result()
+            except Exception as exc:  # noqa: BLE001
+                asyncio.run_coroutine_threadsafe(queue.put(exc), loop).result()
+            finally:
+                asyncio.run_coroutine_threadsafe(queue.put(sentinel), loop).result()
+
+        worker = asyncio.get_running_loop().run_in_executor(None, _drain)
+        try:
+            while True:
+                item = await queue.get()
+                if item is sentinel:
+                    break
+                if isinstance(item, BaseException):
+                    raise item
+                yield item
+        finally:
+            await worker
 
     # MARK: - Execution Helpers
 

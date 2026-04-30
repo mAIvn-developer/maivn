@@ -55,6 +55,26 @@ from ._internal.api.resource_models import (
     ProjectMemoryResources,
 )
 
+# MARK: - Scheduling
+from ._internal.api.scheduling import (
+    AtSchedule,
+    CronInvocationBuilder,
+    CronSchedule,
+    IntervalSchedule,
+    JitterDistribution,
+    JitterSpec,
+    MisfirePolicy,
+    OverlapPolicy,
+    Retry,
+    RetryBackoff,
+    RunRecord,
+    RunStatus,
+    Schedule,
+    ScheduledJob,
+    list_jobs,
+    stop_all_jobs,
+)
+
 # MARK: - Interrupts
 from ._internal.core.services.interrupt_service import (
     default_terminal_interrupt,
@@ -207,4 +227,21 @@ __all__ = [
     "default_terminal_interrupt",
     "get_interrupt_service",
     "set_interrupt_service",
+    # Scheduling
+    "AtSchedule",
+    "CronInvocationBuilder",
+    "CronSchedule",
+    "IntervalSchedule",
+    "JitterDistribution",
+    "JitterSpec",
+    "MisfirePolicy",
+    "OverlapPolicy",
+    "Retry",
+    "RetryBackoff",
+    "RunRecord",
+    "RunStatus",
+    "Schedule",
+    "ScheduledJob",
+    "list_jobs",
+    "stop_all_jobs",
 ]
