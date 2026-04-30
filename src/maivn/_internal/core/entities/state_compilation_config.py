@@ -18,7 +18,7 @@ class StateCompilationConfig(ConfigurableMixin):
 
     include_timeout: bool = Field(
         default=True,
-        description="Whether to include the timeout value in the session metadata.",
+        description="Whether to include the timeout value in the session execution config.",
     )
     base_metadata: dict[str, Any] = Field(
         default_factory=dict,

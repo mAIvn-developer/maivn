@@ -1,0 +1,387 @@
+# Session Config Models
+
+Typed session config models carry runtime controls for SDK invocations. Use these
+objects instead of putting control keys in request `metadata`.
+
+## Import
+
+```python
+from maivn import (
+    MemoryAssetsConfig,
+    MemoryConfig,
+    MemoryInsightExtractionConfig,
+    MemoryResourceConfig,
+    MemoryRetrievalConfig,
+    MemorySkillConfig,
+    MemorySkillExtractionConfig,
+    SessionExecutionConfig,
+    SessionOrchestrationConfig,
+    StructuredOutputConfig,
+    SwarmAgentConfig,
+    SwarmConfig,
+    SystemToolsConfig,
+)
+```
+
+`Agent(...)` and `Swarm(...)` accept config objects or equivalent dictionaries
+for scope defaults. Invocation methods accept the same config objects as per-call
+overrides.
+
+```python
+from maivn import Agent, SystemToolsConfig, SessionOrchestrationConfig
+from maivn.messages import HumanMessage
+
+agent = Agent(
+    name="analyst",
+    api_key="...",
+    system_tools_config=SystemToolsConfig(allowed_tools=["web_search"]),
+)
+
+response = agent.invoke(
+    [HumanMessage(content="Research this topic")],
+    orchestration_config=SessionOrchestrationConfig(max_cycles=4),
+)
+```
+
+## Configuration Layers
+
+| Layer | Where | Merge behavior |
+| ----- | ----- | -------------- |
+| Scope default | `Agent(...)`, `Swarm(...)` | Applied to every call from that scope |
+| Invocation override | `invoke()`, `stream()`, `ainvoke()`, `astream()` | Merged over scope defaults for one call |
+| Compiled request | `compile_state()` | Produces a `SessionRequest` with typed config fields |
+| Server runtime | session service | Projects typed config into internal runtime metadata after validation |
+
+Request `metadata` is application-owned. Reserved runtime-control keys such as
+`allowed_system_tools`, `allow_reevaluate_loop`, `structured_output_intent`,
+`memory_defined_skills`, and `swarm_agent_roster` are rejected at the SDK/shared
+model boundary.
+
+## SystemToolsConfig
+
+Controls server-side system tool availability and approvals.
+
+```python
+SystemToolsConfig(
+    allowed_tools: list[str] | None = None,
+    approved_compose_artifact_targets: list[str] | bool | None = None,
+    allow_private_data: bool | None = None,
+    allow_private_data_placeholders: bool | None = None,
+)
+```
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `allowed_tools` | `list[str] \| None` | `None` | System tool allowlist. Use `[]` to disable all system tools for the call. |
+| `approved_compose_artifact_targets` | `list[str] \| bool \| None` | `None` | Explicit `compose_artifact` target approvals, or `True` to approve all targets. |
+| `allow_private_data` | `bool \| None` | `None` | Allow system tools to receive raw `private_data` values. Advanced use only. |
+| `allow_private_data_placeholders` | `bool \| None` | `None` | Allow system tools to receive private-data placeholders. The SDK enables this by default when resolving invocation config. |
+
+```python
+agent.invoke(
+    messages,
+    system_tools_config=SystemToolsConfig(
+        allowed_tools=["web_search", "compose_artifact"],
+        approved_compose_artifact_targets=["write_report.report"],
+    ),
+)
+```
+
+## SessionOrchestrationConfig
+
+Controls server orchestration loop behavior.
+
+```python
+SessionOrchestrationConfig(
+    allow_reevaluate_loop: bool | None = None,
+    max_cycles: int | None = None,
+)
+```
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `allow_reevaluate_loop` | `bool \| None` | `None` | Allows reevaluate dependencies to continue after a complete result is available. |
+| `max_cycles` | `int \| None` | `None` | Maximum orchestration loop cycles for this request. Must be greater than zero. |
+
+```python
+agent.invoke(
+    messages,
+    orchestration_config={"allow_reevaluate_loop": True, "max_cycles": 6},
+)
+```
+
+## MemoryConfig
+
+Controls public memory behavior for recall, summarization, and persistence.
+
+```python
+MemoryConfig(
+    enabled: bool | None = None,
+    level: Literal["none", "glimpse", "focus", "clarity"] | None = None,
+    summarization_enabled: bool | None = None,
+    persistence_mode: Literal[
+        "persist_none",
+        "vector_only",
+        "vector_plus_graph",
+    ] | None = None,
+    retrieval: MemoryRetrievalConfig | None = None,
+    skill_extraction: MemorySkillExtractionConfig | None = None,
+    insight_extraction: MemoryInsightExtractionConfig | None = None,
+)
+```
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `enabled` | `bool \| None` | `None` | Public memory master toggle for the invocation. |
+| `level` | `"none" \| "glimpse" \| "focus" \| "clarity" \| None` | `None` | Memory behavior level. |
+| `summarization_enabled` | `bool \| None` | `None` | Optional summarization override. |
+| `persistence_mode` | `"persist_none" \| "vector_only" \| "vector_plus_graph" \| None` | `None` | Optional persistence downscope. |
+| `retrieval` | `MemoryRetrievalConfig \| None` | `None` | Retrieval limits and signal toggles. |
+| `skill_extraction` | `MemorySkillExtractionConfig \| None` | `None` | Skill extraction controls. |
+| `insight_extraction` | `MemoryInsightExtractionConfig \| None` | `None` | Insight extraction controls. |
+
+```python
+MemoryRetrievalConfig(
+    top_k: int | None = None,
+    candidate_limit: int | None = None,
+    skills_enabled: bool | None = None,
+    insights_enabled: bool | None = None,
+    resources_enabled: bool | None = None,
+    skill_injection_max_count: int | None = None,
+    insight_injection_max_count: int | None = None,
+    resource_injection_max_count: int | None = None,
+    insight_relevance_floor: float | None = None,
+)
+```
+
+| Retrieval field | Type | Validation |
+| --------------- | ---- | ---------- |
+| `top_k` | `int \| None` | `>= 1` |
+| `candidate_limit` | `int \| None` | `>= 1` and must be `>= top_k` when both are set |
+| `skills_enabled` | `bool \| None` | Optional skill recall toggle |
+| `insights_enabled` | `bool \| None` | Optional insight recall toggle |
+| `resources_enabled` | `bool \| None` | Optional resource recall toggle |
+| `skill_injection_max_count` | `int \| None` | `>= 1` |
+| `insight_injection_max_count` | `int \| None` | `>= 1` |
+| `resource_injection_max_count` | `int \| None` | `>= 1` |
+| `insight_relevance_floor` | `float \| None` | `0.0` to `1.0` |
+
+```python
+MemorySkillExtractionConfig(
+    enabled: bool | None = None,
+    sharing_scope: Literal["agent", "swarm", "project", "org"] | None = None,
+    confidence_threshold: float | None = None,
+    max_count: int | None = None,
+)
+
+MemoryInsightExtractionConfig(
+    enabled: bool | None = None,
+    sharing_scope: Literal["agent", "swarm"] | None = None,
+    max_count: int | None = None,
+    min_relevance_score: float | None = None,
+)
+```
+
+Use portal promotion for project-wide or organization-wide insights; AI-generated
+insights are limited to `agent` or `swarm` sharing scope in the SDK config.
+
+## MemoryAssetsConfig
+
+Carries user-defined skills and bound resources with one request. Constructor
+`skills=[...]` and `resources=[...]` on `Agent` or `Swarm` are normalized into
+this config automatically.
+
+```python
+MemoryAssetsConfig(
+    defined_skills: list[MemorySkillConfig] = [],
+    bound_resources: list[MemoryResourceConfig] = [],
+    recall_turn_active: bool | None = None,
+)
+```
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `defined_skills` | `list[MemorySkillConfig]` | `[]` | User-defined skill payloads available for retrieval. |
+| `bound_resources` | `list[MemoryResourceConfig]` | `[]` | Bound resource payloads available for retrieval. |
+| `recall_turn_active` | `bool \| None` | `None` | Marks a recall-active turn for server-side memory behavior. |
+
+### MemorySkillConfig
+
+```python
+MemorySkillConfig(
+    skill_id: str | None = None,
+    id: str | None = None,
+    name: str | None = None,
+    title: str | None = None,
+    description: str | None = None,
+    content: str | None = None,
+    steps: list[dict[str, Any]] = [],
+    preconditions: dict[str, Any] = {},
+    postconditions: dict[str, Any] = {},
+    sharing_scope: Literal["agent", "swarm", "project", "org"] | None = None,
+    origin: str | None = None,
+    confidence: float | None = None,
+    metadata: dict[str, Any] = {},
+    agent_id: str | None = None,
+    swarm_id: str | None = None,
+)
+```
+
+`MemorySkillConfig` requires either `name` or `title`. `confidence`, when set,
+must be between `0.0` and `1.0`.
+
+### MemoryResourceConfig
+
+```python
+MemoryResourceConfig(
+    resource_id: str | None = None,
+    id: str | None = None,
+    title: str | None = None,
+    name: str | None = None,
+    description: str | None = None,
+    content: str | None = None,
+    source_url: str | None = None,
+    url: str | None = None,
+    content_base64: str | None = None,
+    mime_type: str | None = None,
+    tags: list[str] = [],
+    binding_type: str | None = None,
+    sharing_scope: Literal["agent", "swarm", "project", "org"] | None = None,
+    source_type: str | None = None,
+    agent_id: str | None = None,
+    swarm_id: str | None = None,
+)
+```
+
+`MemoryResourceConfig` requires at least one of `title`, `name`, `resource_id`,
+or `id`.
+
+## SwarmConfig
+
+Carries typed swarm orchestration transport data. Most users should configure
+`Swarm(...)` and member `Agent(...)` instances instead of constructing this
+directly. It is exposed for advanced integrations and inspection.
+
+```python
+SwarmConfig(
+    invocation_intent: bool | None = None,
+    swarm_id: str | None = None,
+    swarm_name: str | None = None,
+    swarm_description: str | None = None,
+    swarm_system_prompt: str | None = None,
+    agent_roster: list[SwarmAgentConfig] = [],
+    agent_invocation_tool_map: dict[str, str] = {},
+    agent_invocation: bool | None = None,
+    use_as_final_output: bool | None = None,
+    invoked_agent_id: str | None = None,
+    invoked_agent_name: str | None = None,
+    included_nested_synthesis: Literal["auto", True, False] | None = None,
+    sdk_delivery_mode: str | None = None,
+    agent_dependency_context: dict[str, Any] | None = None,
+    agent_dependency_context_keys: list[str] | None = None,
+)
+```
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `invocation_intent` | `bool \| None` | Marks the request as a swarm invocation. |
+| `swarm_id`, `swarm_name`, `swarm_description`, `swarm_system_prompt` | `str \| None` | Swarm identity and prompt context. |
+| `agent_roster` | `list[SwarmAgentConfig]` | Typed member roster sent to the server. |
+| `agent_invocation_tool_map` | `dict[str, str]` | Maps generated member invocation tool IDs to agent IDs. |
+| `agent_invocation` | `bool \| None` | Marks a nested agent invocation. |
+| `use_as_final_output` | `bool \| None` | Marks whether the invoked member should produce the final output. |
+| `invoked_agent_id`, `invoked_agent_name` | `str \| None` | Nested member identity. |
+| `included_nested_synthesis` | `"auto" \| True \| False \| None` | Nested synthesis mode for member invocations. |
+| `sdk_delivery_mode` | `str \| None` | SDK transport mode used by server routing. |
+| `agent_dependency_context` | `dict[str, Any] \| None` | Dependency payload for nested agent execution. |
+| `agent_dependency_context_keys` | `list[str] \| None` | Dependency context key list for nested execution. |
+
+### SwarmAgentConfig
+
+```python
+SwarmAgentConfig(
+    agent_id: str | None = None,
+    name: str | None = None,
+    description: str | None = None,
+    use_as_final_output: bool = False,
+    included_nested_synthesis: Literal["auto", True, False] | None = None,
+    included_nested_synthesis_guidance: str | None = None,
+    has_final_tool: bool = False,
+    invocation_tool_id: str | None = None,
+    memory_config: MemoryConfig | None = None,
+    memory_defined_skills: list[MemorySkillConfig] = [],
+    memory_bound_resources: list[MemoryResourceConfig] = [],
+)
+```
+
+## StructuredOutputConfig
+
+Carries the typed structured-output transport intent inside `SessionRequest`.
+Public code normally uses `agent.structured_output(Model).invoke(...)` or
+`agent.invoke(..., structured_output=Model)`, which builds this config.
+
+```python
+StructuredOutputConfig(
+    enabled: bool | None = None,
+    model: str | None = None,
+)
+```
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `enabled` | `bool \| None` | `None` | Whether structured-output routing is requested. |
+| `model` | `str \| None` | `None` | Structured-output model name recorded for server routing and observability. |
+
+## SessionExecutionConfig
+
+Carries SDK execution transport details inside `SessionRequest`. This is usually
+produced by the SDK, not supplied directly by application code.
+
+```python
+SessionExecutionConfig(
+    agent_id: str | None = None,
+    timeout: int | float | None = None,
+    sdk_delivery_mode: str | None = None,
+    client_timezone: str | None = None,
+    sdk_deployment_timezone: str | None = None,
+)
+```
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `agent_id` | `str \| None` | `None` | SDK agent identifier. |
+| `timeout` | `int \| float \| None` | `None` | Execution timeout. Must be non-negative. |
+| `sdk_delivery_mode` | `str \| None` | `None` | SDK delivery mode used by server-side routing. |
+| `client_timezone` | `str \| None` | `None` | Client IANA timezone used for datetime-aware execution. |
+| `sdk_deployment_timezone` | `str \| None` | `None` | SDK deployment timezone fallback. |
+
+## Metadata Boundary
+
+Use `metadata` for your application data:
+
+```python
+agent.invoke(
+    messages,
+    metadata={"request_id": "req_123", "tenant": "acme"},
+)
+```
+
+Use typed config objects for SDK/runtime controls:
+
+```python
+agent.invoke(
+    messages,
+    system_tools_config={"allowed_tools": ["web_search"]},
+    orchestration_config={"max_cycles": 4},
+)
+```
+
+The SDK rejects reserved control keys in request `metadata` so config changes
+remain typed, validated, and visible in the public API.
+
+## See Also
+
+- [Agent](agent.md) - Agent constructor and invocation arguments
+- [Swarm](swarm.md) - Swarm constructor and invocation arguments
+- [System Tools Guide](../guides/system-tools.md) - System tool allowlists and approvals
+- [Memory and Recall Guide](../guides/memory-and-recall.md) - Memory behavior and assets

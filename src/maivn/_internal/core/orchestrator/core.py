@@ -12,10 +12,15 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from maivn_shared import (
     BaseMessage,
+    MemoryAssetsConfig,
     MemoryConfig,
     SessionClientProtocol,
+    SessionExecutionConfig,
+    SessionOrchestrationConfig,
     SessionRequest,
     SessionResponse,
+    SwarmConfig,
+    SystemToolsConfig,
 )
 from maivn_shared.infrastructure.logging import MetricsLoggerProtocol
 from pydantic import BaseModel
@@ -159,6 +164,10 @@ class AgentOrchestrator:
         thread_id: str | None = None,
         metadata: dict[str, Any] | None = None,
         memory_config: MemoryConfig | None = None,
+        system_tools_config: SystemToolsConfig | None = None,
+        orchestration_config: SessionOrchestrationConfig | None = None,
+        memory_assets_config: MemoryAssetsConfig | None = None,
+        swarm_config: SwarmConfig | None = None,
     ) -> SessionRequest:
         """Compile agent state without executing."""
         self.agent.compile_tools()
@@ -174,7 +183,7 @@ class AgentOrchestrator:
 
         timeout = self.agent.timeout if self.agent.timeout is not None else self.timeout
         timeout_int = int(timeout) if timeout is not None else None
-        merged_metadata = self._merge_metadata_with_timezone(metadata)
+        execution_config = self._build_session_execution_config()
 
         state = self._state_compiler.compile_state(
             messages=list(messages),
@@ -189,8 +198,13 @@ class AgentOrchestrator:
             stream_response=stream_response,
             status_messages=status_messages,
             max_results=self.agent.max_results,
+            execution_config=execution_config,
             memory_config=memory_config,
-            metadata=merged_metadata,
+            system_tools_config=system_tools_config,
+            orchestration_config=orchestration_config,
+            memory_assets_config=memory_assets_config,
+            swarm_config=swarm_config,
+            metadata=metadata,
         )
         self._state = state
         self._tool_exec_orchestrator.update_messages(messages)
@@ -214,6 +228,10 @@ class AgentOrchestrator:
         verbose: bool = False,
         metadata: dict[str, Any] | None = None,
         memory_config: MemoryConfig | None = None,
+        system_tools_config: SystemToolsConfig | None = None,
+        orchestration_config: SessionOrchestrationConfig | None = None,
+        memory_assets_config: MemoryAssetsConfig | None = None,
+        swarm_config: SwarmConfig | None = None,
     ) -> SessionResponse:
         """Execute the agent end-to-end and return the final response."""
         state, elapsed = self._compile_execution_state(
@@ -226,6 +244,10 @@ class AgentOrchestrator:
             stream_response=stream_response,
             metadata=metadata,
             memory_config=memory_config,
+            system_tools_config=system_tools_config,
+            orchestration_config=orchestration_config,
+            memory_assets_config=memory_assets_config,
+            swarm_config=swarm_config,
             thread_id=thread_id,
         )
         return self.invoke_compiled_state(
@@ -248,6 +270,10 @@ class AgentOrchestrator:
         verbose: bool = False,
         metadata: dict[str, Any] | None = None,
         memory_config: MemoryConfig | None = None,
+        system_tools_config: SystemToolsConfig | None = None,
+        orchestration_config: SessionOrchestrationConfig | None = None,
+        memory_assets_config: MemoryAssetsConfig | None = None,
+        swarm_config: SwarmConfig | None = None,
     ) -> Iterator[SSEEvent]:
         """Execute the agent and stream raw SSE events as they arrive."""
         state, elapsed = self._compile_execution_state(
@@ -261,6 +287,10 @@ class AgentOrchestrator:
             status_messages=status_messages,
             metadata=metadata,
             memory_config=memory_config,
+            system_tools_config=system_tools_config,
+            orchestration_config=orchestration_config,
+            memory_assets_config=memory_assets_config,
+            swarm_config=swarm_config,
             thread_id=thread_id,
         )
         return self.stream_compiled_state(
@@ -343,6 +373,10 @@ class AgentOrchestrator:
         thread_id: str | None = None,
         metadata: dict[str, Any] | None = None,
         memory_config: MemoryConfig | None = None,
+        system_tools_config: SystemToolsConfig | None = None,
+        orchestration_config: SessionOrchestrationConfig | None = None,
+        memory_assets_config: MemoryAssetsConfig | None = None,
+        swarm_config: SwarmConfig | None = None,
     ) -> tuple[SessionRequest, float]:
         t0 = time.perf_counter()
         state = self.compile_state(
@@ -356,27 +390,21 @@ class AgentOrchestrator:
             status_messages=status_messages,
             metadata=metadata,
             memory_config=memory_config,
+            system_tools_config=system_tools_config,
+            orchestration_config=orchestration_config,
+            memory_assets_config=memory_assets_config,
+            swarm_config=swarm_config,
             thread_id=thread_id,
         )
         return state, time.perf_counter() - t0
 
-    def _merge_metadata_with_timezone(
-        self,
-        metadata: dict[str, Any] | None,
-    ) -> dict[str, Any] | None:
-        """Merge caller-supplied metadata with timezone metadata."""
-        tz_metadata = self._build_timezone_metadata()
-        if not tz_metadata and not metadata:
-            return metadata
-        merged: dict[str, Any] = {}
-        if metadata:
-            merged.update(metadata)
-        if tz_metadata:
-            merged.update(tz_metadata)
-        return merged or None
+    def _build_session_execution_config(self) -> SessionExecutionConfig | None:
+        """Build SDK execution context that should travel as typed config."""
+        config = SessionExecutionConfig(**self._build_timezone_metadata())
+        return config if config.is_configured() else None
 
     def _build_timezone_metadata(self) -> dict[str, Any]:
-        """Build timezone metadata from client configuration."""
+        """Build timezone execution config from client configuration."""
         tz_metadata: dict[str, Any] = {}
         client_timezone = getattr(self.client, "client_timezone", None)
         if isinstance(client_timezone, str) and client_timezone.strip():

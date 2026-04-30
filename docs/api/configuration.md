@@ -2,6 +2,10 @@
 
 The maivn SDK uses a layered configuration system that supports environment variables and programmatic configuration.
 
+This page covers SDK environment and process-level settings. Invocation-time runtime
+controls such as memory, system tools, orchestration, structured output, and swarm
+transport are documented in [Session Config Models](session-config.md).
+
 ## Import
 
 ```python
@@ -228,4 +232,5 @@ throughput.
 ## See Also
 
 - [Client](client.md) - Client timeout configuration
+- [Session Config Models](session-config.md) - Typed invocation runtime controls
 - [Logging](logging.md) - Logging configuration

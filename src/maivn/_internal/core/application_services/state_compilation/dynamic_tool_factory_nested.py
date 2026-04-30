@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from maivn_shared import SWARM_AGENT_INVOCATION_METADATA_KEY, MemoryConfig
+from maivn_shared import MemoryAssetsConfig, MemoryConfig, SwarmConfig
 
 from maivn._internal.utils.reporting.context import current_sdk_delivery_mode
 
 
 class DynamicToolFactoryNestedInvocationMixin:
     @staticmethod
-    def _normalize_included_nested_synthesis(value: Any) -> bool | str:
+    def _normalize_included_nested_synthesis(value: Any) -> bool | Literal["auto"]:
         if isinstance(value, bool):
             return value
         if isinstance(value, str):
@@ -22,39 +22,58 @@ class DynamicToolFactoryNestedInvocationMixin:
                 return False
         return "auto"
 
-    def _build_nested_invocation_metadata(
+    def _build_nested_invocation_swarm_config(
+        self,
+        *,
+        agent: Any,
+        agent_id: str,
+        use_as_final_output: bool,
+        resolved_nested_synthesis: bool | Literal["auto"],
+    ) -> SwarmConfig:
+        return SwarmConfig(
+            agent_invocation=True,
+            use_as_final_output=use_as_final_output,
+            invoked_agent_id=getattr(agent, "id", agent_id),
+            invoked_agent_name=getattr(agent, "name", None),
+            included_nested_synthesis=resolved_nested_synthesis,
+            sdk_delivery_mode=current_sdk_delivery_mode.get(),
+        )
+
+    def _build_nested_invocation_memory_assets_config(
         self,
         *,
         agent: Any,
         swarm_scope: Any,
-        agent_id: str,
-        use_as_final_output: bool,
-        resolved_nested_synthesis: bool | str,
         memory_recall_turn_active: bool = False,
-    ) -> dict[str, Any]:
-        metadata: dict[str, Any] = {
-            SWARM_AGENT_INVOCATION_METADATA_KEY: True,
-            "swarm_use_as_final_output": use_as_final_output,
-            "swarm_invoked_agent_id": getattr(agent, "id", agent_id),
-            "swarm_invoked_agent_name": getattr(agent, "name", None),
-            "swarm_included_nested_synthesis": resolved_nested_synthesis,
-            "maivn_sdk_delivery_mode": current_sdk_delivery_mode.get(),
-        }
+    ) -> MemoryAssetsConfig | None:
+        defined_skills: list[dict[str, Any]] = []
+        bound_resources: list[dict[str, Any]] = []
         if memory_recall_turn_active:
-            metadata["memory_recall_turn_active"] = True
+            recall_turn_active: bool | None = True
+        else:
+            recall_turn_active = None
         self._merge_memory_assets(
-            metadata,
+            defined_skills=defined_skills,
+            bound_resources=bound_resources,
             scope=agent,
             default_agent_id=getattr(agent, "id", None),
             default_swarm_id=getattr(swarm_scope, "id", None),
         )
         self._merge_memory_assets(
-            metadata,
+            defined_skills=defined_skills,
+            bound_resources=bound_resources,
             scope=swarm_scope,
             default_swarm_id=getattr(swarm_scope, "id", None),
         )
 
-        return metadata
+        config = MemoryAssetsConfig.model_validate(
+            {
+                "defined_skills": defined_skills,
+                "bound_resources": bound_resources,
+                "recall_turn_active": recall_turn_active,
+            }
+        )
+        return config if config.is_configured() else None
 
     @staticmethod
     def _coerce_memory_config(value: Any) -> MemoryConfig | None:
@@ -85,20 +104,12 @@ class DynamicToolFactoryNestedInvocationMixin:
 
     @staticmethod
     def _merge_payload_list(
-        metadata: dict[str, Any],
-        key: str,
+        existing: list[dict[str, Any]],
         incoming: list[dict[str, Any]],
         *,
         identity_keys: tuple[str, ...],
-    ) -> None:
-        existing_raw = metadata.get(key)
-        existing = (
-            [item for item in existing_raw if isinstance(item, dict)]
-            if isinstance(existing_raw, list)
-            else []
-        )
-
-        merged: list[dict[str, Any]] = list(existing)
+    ) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = [item for item in existing if isinstance(item, dict)]
         seen: set[str] = set()
 
         def _identity(item: dict[str, Any]) -> str:
@@ -123,13 +134,13 @@ class DynamicToolFactoryNestedInvocationMixin:
                 seen.add(identifier)
             merged.append(item)
 
-        if merged:
-            metadata[key] = merged
+        return merged
 
     def _merge_memory_assets(
         self,
-        metadata: dict[str, Any],
         *,
+        defined_skills: list[dict[str, Any]],
+        bound_resources: list[dict[str, Any]],
         scope: Any,
         default_agent_id: str | None = None,
         default_swarm_id: str | None = None,
@@ -149,16 +160,14 @@ class DynamicToolFactoryNestedInvocationMixin:
         skill_payloads = skill_payloads_raw if isinstance(skill_payloads_raw, list) else []
         resource_payloads = resource_payloads_raw if isinstance(resource_payloads_raw, list) else []
         if skill_payloads:
-            self._merge_payload_list(
-                metadata,
-                "memory_defined_skills",
+            defined_skills[:] = self._merge_payload_list(
+                defined_skills,
                 skill_payloads,
                 identity_keys=("skill_id", "id", "name"),
             )
         if resource_payloads:
-            self._merge_payload_list(
-                metadata,
-                "memory_bound_resources",
+            bound_resources[:] = self._merge_payload_list(
+                bound_resources,
                 resource_payloads,
                 identity_keys=("resource_id", "id", "title", "name"),
             )

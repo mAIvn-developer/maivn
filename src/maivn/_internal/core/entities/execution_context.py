@@ -6,7 +6,13 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from maivn_shared import MemoryConfig
+from maivn_shared import (
+    MemoryAssetsConfig,
+    MemoryConfig,
+    SessionOrchestrationConfig,
+    SwarmConfig,
+    SystemToolsConfig,
+)
 
 # MARK: - Execution Context
 
@@ -23,6 +29,10 @@ class ExecutionContext:
     messages: Iterable[Any] | None = None
     metadata: Mapping[str, Any] | None = None
     memory_config: MemoryConfig | None = None
+    system_tools_config: SystemToolsConfig | None = None
+    orchestration_config: SessionOrchestrationConfig | None = None
+    memory_assets_config: MemoryAssetsConfig | None = None
+    swarm_config: SwarmConfig | None = None
 
     # MARK: - Copy Methods
 
@@ -36,6 +46,19 @@ class ExecutionContext:
             messages=overrides.get("messages", self.messages),
             metadata=overrides.get("metadata", self.metadata),
             memory_config=overrides.get("memory_config", self.memory_config),
+            system_tools_config=overrides.get(
+                "system_tools_config",
+                self.system_tools_config,
+            ),
+            orchestration_config=overrides.get(
+                "orchestration_config",
+                self.orchestration_config,
+            ),
+            memory_assets_config=overrides.get(
+                "memory_assets_config",
+                self.memory_assets_config,
+            ),
+            swarm_config=overrides.get("swarm_config", self.swarm_config),
         )
 
     # MARK: - Serialization
@@ -49,6 +72,10 @@ class ExecutionContext:
             "messages": self.messages,
             "metadata": self.metadata,
             "memory_config": self.memory_config,
+            "system_tools_config": self.system_tools_config,
+            "orchestration_config": self.orchestration_config,
+            "memory_assets_config": self.memory_assets_config,
+            "swarm_config": self.swarm_config,
         }
 
 

@@ -7,8 +7,14 @@ from typing import Any
 
 from maivn_shared import (
     BaseMessage,
+    MemoryAssetsConfig,
     MemoryConfig,
+    SessionExecutionConfig,
+    SessionOrchestrationConfig,
     SessionRequest,
+    StructuredOutputConfig,
+    SwarmConfig,
+    SystemToolsConfig,
     ToolSpec,
 )
 from pydantic import BaseModel
@@ -57,7 +63,12 @@ class StateCompiler:
         stream_response: bool = True,
         status_messages: bool = False,
         max_results: int | None = None,
+        execution_config: SessionExecutionConfig | None = None,
         memory_config: MemoryConfig | None = None,
+        system_tools_config: SystemToolsConfig | None = None,
+        orchestration_config: SessionOrchestrationConfig | None = None,
+        memory_assets_config: MemoryAssetsConfig | None = None,
+        swarm_config: SwarmConfig | None = None,
         metadata: dict[str, Any] | None = None,
         config: StateCompilationConfig | None = None,
     ) -> SessionRequest:
@@ -76,7 +87,12 @@ class StateCompiler:
             stream_response: Whether to stream intermediate responses.
             status_messages: Whether to emit status messages at swarm lifecycle milestones.
             max_results: Optional max results.
+            execution_config: Optional execution configuration supplied by the orchestrator.
             memory_config: Optional memory configuration.
+            system_tools_config: Optional system-tool configuration.
+            orchestration_config: Optional orchestration loop controls.
+            memory_assets_config: Optional memory asset payloads.
+            swarm_config: Optional swarm orchestration configuration.
             metadata: Optional metadata to merge into the session request.
             config: Optional compilation configuration.
 
@@ -113,12 +129,21 @@ class StateCompiler:
         )
         update_tool_dependency_references(tool_specs, all_tools)
 
-        metadata = self._build_metadata(scope, timeout, metadata)
-        self._auto_approve_compose_artifact_targets(tool_specs, metadata)
+        metadata = self._build_metadata(scope, metadata)
+        execution_config = self._build_execution_config(scope, timeout, execution_config)
+        system_tools_config = self._build_system_tools_config(scope, system_tools_config)
+        memory_assets_config = self._build_memory_assets_config(scope, memory_assets_config)
+        system_tools_config = self._auto_approve_compose_artifact_targets(
+            tool_specs,
+            system_tools_config,
+        )
 
+        structured_output_config: StructuredOutputConfig | None = None
         if structured_output is not None:
-            metadata["structured_output_intent"] = True
-            metadata["structured_output_model"] = getattr(structured_output, "__name__", None)
+            structured_output_config = StructuredOutputConfig(
+                enabled=True,
+                model=getattr(structured_output, "__name__", None),
+            )
             force_final_tool = True
             targeted_tools = None
         interrupt_data_keys = self._extract_interrupt_data_keys(all_tools)
@@ -129,6 +154,12 @@ class StateCompiler:
             tools=tool_specs,
             metadata=metadata,
             memory_config=self._build_memory_config(scope, memory_config),
+            execution_config=execution_config,
+            system_tools_config=system_tools_config,
+            structured_output_config=structured_output_config,
+            orchestration_config=orchestration_config,
+            memory_assets_config=memory_assets_config,
+            swarm_config=swarm_config,
             force_final_tool=force_final_tool,
             targeted_tools=targeted_tools,
             model=model,
@@ -275,61 +306,33 @@ class StateCompiler:
     def _build_metadata(
         self,
         scope: Any,
-        timeout: int | None,
         override_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Build metadata dictionary for the session request.
 
         Args:
             scope: Agent scope.
-            timeout: Optional timeout value.
             override_metadata: Optional metadata to merge on top of defaults.
 
         Returns:
             Metadata dictionary.
         """
-        metadata: dict[str, Any] = {
-            **self._config.base_metadata,
-            "agent_id": scope.id,
-        }
+        metadata: dict[str, Any] = dict(self._config.base_metadata)
         if override_metadata:
             metadata.update(override_metadata)
-        if timeout is not None and self._config.include_timeout:
-            metadata["timeout"] = timeout
-
-        metadata.setdefault("allow_private_data_placeholders_in_system_tools", True)
-        metadata.setdefault(
-            "allow_private_data_in_system_tools",
-            bool(getattr(scope, "allow_private_in_system_tools", False)),
-        )
-
-        apply_memory_assets = getattr(scope, "apply_memory_assets_to_metadata", None)
-        if callable(apply_memory_assets):
-            default_agent_id = getattr(scope, "id", None)
-            default_swarm_id = None
-            get_swarm = getattr(scope, "get_swarm", None)
-            if callable(get_swarm):
-                swarm = get_swarm()
-                if swarm is not None:
-                    default_swarm_id = getattr(swarm, "id", None)
-            apply_memory_assets(
-                metadata,
-                default_agent_id=default_agent_id,
-                default_swarm_id=default_swarm_id,
-            )
 
         return metadata
 
     @staticmethod
     def _auto_approve_compose_artifact_targets(
         tool_specs: list[ToolSpec],
-        metadata: dict[str, Any],
-    ) -> None:
+        system_tools_config: SystemToolsConfig | None,
+    ) -> SystemToolsConfig | None:
         """Auto-derive approved compose_artifact targets from tool specs.
 
         Scans all tool specs for compose_artifact arg policies with
         approval='explicit'. Any such targets are automatically added to
-        the session metadata so that the server-side policy check passes
+        system_tools_config so that the server-side policy check passes
         without requiring explicit invocation-level approval.
 
         This ensures consistent behavior regardless of the invocation
@@ -360,19 +363,86 @@ class StateCompiler:
                     derived_targets.append(f"{tool_name}.{arg_name}")
 
         if not derived_targets:
-            return
+            return system_tools_config
 
-        existing = metadata.get("approved_compose_artifact_targets")
+        existing = (
+            system_tools_config.approved_compose_artifact_targets
+            if system_tools_config is not None
+            else None
+        )
         if existing is True:
-            return
+            return system_tools_config
         if isinstance(existing, list):
             combined = list(existing)
             for target in derived_targets:
                 if target not in combined:
                     combined.append(target)
-            metadata["approved_compose_artifact_targets"] = combined
+            approval_config = SystemToolsConfig(approved_compose_artifact_targets=combined)
         else:
-            metadata["approved_compose_artifact_targets"] = derived_targets
+            approval_config = SystemToolsConfig(approved_compose_artifact_targets=derived_targets)
+        return SystemToolsConfig.merge(system_tools_config, approval_config)
+
+    def _build_execution_config(
+        self,
+        scope: Any,
+        timeout: int | None,
+        override: SessionExecutionConfig | None,
+    ) -> SessionExecutionConfig | None:
+        base = SessionExecutionConfig(
+            agent_id=getattr(scope, "id", None),
+            timeout=timeout if timeout is not None and self._config.include_timeout else None,
+        )
+        config = SessionExecutionConfig.merge(base, override)
+        return config if config is not None and config.is_configured() else None
+
+    @staticmethod
+    def _build_system_tools_config(
+        scope: Any,
+        override: SystemToolsConfig | None,
+    ) -> SystemToolsConfig | None:
+        if override is not None and override.is_configured():
+            return override
+        resolver = getattr(scope, "resolve_system_tools_config", None)
+        if callable(resolver):
+            resolved = resolver(None)
+            if isinstance(resolved, SystemToolsConfig) and resolved.is_configured():
+                return resolved
+        return override
+
+    @staticmethod
+    def _build_memory_assets_config(
+        scope: Any,
+        override: MemoryAssetsConfig | None,
+    ) -> MemoryAssetsConfig | None:
+        if override is not None and override.is_configured():
+            return override
+        build_assets = getattr(scope, "build_memory_asset_payloads", None)
+        if not callable(build_assets):
+            return override
+
+        default_agent_id = getattr(scope, "id", None)
+        default_swarm_id = None
+        get_swarm = getattr(scope, "get_swarm", None)
+        if callable(get_swarm):
+            swarm = get_swarm()
+            if swarm is not None:
+                default_swarm_id = getattr(swarm, "id", None)
+
+        raw_assets = build_assets(
+            default_agent_id=default_agent_id,
+            default_swarm_id=default_swarm_id,
+        )
+        if not (isinstance(raw_assets, tuple) and len(raw_assets) == 2):
+            return override
+
+        skills, resources = raw_assets
+        config = MemoryAssetsConfig.model_validate(
+            {
+                "defined_skills": skills if isinstance(skills, list) else [],
+                "bound_resources": resources if isinstance(resources, list) else [],
+            }
+        )
+        return config if config.is_configured() else override
 
     def _build_memory_config(
         self, scope: Any, override: MemoryConfig | None

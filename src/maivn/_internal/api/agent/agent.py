@@ -12,10 +12,14 @@ from weakref import WeakValueDictionary
 from maivn_shared import (
     BaseDependency,
     BaseMessage,
+    MemoryAssetsConfig,
     MemoryConfig,
+    SessionOrchestrationConfig,
     SessionRequest,
     SessionResponse,
+    SwarmConfig,
     SystemMessage,
+    SystemToolsConfig,
 )
 from maivn_shared.domain.entities.dependencies import AwaitForDependency, ReevaluateDependency
 from pydantic import BaseModel as PydanticBaseModel
@@ -57,6 +61,10 @@ class _InvocationState:
     prepared_messages: list[BaseMessage]
     merged_metadata: dict[str, Any]
     resolved_memory_config: MemoryConfig | None
+    resolved_system_tools_config: SystemToolsConfig | None
+    resolved_orchestration_config: SessionOrchestrationConfig | None
+    resolved_memory_assets_config: MemoryAssetsConfig | None
+    resolved_swarm_config: SwarmConfig | None
     swarm: Swarm | None
     agent_mode: str
     swarm_mode: str
@@ -274,6 +282,10 @@ class Agent(BaseScope):
         verbose: bool = False,
         metadata: dict[str, Any] | None = None,
         memory_config: MemoryConfig | dict[str, Any] | None = None,
+        system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
+        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
+        memory_assets_config: MemoryAssetsConfig | dict[str, Any] | None = None,
+        swarm_config: SwarmConfig | dict[str, Any] | None = None,
         allow_private_in_system_tools: bool | None = None,
     ) -> SessionResponse:
         """Invoke the agent through the AgentOrchestrator."""
@@ -290,6 +302,10 @@ class Agent(BaseScope):
             verbose=verbose,
             metadata=metadata,
             memory_config=memory_config,
+            system_tools_config=system_tools_config,
+            orchestration_config=orchestration_config,
+            memory_assets_config=memory_assets_config,
+            swarm_config=swarm_config,
             allow_private_in_system_tools=allow_private_in_system_tools,
         )
 
@@ -308,6 +324,10 @@ class Agent(BaseScope):
         verbose: bool = False,
         metadata: dict[str, Any] | None = None,
         memory_config: MemoryConfig | dict[str, Any] | None = None,
+        system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
+        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
+        memory_assets_config: MemoryAssetsConfig | dict[str, Any] | None = None,
+        swarm_config: SwarmConfig | dict[str, Any] | None = None,
         allow_private_in_system_tools: bool | None = None,
     ) -> SessionResponse:
         self._validate_invoke_params(force_final_tool, targeted_tools, structured_output)
@@ -315,6 +335,10 @@ class Agent(BaseScope):
             messages,
             metadata=metadata,
             memory_config=memory_config,
+            system_tools_config=system_tools_config,
+            orchestration_config=orchestration_config,
+            memory_assets_config=memory_assets_config,
+            swarm_config=swarm_config,
             allow_private_in_system_tools=allow_private_in_system_tools,
         )
 
@@ -327,6 +351,10 @@ class Agent(BaseScope):
             "stream_response": stream_response,
             "metadata": invocation_state.merged_metadata or None,
             "memory_config": invocation_state.resolved_memory_config,
+            "system_tools_config": invocation_state.resolved_system_tools_config,
+            "orchestration_config": invocation_state.resolved_orchestration_config,
+            "memory_assets_config": invocation_state.resolved_memory_assets_config,
+            "swarm_config": invocation_state.resolved_swarm_config,
             "thread_id": thread_id,
             "verbose": verbose,
         }
@@ -375,6 +403,10 @@ class Agent(BaseScope):
         verbose: bool = False,
         metadata: dict[str, Any] | None = None,
         memory_config: MemoryConfig | dict[str, Any] | None = None,
+        system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
+        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
+        memory_assets_config: MemoryAssetsConfig | dict[str, Any] | None = None,
+        swarm_config: SwarmConfig | dict[str, Any] | None = None,
         allow_private_in_system_tools: bool | None = None,
     ) -> Iterator[SSEEvent]:
         """Stream raw SSE events while executing this agent."""
@@ -383,6 +415,10 @@ class Agent(BaseScope):
             messages,
             metadata=metadata,
             memory_config=memory_config,
+            system_tools_config=system_tools_config,
+            orchestration_config=orchestration_config,
+            memory_assets_config=memory_assets_config,
+            swarm_config=swarm_config,
             allow_private_in_system_tools=allow_private_in_system_tools,
         )
 
@@ -396,6 +432,10 @@ class Agent(BaseScope):
             status_messages=status_messages,
             metadata=invocation_state.merged_metadata or None,
             memory_config=invocation_state.resolved_memory_config,
+            system_tools_config=invocation_state.resolved_system_tools_config,
+            orchestration_config=invocation_state.resolved_orchestration_config,
+            memory_assets_config=invocation_state.resolved_memory_assets_config,
+            swarm_config=invocation_state.resolved_swarm_config,
             thread_id=thread_id,
             verbose=verbose,
         )
@@ -419,6 +459,10 @@ class Agent(BaseScope):
         verbose: bool = False,
         metadata: dict[str, Any] | None = None,
         memory_config: MemoryConfig | dict[str, Any] | None = None,
+        system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
+        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
+        memory_assets_config: MemoryAssetsConfig | dict[str, Any] | None = None,
+        swarm_config: SwarmConfig | dict[str, Any] | None = None,
         allow_private_in_system_tools: bool | None = None,
     ) -> SessionResponse:
         """Async wrapper around :meth:`invoke` that runs the synchronous call in a thread."""
@@ -435,6 +479,10 @@ class Agent(BaseScope):
             verbose=verbose,
             metadata=metadata,
             memory_config=memory_config,
+            system_tools_config=system_tools_config,
+            orchestration_config=orchestration_config,
+            memory_assets_config=memory_assets_config,
+            swarm_config=swarm_config,
             allow_private_in_system_tools=allow_private_in_system_tools,
         )
 
@@ -451,6 +499,10 @@ class Agent(BaseScope):
         verbose: bool = False,
         metadata: dict[str, Any] | None = None,
         memory_config: MemoryConfig | dict[str, Any] | None = None,
+        system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
+        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
+        memory_assets_config: MemoryAssetsConfig | dict[str, Any] | None = None,
+        swarm_config: SwarmConfig | dict[str, Any] | None = None,
         allow_private_in_system_tools: bool | None = None,
     ) -> AsyncIterator[SSEEvent]:
         """Async wrapper around :meth:`stream` that yields events from a worker thread."""
@@ -472,6 +524,10 @@ class Agent(BaseScope):
                     verbose=verbose,
                     metadata=metadata,
                     memory_config=memory_config,
+                    system_tools_config=system_tools_config,
+                    orchestration_config=orchestration_config,
+                    memory_assets_config=memory_assets_config,
+                    swarm_config=swarm_config,
                     allow_private_in_system_tools=allow_private_in_system_tools,
                 )
                 for event in iterator:
@@ -521,6 +577,10 @@ class Agent(BaseScope):
         *,
         metadata: dict[str, Any] | None,
         memory_config: MemoryConfig | dict[str, Any] | None,
+        system_tools_config: SystemToolsConfig | dict[str, Any] | None,
+        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None,
+        memory_assets_config: MemoryAssetsConfig | dict[str, Any] | None,
+        swarm_config: SwarmConfig | dict[str, Any] | None,
         allow_private_in_system_tools: bool | None,
     ) -> _InvocationState:
         prepared_messages = self._prepare_messages(messages)
@@ -528,26 +588,96 @@ class Agent(BaseScope):
         self.reject_reserved_memory_metadata_keys(metadata)
         merged_metadata = dict(metadata or {})
         resolved_memory_config = self.resolve_memory_config(memory_config)
+        resolved_system_tools_config = self.resolve_system_tools_config(
+            system_tools_config,
+            allow_private_in_system_tools=allow_private_in_system_tools,
+        )
+        resolved_orchestration_config = self.resolve_orchestration_config(orchestration_config)
         swarm = self.get_swarm()
-        self.apply_memory_assets_to_metadata(
-            merged_metadata,
+        resolved_memory_assets_config = self._resolve_memory_assets_config(
+            memory_assets_config,
             default_agent_id=self.id,
             default_swarm_id=swarm.id if swarm is not None else None,
         )
-        if allow_private_in_system_tools is not None:
-            merged_metadata["allow_private_data_in_system_tools"] = bool(
-                allow_private_in_system_tools
-            )
-        merged_metadata.setdefault("allow_private_data_placeholders_in_system_tools", True)
+        resolved_swarm_config = self._coerce_swarm_config(swarm_config)
 
         return _InvocationState(
             prepared_messages=prepared_messages,
             merged_metadata=merged_metadata,
             resolved_memory_config=resolved_memory_config,
+            resolved_system_tools_config=resolved_system_tools_config,
+            resolved_orchestration_config=resolved_orchestration_config,
+            resolved_memory_assets_config=resolved_memory_assets_config,
+            resolved_swarm_config=resolved_swarm_config,
             swarm=swarm,
             agent_mode=getattr(self, "hook_execution_mode", "tool"),
             swarm_mode=(
                 getattr(swarm, "hook_execution_mode", "tool") if swarm is not None else "tool"
+            ),
+        )
+
+    def _build_memory_assets_config(
+        self,
+        *,
+        default_agent_id: str | None = None,
+        default_swarm_id: str | None = None,
+    ) -> MemoryAssetsConfig | None:
+        skills, resources = self.build_memory_asset_payloads(
+            default_agent_id=default_agent_id,
+            default_swarm_id=default_swarm_id,
+        )
+        if not skills and not resources:
+            return None
+        return MemoryAssetsConfig.model_validate(
+            {
+                "defined_skills": skills,
+                "bound_resources": resources,
+            }
+        )
+
+    @staticmethod
+    def _coerce_memory_assets_config(value: Any) -> MemoryAssetsConfig | None:
+        if value is None:
+            return None
+        if isinstance(value, MemoryAssetsConfig):
+            return value
+        if isinstance(value, dict):
+            return MemoryAssetsConfig.model_validate(value)
+        raise TypeError("memory_assets_config must be a MemoryAssetsConfig, dictionary, or None")
+
+    @staticmethod
+    def _coerce_swarm_config(value: Any) -> SwarmConfig | None:
+        if value is None:
+            return None
+        if isinstance(value, SwarmConfig):
+            return value
+        if isinstance(value, dict):
+            return SwarmConfig.model_validate(value)
+        raise TypeError("swarm_config must be a SwarmConfig, dictionary, or None")
+
+    def _resolve_memory_assets_config(
+        self,
+        override: Any = None,
+        *,
+        default_agent_id: str | None = None,
+        default_swarm_id: str | None = None,
+    ) -> MemoryAssetsConfig | None:
+        base = self._build_memory_assets_config(
+            default_agent_id=default_agent_id,
+            default_swarm_id=default_swarm_id,
+        )
+        override_config = self._coerce_memory_assets_config(override)
+        if override_config is None:
+            return base
+        if base is None:
+            return override_config
+        return MemoryAssetsConfig(
+            defined_skills=override_config.defined_skills or base.defined_skills,
+            bound_resources=override_config.bound_resources or base.bound_resources,
+            recall_turn_active=(
+                override_config.recall_turn_active
+                if override_config.recall_turn_active is not None
+                else base.recall_turn_active
             ),
         )
 
@@ -601,6 +731,10 @@ class Agent(BaseScope):
         messages: Sequence[BaseMessage],
         targeted_tools: list[str] | None = None,
         memory_config: MemoryConfig | dict[str, Any] | None = None,
+        system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
+        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
+        memory_assets_config: MemoryAssetsConfig | dict[str, Any] | None = None,
+        swarm_config: SwarmConfig | dict[str, Any] | None = None,
         stream_response: bool = True,
     ) -> SessionRequest:
         """Compile agent state via the AgentOrchestrator."""
@@ -608,6 +742,14 @@ class Agent(BaseScope):
             messages,
             targeted_tools=targeted_tools,
             memory_config=self.resolve_memory_config(memory_config),
+            system_tools_config=self.resolve_system_tools_config(system_tools_config),
+            orchestration_config=self.resolve_orchestration_config(orchestration_config),
+            memory_assets_config=self._resolve_memory_assets_config(
+                memory_assets_config,
+                default_agent_id=self.id,
+                default_swarm_id=getattr(self.get_swarm(), "id", None),
+            ),
+            swarm_config=self._coerce_swarm_config(swarm_config),
             stream_response=stream_response,
         )
 

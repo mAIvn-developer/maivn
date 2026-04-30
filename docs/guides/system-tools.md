@@ -273,20 +273,23 @@ Supported modes:
 Supported approval values:
 
 - `none`: no additional approval metadata required
-- `explicit`: invocation metadata must explicitly approve that target arg
+- `explicit`: invocation `system_tools_config` must explicitly approve that target arg
 
-### Invocation Metadata
+### Invocation System Tools Config
 
-Use invocation metadata to narrow which system tools are allowed for a run and which `compose_artifact` targets are explicitly approved:
+Use `SystemToolsConfig` to narrow which system tools are allowed for a run and which
+`compose_artifact` targets are explicitly approved:
 
 ```python
+from maivn import SystemToolsConfig
+
 response = agent.invoke(
     [HumanMessage(content='Draft and validate the SQL artifact')],
     force_final_tool=True,
-    metadata={
-        'allowed_system_tools': ['compose_artifact'],
-        'approved_compose_artifact_targets': ['validate_query_artifact.query'],
-    },
+    system_tools_config=SystemToolsConfig(
+        allowed_tools=['compose_artifact'],
+        approved_compose_artifact_targets=['validate_query_artifact.query'],
+    ),
 )
 ```
 
@@ -380,15 +383,17 @@ agent = Agent(
 )
 ```
 
-When you need hard runtime boundaries, pass invocation metadata:
+When you need hard runtime boundaries, pass invocation system-tool config:
 
 ```python
+from maivn import SystemToolsConfig
+
 response = agent.invoke(
     [HumanMessage(content='Validate the generated SQL artifact')],
-    metadata={
-        'allowed_system_tools': ['compose_artifact'],
-        'approved_compose_artifact_targets': ['validate_query_artifact.query'],
-    },
+    system_tools_config=SystemToolsConfig(
+        allowed_tools=['compose_artifact'],
+        approved_compose_artifact_targets=['validate_query_artifact.query'],
+    ),
 )
 ```
 
@@ -474,9 +479,9 @@ Every system-tool invocation still passes through the final protected-data bound
 System tools are still provisioned by the runtime, but developers can influence use at the SDK layer:
 
 - Deployment administrators control availability, quotas, and deployment policy
-- Invocation `metadata['allowed_system_tools']` can narrow which system tools may run for a session
+- Invocation `system_tools_config.allowed_tools` can narrow which system tools may run for a session
 - `@compose_artifact_policy(...)` controls whether a specific argument can use `compose_artifact`
-- `metadata['approved_compose_artifact_targets']` provides explicit approval for args that require it
+- `system_tools_config.approved_compose_artifact_targets` provides explicit approval for args that require it
 
 Contact your administrator for:
 

@@ -7,7 +7,7 @@ import threading
 from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any, cast
 
-from maivn_shared import SessionResponse
+from maivn_shared import SessionExecutionConfig, SessionResponse
 from pydantic import ValidationError
 
 from maivn._internal.core import SessionEndpoints, SSEEvent
@@ -310,18 +310,17 @@ def _report_error(reporter: BaseReporter, response: SessionResponse) -> None:
 
 
 def _set_state_delivery_mode(state: Any, delivery_mode: str) -> None:
-    """Persist the SDK delivery mode in session metadata for server-side routing."""
-    if not hasattr(state, "metadata"):
+    """Persist the SDK delivery mode in typed execution config for server routing."""
+    if not hasattr(state, "execution_config"):
         return
 
-    metadata = getattr(state, "metadata", None)
-    if not isinstance(metadata, dict):
-        metadata = {}
+    execution_config = getattr(state, "execution_config", None)
+    if isinstance(execution_config, SessionExecutionConfig):
+        state.execution_config = execution_config.model_copy(
+            update={"sdk_delivery_mode": delivery_mode}
+        )
     else:
-        metadata = dict(metadata)
-
-    metadata["maivn_sdk_delivery_mode"] = delivery_mode
-    state.metadata = metadata
+        state.execution_config = SessionExecutionConfig(sdk_delivery_mode=delivery_mode)
 
 
 __all__ = ["execute_invoke", "execute_stream"]

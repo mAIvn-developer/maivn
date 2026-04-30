@@ -17,8 +17,10 @@ if TYPE_CHECKING:
 from maivn_shared import (
     MemoryConfig,
     PrivateData,
+    SessionOrchestrationConfig,
     SessionResponse,
     SystemMessage,
+    SystemToolsConfig,
     create_uuid,
 )
 from pydantic import (
@@ -142,6 +144,20 @@ class BaseScope(
             "(for example level, summarization, retrieval, and persistence behavior)."
         ),
     )
+    system_tools_config: SystemToolsConfig = Field(
+        default_factory=SystemToolsConfig,
+        description=(
+            "Typed system-tool defaults applied to every invocation for this scope "
+            "(for example allowed system tools and compose_artifact approvals)."
+        ),
+    )
+    orchestration_config: SessionOrchestrationConfig = Field(
+        default_factory=SessionOrchestrationConfig,
+        description=(
+            "Typed orchestration defaults applied to every invocation for this scope "
+            "(for example reevaluate loop and cycle limits)."
+        ),
+    )
     skills: list[dict[str, Any]] = Field(
         default_factory=list,
         description=(
@@ -218,6 +234,30 @@ class BaseScope(
             raise TypeError("memory_config must be a MemoryConfig, dictionary, or None")
         return MemoryConfig.model_validate(v)
 
+    @field_validator("system_tools_config", mode="before")
+    @classmethod
+    def _normalize_system_tools_config(cls, v: Any) -> SystemToolsConfig:
+        if v is None:
+            return SystemToolsConfig()
+        if isinstance(v, SystemToolsConfig):
+            return v
+        if not isinstance(v, dict):
+            raise TypeError("system_tools_config must be a SystemToolsConfig, dictionary, or None")
+        return SystemToolsConfig.model_validate(v)
+
+    @field_validator("orchestration_config", mode="before")
+    @classmethod
+    def _normalize_orchestration_config(cls, v: Any) -> SessionOrchestrationConfig:
+        if v is None:
+            return SessionOrchestrationConfig()
+        if isinstance(v, SessionOrchestrationConfig):
+            return v
+        if not isinstance(v, dict):
+            raise TypeError(
+                "orchestration_config must be a SessionOrchestrationConfig, dictionary, or None"
+            )
+        return SessionOrchestrationConfig.model_validate(v)
+
     @field_validator("skills", mode="before")
     @classmethod
     def _normalize_skills(cls, v: Any) -> list[dict[str, Any]]:
@@ -252,6 +292,58 @@ class BaseScope(
     def id(self) -> str:
         name = self.name or self.__class__.__name__
         return create_uuid(f"{self.__class__.__name__}:{name}")
+
+    # MARK: - System Tool Configuration
+
+    @staticmethod
+    def coerce_system_tools_config(value: Any) -> SystemToolsConfig | None:
+        if value is None:
+            return None
+        if isinstance(value, SystemToolsConfig):
+            return value
+        if isinstance(value, dict):
+            return SystemToolsConfig.model_validate(value)
+        raise TypeError("system_tools_config must be a SystemToolsConfig, dictionary, or None")
+
+    def resolve_system_tools_config(
+        self,
+        override: Any = None,
+        *,
+        allow_private_in_system_tools: bool | None = None,
+    ) -> SystemToolsConfig | None:
+        configs: list[SystemToolsConfig | None] = [
+            SystemToolsConfig(allow_private_data_placeholders=True),
+            self.system_tools_config,
+        ]
+        if self.allow_private_in_system_tools:
+            configs.append(SystemToolsConfig(allow_private_data=True))
+        configs.append(self.coerce_system_tools_config(override))
+        if allow_private_in_system_tools is not None:
+            configs.append(SystemToolsConfig(allow_private_data=allow_private_in_system_tools))
+        return SystemToolsConfig.merge(*configs)
+
+    # MARK: - Orchestration Configuration
+
+    @staticmethod
+    def coerce_orchestration_config(value: Any) -> SessionOrchestrationConfig | None:
+        if value is None:
+            return None
+        if isinstance(value, SessionOrchestrationConfig):
+            return value
+        if isinstance(value, dict):
+            return SessionOrchestrationConfig.model_validate(value)
+        raise TypeError(
+            "orchestration_config must be a SessionOrchestrationConfig, dictionary, or None"
+        )
+
+    def resolve_orchestration_config(
+        self,
+        override: Any = None,
+    ) -> SessionOrchestrationConfig | None:
+        return SessionOrchestrationConfig.merge(
+            self.orchestration_config,
+            self.coerce_orchestration_config(override),
+        )
 
     # MARK: - Scheduled Invocation
 

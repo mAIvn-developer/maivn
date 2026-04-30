@@ -35,6 +35,10 @@ def build_scope_hook_payload(
         messages=invocation_state.prepared_messages,
         metadata=invocation_state.merged_metadata or None,
         memory_config=invocation_state.resolved_memory_config,
+        system_tools_config=invocation_state.resolved_system_tools_config,
+        orchestration_config=invocation_state.resolved_orchestration_config,
+        memory_assets_config=invocation_state.resolved_memory_assets_config,
+        swarm_config=invocation_state.resolved_swarm_config,
     )
     return {
         "stage": "before",

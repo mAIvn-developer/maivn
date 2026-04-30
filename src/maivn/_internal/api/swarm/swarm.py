@@ -11,9 +11,11 @@ from typing import TYPE_CHECKING, Any
 from maivn_shared import (
     BaseMessage,
     MemoryConfig,
+    SessionOrchestrationConfig,
     SessionRequest,
     SessionResponse,
     SystemMessage,
+    SystemToolsConfig,
 )
 from pydantic import Field, PrivateAttr, model_validator
 from typing_extensions import Self
@@ -137,6 +139,8 @@ class Swarm(BaseScope):
         verbose: bool = False,
         metadata: dict[str, Any] | None = None,
         memory_config: MemoryConfig | dict[str, Any] | None = None,
+        system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
+        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
         allow_private_in_system_tools: bool | None = None,
     ) -> SessionResponse:
         """Invoke the swarm with the given messages."""
@@ -152,6 +156,8 @@ class Swarm(BaseScope):
             stream_response=stream_response,
             metadata=metadata,
             memory_config=memory_config,
+            system_tools_config=system_tools_config,
+            orchestration_config=orchestration_config,
             allow_private_in_system_tools=allow_private_in_system_tools,
         )
 
@@ -174,6 +180,8 @@ class Swarm(BaseScope):
         verbose: bool = False,
         metadata: dict[str, Any] | None = None,
         memory_config: MemoryConfig | dict[str, Any] | None = None,
+        system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
+        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
         allow_private_in_system_tools: bool | None = None,
     ) -> Iterator[SSEEvent]:
         """Stream raw SSE events while executing the swarm."""
@@ -190,6 +198,8 @@ class Swarm(BaseScope):
             status_messages=status_messages,
             metadata=metadata,
             memory_config=memory_config,
+            system_tools_config=system_tools_config,
+            orchestration_config=orchestration_config,
             allow_private_in_system_tools=allow_private_in_system_tools,
         )
 
@@ -211,6 +221,8 @@ class Swarm(BaseScope):
         verbose: bool = False,
         metadata: dict[str, Any] | None = None,
         memory_config: MemoryConfig | dict[str, Any] | None = None,
+        system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
+        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
         allow_private_in_system_tools: bool | None = None,
     ) -> SessionResponse:
         """Async wrapper around :meth:`invoke`."""
@@ -225,6 +237,8 @@ class Swarm(BaseScope):
             verbose=verbose,
             metadata=metadata,
             memory_config=memory_config,
+            system_tools_config=system_tools_config,
+            orchestration_config=orchestration_config,
             allow_private_in_system_tools=allow_private_in_system_tools,
         )
 
@@ -241,6 +255,8 @@ class Swarm(BaseScope):
         verbose: bool = False,
         metadata: dict[str, Any] | None = None,
         memory_config: MemoryConfig | dict[str, Any] | None = None,
+        system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
+        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
         allow_private_in_system_tools: bool | None = None,
     ) -> AsyncIterator[SSEEvent]:
         """Async wrapper around :meth:`stream`."""
@@ -261,6 +277,8 @@ class Swarm(BaseScope):
                     verbose=verbose,
                     metadata=metadata,
                     memory_config=memory_config,
+                    system_tools_config=system_tools_config,
+                    orchestration_config=orchestration_config,
                     allow_private_in_system_tools=allow_private_in_system_tools,
                 )
                 for event in iterator:
@@ -323,6 +341,8 @@ class Swarm(BaseScope):
         status_messages: bool = False,
         metadata: dict[str, Any] | None = None,
         memory_config: MemoryConfig | dict[str, Any] | None = None,
+        system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
+        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
         allow_private_in_system_tools: bool | None = None,
     ) -> tuple[AgentOrchestratorInterface, SessionRequest]:
         entry_agent = self.agents[0]
@@ -338,18 +358,13 @@ class Swarm(BaseScope):
             stream_response=stream_response,
             status_messages=status_messages,
             memory_config=self.resolve_memory_config(memory_config),
+            system_tools_config=self.resolve_system_tools_config(
+                system_tools_config,
+                allow_private_in_system_tools=allow_private_in_system_tools,
+            ),
+            orchestration_config=self.resolve_orchestration_config(orchestration_config),
+            metadata=metadata,
         )
-
-        merged_metadata = dict(state.metadata or {})
-        if metadata:
-            merged_metadata.update(metadata)
-        if allow_private_in_system_tools is not None:
-            merged_metadata["allow_private_data_in_system_tools"] = bool(
-                allow_private_in_system_tools
-            )
-        merged_metadata.setdefault("allow_private_data_placeholders_in_system_tools", True)
-        if merged_metadata:
-            state.metadata = merged_metadata
 
         self._configure_state(
             state,
@@ -394,7 +409,11 @@ class Swarm(BaseScope):
         invocation_tool_map: dict[str, str],
     ) -> dict[str, Any]:
         """Build a roster entry for an agent."""
-        return _swarm_build_agent_roster_entry(self, agent, invocation_tool_map)
+        return _swarm_build_agent_roster_entry(
+            self,
+            agent,
+            invocation_tool_map,
+        ).model_dump(exclude_none=True)
 
     # MARK: - Tool Registration
 
