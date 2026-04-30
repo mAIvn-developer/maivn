@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING, Any
 from .serialization import logger
 
 if TYPE_CHECKING:
-    from .bridge import EventBridge, UIEvent
+    from .bridge import EventBridge
+    from .ui_event import UIEvent
 
 
 # MARK: History Replay

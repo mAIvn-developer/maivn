@@ -39,13 +39,30 @@ class _StubScope:
         return self.invoke(*args, **kwargs)
 
 
+async def _wait_for_call_count(
+    scope: _StubScope,
+    expected_count: int,
+    *,
+    timeout_seconds: float,
+) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_seconds
+    while True:
+        with scope.lock:
+            call_count = len(scope.calls)
+        if call_count >= expected_count or loop.time() >= deadline:
+            return
+        await asyncio.sleep(0.02)
+
+
 @pytest.mark.asyncio
 async def test_runs_fire_and_callbacks_invoked() -> None:
     scope = _StubScope()
     builder = CronInvocationBuilder(
         scope,  # type: ignore[arg-type]
-        IntervalSchedule(timedelta(milliseconds=100), start=datetime.now(tz=timezone.utc)),
+        IntervalSchedule(timedelta(milliseconds=1), start=datetime.now(tz=timezone.utc)),
         max_runs=3,
+        max_overlap=3,
     )
     fire_records: list = []
     success_records: list = []
@@ -56,7 +73,7 @@ async def test_runs_fire_and_callbacks_invoked() -> None:
     job.on_success(lambda r: success_records.append(r))
     job.on_error(lambda r: error_records.append(r))
 
-    await asyncio.sleep(0.6)
+    await _wait_for_call_count(scope, 3, timeout_seconds=2.0)
     job.stop(drain=True, timeout=2)
 
     assert len(scope.calls) >= 3

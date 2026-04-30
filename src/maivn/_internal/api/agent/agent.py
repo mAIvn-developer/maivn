@@ -5,9 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from collections.abc import AsyncIterator, Callable, Iterator, Sequence
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
-from weakref import WeakValueDictionary
 
 from maivn_shared import (
     BaseDependency,
@@ -18,7 +16,6 @@ from maivn_shared import (
     SessionRequest,
     SessionResponse,
     SwarmConfig,
-    SystemMessage,
     SystemToolsConfig,
 )
 from maivn_shared.domain.entities.dependencies import AwaitForDependency, ReevaluateDependency
@@ -34,7 +31,9 @@ from maivn._internal.core.services.team_dependencies import (
     resolve_team_control_reference,
 )
 
+from ..async_stream import stream_in_worker_thread
 from ..base_scope import BaseScope
+from .client_cache import get_or_create_client
 from .hooks import (
     build_scope_hook_payload,
     get_after_scope_hooks,
@@ -43,31 +42,22 @@ from .hooks import (
     scope_hooks_enabled,
     wrap_stream_with_hooks,
 )
+from .invocation_helpers import (
+    build_memory_assets_config,
+    coerce_memory_assets_config,
+    coerce_swarm_config,
+    collect_all_tools,
+    prepare_invocation_state,
+    prepare_messages,
+    resolve_memory_assets_config,
+    validate_final_tool_exists,
+    validate_invoke_params,
+)
+from .invocation_state import InvocationState as _InvocationState
 
 if TYPE_CHECKING:
     from ..client import Client
     from ..swarm import Swarm
-
-
-# MARK: Client Cache
-
-_CLIENT_CACHE: WeakValueDictionary[tuple[str, str, str, float | int | None], Client] = (
-    WeakValueDictionary()
-)
-
-
-@dataclass(frozen=True)
-class _InvocationState:
-    prepared_messages: list[BaseMessage]
-    merged_metadata: dict[str, Any]
-    resolved_memory_config: MemoryConfig | None
-    resolved_system_tools_config: SystemToolsConfig | None
-    resolved_orchestration_config: SessionOrchestrationConfig | None
-    resolved_memory_assets_config: MemoryAssetsConfig | None
-    resolved_swarm_config: SwarmConfig | None
-    swarm: Swarm | None
-    agent_mode: str
-    swarm_mode: str
 
 
 # MARK: Agent
@@ -166,25 +156,7 @@ class Agent(BaseScope):
     @staticmethod
     def _get_or_create_client(api_key: str) -> Client:
         """Get cached client or create new one."""
-        from maivn._internal.utils.configuration import get_configuration
-
-        from ..client import Client
-
-        config = get_configuration()
-        cache_key = (
-            api_key,
-            config.server.base_url,
-            config.server.mock_base_url,
-            config.server.timeout_seconds,
-        )
-
-        cached = _CLIENT_CACHE.get(cache_key)
-        if cached is not None:
-            return cached
-
-        client = Client(api_key=api_key)
-        _CLIENT_CACHE[cache_key] = client
-        return client
+        return get_or_create_client(api_key)
 
     # MARK: - Tool Management
 
@@ -506,48 +478,29 @@ class Agent(BaseScope):
         allow_private_in_system_tools: bool | None = None,
     ) -> AsyncIterator[SSEEvent]:
         """Async wrapper around :meth:`stream` that yields events from a worker thread."""
-        loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[Any] = asyncio.Queue()
-        sentinel = object()
 
-        def _drain() -> None:
-            try:
-                iterator = self.stream(
-                    messages,
-                    force_final_tool=force_final_tool,
-                    targeted_tools=targeted_tools,
-                    model=model,
-                    reasoning=reasoning,
-                    stream_response=stream_response,
-                    status_messages=status_messages,
-                    thread_id=thread_id,
-                    verbose=verbose,
-                    metadata=metadata,
-                    memory_config=memory_config,
-                    system_tools_config=system_tools_config,
-                    orchestration_config=orchestration_config,
-                    memory_assets_config=memory_assets_config,
-                    swarm_config=swarm_config,
-                    allow_private_in_system_tools=allow_private_in_system_tools,
-                )
-                for event in iterator:
-                    asyncio.run_coroutine_threadsafe(queue.put(event), loop).result()
-            except Exception as exc:  # noqa: BLE001
-                asyncio.run_coroutine_threadsafe(queue.put(exc), loop).result()
-            finally:
-                asyncio.run_coroutine_threadsafe(queue.put(sentinel), loop).result()
+        def _stream() -> Iterator[SSEEvent]:
+            return self.stream(
+                messages,
+                force_final_tool=force_final_tool,
+                targeted_tools=targeted_tools,
+                model=model,
+                reasoning=reasoning,
+                stream_response=stream_response,
+                status_messages=status_messages,
+                thread_id=thread_id,
+                verbose=verbose,
+                metadata=metadata,
+                memory_config=memory_config,
+                system_tools_config=system_tools_config,
+                orchestration_config=orchestration_config,
+                memory_assets_config=memory_assets_config,
+                swarm_config=swarm_config,
+                allow_private_in_system_tools=allow_private_in_system_tools,
+            )
 
-        worker = asyncio.get_running_loop().run_in_executor(None, _drain)
-        try:
-            while True:
-                item = await queue.get()
-                if item is sentinel:
-                    break
-                if isinstance(item, BaseException):
-                    raise item
-                yield item
-        finally:
-            await worker
+        async for event in stream_in_worker_thread(_stream):
+            yield event
 
     # MARK: - Invocation Helpers
 
@@ -583,37 +536,16 @@ class Agent(BaseScope):
         swarm_config: SwarmConfig | dict[str, Any] | None,
         allow_private_in_system_tools: bool | None,
     ) -> _InvocationState:
-        prepared_messages = self._prepare_messages(messages)
-
-        self.reject_reserved_memory_metadata_keys(metadata)
-        merged_metadata = dict(metadata or {})
-        resolved_memory_config = self.resolve_memory_config(memory_config)
-        resolved_system_tools_config = self.resolve_system_tools_config(
-            system_tools_config,
+        return prepare_invocation_state(
+            self,
+            messages,
+            metadata=metadata,
+            memory_config=memory_config,
+            system_tools_config=system_tools_config,
+            orchestration_config=orchestration_config,
+            memory_assets_config=memory_assets_config,
+            swarm_config=swarm_config,
             allow_private_in_system_tools=allow_private_in_system_tools,
-        )
-        resolved_orchestration_config = self.resolve_orchestration_config(orchestration_config)
-        swarm = self.get_swarm()
-        resolved_memory_assets_config = self._resolve_memory_assets_config(
-            memory_assets_config,
-            default_agent_id=self.id,
-            default_swarm_id=swarm.id if swarm is not None else None,
-        )
-        resolved_swarm_config = self._coerce_swarm_config(swarm_config)
-
-        return _InvocationState(
-            prepared_messages=prepared_messages,
-            merged_metadata=merged_metadata,
-            resolved_memory_config=resolved_memory_config,
-            resolved_system_tools_config=resolved_system_tools_config,
-            resolved_orchestration_config=resolved_orchestration_config,
-            resolved_memory_assets_config=resolved_memory_assets_config,
-            resolved_swarm_config=resolved_swarm_config,
-            swarm=swarm,
-            agent_mode=getattr(self, "hook_execution_mode", "tool"),
-            swarm_mode=(
-                getattr(swarm, "hook_execution_mode", "tool") if swarm is not None else "tool"
-            ),
         )
 
     def _build_memory_assets_config(
@@ -622,38 +554,19 @@ class Agent(BaseScope):
         default_agent_id: str | None = None,
         default_swarm_id: str | None = None,
     ) -> MemoryAssetsConfig | None:
-        skills, resources = self.build_memory_asset_payloads(
+        return build_memory_assets_config(
+            self,
             default_agent_id=default_agent_id,
             default_swarm_id=default_swarm_id,
-        )
-        if not skills and not resources:
-            return None
-        return MemoryAssetsConfig.model_validate(
-            {
-                "defined_skills": skills,
-                "bound_resources": resources,
-            }
         )
 
     @staticmethod
     def _coerce_memory_assets_config(value: Any) -> MemoryAssetsConfig | None:
-        if value is None:
-            return None
-        if isinstance(value, MemoryAssetsConfig):
-            return value
-        if isinstance(value, dict):
-            return MemoryAssetsConfig.model_validate(value)
-        raise TypeError("memory_assets_config must be a MemoryAssetsConfig, dictionary, or None")
+        return coerce_memory_assets_config(value)
 
     @staticmethod
     def _coerce_swarm_config(value: Any) -> SwarmConfig | None:
-        if value is None:
-            return None
-        if isinstance(value, SwarmConfig):
-            return value
-        if isinstance(value, dict):
-            return SwarmConfig.model_validate(value)
-        raise TypeError("swarm_config must be a SwarmConfig, dictionary, or None")
+        return coerce_swarm_config(value)
 
     def _resolve_memory_assets_config(
         self,
@@ -662,23 +575,11 @@ class Agent(BaseScope):
         default_agent_id: str | None = None,
         default_swarm_id: str | None = None,
     ) -> MemoryAssetsConfig | None:
-        base = self._build_memory_assets_config(
+        return resolve_memory_assets_config(
+            self,
+            override,
             default_agent_id=default_agent_id,
             default_swarm_id=default_swarm_id,
-        )
-        override_config = self._coerce_memory_assets_config(override)
-        if override_config is None:
-            return base
-        if base is None:
-            return override_config
-        return MemoryAssetsConfig(
-            defined_skills=override_config.defined_skills or base.defined_skills,
-            bound_resources=override_config.bound_resources or base.bound_resources,
-            recall_turn_active=(
-                override_config.recall_turn_active
-                if override_config.recall_turn_active is not None
-                else base.recall_turn_active
-            ),
         )
 
     def _validate_invoke_params(
@@ -688,43 +589,22 @@ class Agent(BaseScope):
         structured_output: type[PydanticBaseModel] | None,
     ) -> None:
         """Validate invocation parameters for mutual exclusivity."""
-        self.validate_tool_configuration()
-
-        if structured_output is not None and targeted_tools:
-            raise ValueError("structured_output and targeted_tools are mutually exclusive.")
-        if force_final_tool and targeted_tools:
-            raise ValueError("force_final_tool and targeted_tools are mutually exclusive.")
-        if force_final_tool and structured_output is None:
-            self._validate_final_tool_exists()
+        validate_invoke_params(self, force_final_tool, targeted_tools, structured_output)
 
     def _validate_final_tool_exists(self) -> None:
         """Ensure at least one final_tool exists when force_final_tool is True."""
-        all_tools = self._collect_all_tools()
-        final_tools = [t for t in all_tools if getattr(t, "final_tool", False)]
-        if not final_tools:
-            raise ValueError(
-                f"force_final_tool=True requires at least one tool with final_tool=True. "
-                f"Agent '{self.name}' has {len(all_tools)} tool(s) but none are final."
-            )
+        validate_final_tool_exists(self)
 
     def _collect_all_tools(self) -> list[Any]:
         """Collect all tools from agent and parent swarm."""
-        all_tools = list(self.list_tools())
-        swarm = self.get_swarm()
-        if swarm is not None:
-            all_tools.extend(swarm.list_tools())
-        return all_tools
+        return collect_all_tools(self)
 
     def _prepare_messages(
         self,
         messages: Sequence[BaseMessage],
     ) -> list[BaseMessage]:
         """Prepare messages, injecting system message if needed."""
-        messages_list = list(messages)
-        has_system = any(isinstance(m, SystemMessage) for m in messages_list)
-        if not has_system and self._system_message is not None:
-            messages_list = [self._system_message, *messages_list]
-        return messages_list
+        return prepare_messages(self, messages)
 
     def compile_state(
         self,

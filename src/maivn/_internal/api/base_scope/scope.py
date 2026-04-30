@@ -1,24 +1,16 @@
-"""Base scope implementation for maivn SDK internals.
-Defines shared tool registration, compilation, and dependency wiring for Agent/Swarm.
-"""
+"""Base scope implementation for maivn SDK internals."""
 
 from __future__ import annotations
 
-import asyncio
-from collections.abc import Callable, Iterable
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
-from datetime import timezone as dt_timezone
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
-    from ..scheduling.builder import CronInvocationBuilder
+    pass
 
 from maivn_shared import (
     MemoryConfig,
-    PrivateData,
     SessionOrchestrationConfig,
-    SessionResponse,
     SystemMessage,
     SystemToolsConfig,
     create_uuid,
@@ -42,50 +34,13 @@ from maivn._internal.core.interfaces.resolvers import ScopeResolverInterface
 from maivn._internal.core.registrars import ToolRegistrar
 from maivn._internal.core.services.toolify import ToolifyService
 
+from .batch import BaseScopeBatchMixin
 from .mcp import McpRegistry
 from .memory import BaseScopeMemoryMixin
+from .normalization import private_data_list_to_dict
 from .runtime import BaseScopeInitializationMixin
+from .scheduling import BaseScopeSchedulingMixin
 from .tooling import BaseScopeToolingMixin
-
-# MARK: Helpers
-
-
-def _private_data_list_to_dict(items: list[Any]) -> dict[str, Any]:
-    """Convert a list of PrivateData objects to a key-value dict.
-
-    Each PrivateData must have a ``name`` when used in ``private_data``
-    (unlike ``known_pii_values`` where names are optional and auto-generated).
-    """
-    result: dict[str, Any] = {}
-    counter = 0
-    for item in items:
-        if isinstance(item, PrivateData):
-            pd = item
-        elif isinstance(item, dict) and "value" in item:
-            pd = PrivateData.model_validate(item)
-        else:
-            raise TypeError(
-                'private_data list entries must be PrivateData objects or dicts with a "value" key'
-            )
-        key = pd.name
-        if not key:
-            counter += 1
-            key = f"_private_{counter}"
-        elif key in result:
-            raise ValueError(f'duplicate private_data name: "{key}"')
-        result[key] = pd.value
-    return result
-
-
-def _resolve_max_concurrency(max_concurrency: int | None, input_count: int) -> int | None:
-    if max_concurrency is not None and max_concurrency < 1:
-        raise ValueError("max_concurrency must be greater than 0.")
-    if input_count < 1:
-        return 0
-    if max_concurrency is None:
-        return None
-    return min(max_concurrency, input_count)
-
 
 # MARK: Base Scope
 
@@ -94,6 +49,8 @@ class BaseScope(
     BaseScopeToolingMixin,
     BaseScopeInitializationMixin,
     BaseScopeMemoryMixin,
+    BaseScopeSchedulingMixin,
+    BaseScopeBatchMixin,
     BaseModel,
 ):
     """Base abstract scope for tool registration and dependency management.
@@ -220,7 +177,7 @@ class BaseScope(
         if isinstance(v, dict):
             return v
         if isinstance(v, list):
-            return _private_data_list_to_dict(v)
+            return private_data_list_to_dict(v)
         raise TypeError("private_data must be a dictionary, list of PrivateData, or None")
 
     @field_validator("memory_config", mode="before")
@@ -344,179 +301,6 @@ class BaseScope(
             self.orchestration_config,
             self.coerce_orchestration_config(override),
         )
-
-    # MARK: - Scheduled Invocation
-
-    def cron(
-        self,
-        expression: str,
-        *,
-        tz: str | dt_timezone | None = None,
-        jitter: Any = None,
-        name: str | None = None,
-        misfire: Literal["skip", "fire_now", "coalesce"] = "coalesce",
-        max_overlap: int = 1,
-        overlap_policy: Literal["skip", "queue", "replace"] = "skip",
-        start_at: datetime | None = None,
-        end_at: datetime | None = None,
-        max_runs: int | None = None,
-        retry: Any = None,
-        emit_events: bool = False,
-    ) -> CronInvocationBuilder:
-        """Build a scheduled invocation driven by a cron expression."""
-        from ..scheduling.builder import CronInvocationBuilder
-        from ..scheduling.schedule import CronSchedule
-
-        return CronInvocationBuilder(
-            self,
-            CronSchedule(expression, tz=tz),
-            name=name,
-            jitter=jitter,
-            misfire=misfire,
-            max_overlap=max_overlap,
-            overlap_policy=overlap_policy,
-            start_at=start_at,
-            end_at=end_at,
-            max_runs=max_runs,
-            retry=retry,
-            emit_events=emit_events,
-        )
-
-    def every(
-        self,
-        interval: timedelta | float | int,
-        *,
-        tz: str | dt_timezone | None = None,
-        start: datetime | None = None,
-        jitter: Any = None,
-        name: str | None = None,
-        misfire: Literal["skip", "fire_now", "coalesce"] = "coalesce",
-        max_overlap: int = 1,
-        overlap_policy: Literal["skip", "queue", "replace"] = "skip",
-        end_at: datetime | None = None,
-        max_runs: int | None = None,
-        retry: Any = None,
-        emit_events: bool = False,
-    ) -> CronInvocationBuilder:
-        """Build a scheduled invocation that fires every ``interval``."""
-        from ..scheduling.builder import CronInvocationBuilder
-        from ..scheduling.schedule import IntervalSchedule
-
-        if not isinstance(interval, timedelta):
-            interval = timedelta(seconds=float(interval))
-        return CronInvocationBuilder(
-            self,
-            IntervalSchedule(interval, start=start, tz=tz),
-            name=name,
-            jitter=jitter,
-            misfire=misfire,
-            max_overlap=max_overlap,
-            overlap_policy=overlap_policy,
-            end_at=end_at,
-            max_runs=max_runs,
-            retry=retry,
-            emit_events=emit_events,
-        )
-
-    def at(
-        self,
-        when: datetime,
-        *,
-        tz: str | dt_timezone | None = None,
-        jitter: Any = None,
-        name: str | None = None,
-        retry: Any = None,
-        emit_events: bool = False,
-    ) -> CronInvocationBuilder:
-        """Build a one-shot scheduled invocation that fires at ``when``."""
-        from ..scheduling.builder import CronInvocationBuilder
-        from ..scheduling.schedule import AtSchedule
-
-        return CronInvocationBuilder(
-            self,
-            AtSchedule(when, tz=tz),
-            name=name,
-            jitter=jitter,
-            max_runs=1,
-            retry=retry,
-            emit_events=emit_events,
-        )
-
-    # MARK: - Batch Invocation
-
-    def batch(
-        self,
-        inputs: Iterable[Any],
-        *,
-        max_concurrency: int | None = None,
-        **invoke_kwargs: Any,
-    ) -> list[SessionResponse]:
-        """Invoke this scope for multiple inputs concurrently.
-
-        Args:
-            inputs: Iterable of first-argument values to pass to ``invoke``.
-            max_concurrency: Maximum number of invoke calls to run at once.
-            **invoke_kwargs: Keyword arguments shared by every invoke call.
-
-        Returns:
-            Responses in the same order as ``inputs``.
-        """
-        input_items = list(inputs)
-        max_workers = _resolve_max_concurrency(max_concurrency, len(input_items))
-        if max_workers == 0:
-            return []
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(self._invoke_batch_item, item, dict(invoke_kwargs))
-                for item in input_items
-            ]
-            return [future.result() for future in futures]
-
-    async def abatch(
-        self,
-        inputs: Iterable[Any],
-        *,
-        max_concurrency: int | None = None,
-        **invoke_kwargs: Any,
-    ) -> list[SessionResponse]:
-        """Asynchronously invoke this scope for multiple inputs concurrently.
-
-        Args:
-            inputs: Iterable of first-argument values to pass to ``invoke``.
-            max_concurrency: Maximum number of invoke calls to run at once.
-            **invoke_kwargs: Keyword arguments shared by every invoke call.
-
-        Returns:
-            Responses in the same order as ``inputs``.
-        """
-        input_items = list(inputs)
-        max_workers = _resolve_max_concurrency(max_concurrency, len(input_items))
-        if max_workers == 0:
-            return []
-
-        loop = asyncio.get_running_loop()
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            tasks = [
-                loop.run_in_executor(
-                    executor,
-                    self._invoke_batch_item,
-                    item,
-                    dict(invoke_kwargs),
-                )
-                for item in input_items
-            ]
-            return list(await asyncio.gather(*tasks))
-
-    def _invoke_batch_item(
-        self,
-        input_item: Any,
-        invoke_kwargs: dict[str, Any],
-    ) -> SessionResponse:
-        invoke_fn = getattr(self, "invoke", None)
-        if invoke_fn is None:
-            raise AttributeError("Scope does not support invoke().")
-        return invoke_fn(input_item, **invoke_kwargs)
 
 
 # MARK: Model Rebuild
