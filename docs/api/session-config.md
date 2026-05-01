@@ -307,6 +307,7 @@ SwarmAgentConfig(
     included_nested_synthesis_guidance: str | None = None,
     has_final_tool: bool = False,
     invocation_tool_id: str | None = None,
+    invokes_via_dependency: list[str] = [],
     memory_config: MemoryConfig | None = None,
     memory_defined_skills: list[MemorySkillConfig] = [],
     memory_bound_resources: list[MemoryResourceConfig] = [],

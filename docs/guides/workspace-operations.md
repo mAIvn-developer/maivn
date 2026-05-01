@@ -43,11 +43,12 @@ Operational guidance:
 
 ### Project Memory Operations
 
-Project workspaces now include dedicated memory pages:
+Project workspaces include dedicated memory pages, listed in the sidebar in this
+order:
 
-- `Memory -> Skills`
-- `Memory -> Insights`
-- `Memory -> Resources`
+- `Memory Resources` (`/projects/{project_id}/memory/resources`)
+- `Memory Skills` (`/projects/{project_id}/memory/skills`)
+- `Memory Insights` (`/projects/{project_id}/memory/insights`)
 
 Use these pages to curate reusable memory assets and manage lifecycle state (create/update/bind/promote/delete/restore).
 

@@ -305,7 +305,7 @@ They shouldn't be. If you see this:
 
 Before debugging, verify:
 
-- [ ] `MAIVN_API_KEY` is set
+- [ ] `MAIVN_API_KEY` (or `MAIVN_DEV_API_KEY` for development) is set
 - [ ] maivn server is running and accessible
 - [ ] Network connectivity to server
 - [ ] Correct Python version (3.11+)

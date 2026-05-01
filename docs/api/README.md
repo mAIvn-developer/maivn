@@ -16,12 +16,16 @@ from maivn import (
     BaseScope,
     MCPServer,
     MCPAutoSetup,
+    MCPSoftErrorHandling,
 
     # Decorators
     depends_on_tool,
     depends_on_agent,
     depends_on_private_data,
     depends_on_interrupt,
+    depends_on_await_for,
+    depends_on_reevaluate,
+    compose_artifact_policy,
 
     # Configuration
     ConfigurationBuilder,
@@ -30,8 +34,11 @@ from maivn import (
     MemoryAssetsConfig,
     MemoryConfig,
     MemoryInsightExtractionConfig,
+    MemoryLevel,
+    MemoryPersistenceMode,
     MemoryResourceConfig,
     MemoryRetrievalConfig,
+    MemorySharingScope,
     MemorySkillConfig,
     MemorySkillExtractionConfig,
     SessionExecutionConfig,
@@ -41,28 +48,70 @@ from maivn import (
     SwarmConfig,
     SystemToolsConfig,
 
+    # Memory Resources
+    MemoryInsight,
+    MemoryInsightOrigin,
+    MemoryInsightType,
+    MemoryPersistenceCeiling,
+    MemoryResource,
+    MemoryResourceBindingType,
+    MemoryResourceDetail,
+    MemoryResourceStatus,
+    MemorySkill,
+    MemorySkillOrigin,
+    MemorySkillStatus,
+    MemoryUnboundResourceCandidate,
+    OrganizationMemoryPolicy,
+    OrganizationMemoryPurgeResult,
+    ProjectMemoryResources,
+
+    # PII / Privacy
+    HIPAA_SAFE_HARBOR_CATEGORIES,
+    PIIWhitelist,
+    PIIWhitelistEntry,
+    PrivateData,
+    RedactedMessage,
+    RedactionPreviewRequest,
+    RedactionPreviewResponse,
+
     # Logging
     configure_logging,
     get_logger,
 
     # Scheduling
-    JitterSpec,
-    Retry,
-    ScheduledJob,
-    RunRecord,
+    AtSchedule,
+    CronInvocationBuilder,
     CronSchedule,
     IntervalSchedule,
-    AtSchedule,
+    JitterDistribution,
+    JitterSpec,
+    MisfirePolicy,
+    OverlapPolicy,
+    Retry,
+    RetryBackoff,
+    RunRecord,
+    RunStatus,
+    Schedule,
+    ScheduledJob,
     list_jobs,
     stop_all_jobs,
 
     # Events
+    APP_EVENT_CONTRACT_VERSION,
     AppEvent,
-    RawSSEEvent,
-    EventBridge,
+    BackpressurePolicy,
     BridgeAudience,
+    BridgeRegistry,
+    EventBridge,
     EventBridgeSecurityPolicy,
+    NormalizedEventForwardingState,
+    NormalizedStreamState,
+    RawSSEEvent,
+    UIEvent,
+    forward_normalized_event,
+    forward_normalized_stream,
     normalize_stream,
+    normalize_stream_event,
 
     # Interrupts
     default_terminal_interrupt,
@@ -91,6 +140,7 @@ from maivn.messages import HumanMessage, AIMessage, SystemMessage
 | [Events](events.md)                      | Public event models, builders, and stream normalization helpers | Core      |
 | [MCPServer](mcp.md)                      | MCP server configuration and client                             | MCP       |
 | [MCPAutoSetup](mcp.md#mcpautosetup)      | Auto-setup for uvx-based MCP servers                            | MCP       |
+| [MCPSoftErrorHandling](mcp.md#mcpsofterrorhandling) | Tolerant retry policy for transient MCP soft errors  | MCP       |
 
 ### Decorators
 
@@ -100,6 +150,9 @@ from maivn.messages import HumanMessage, AIMessage, SystemMessage
 | [@depends_on_agent](decorators.md#depends_on_agent)               | Declare dependency on another agent's output | Decorators |
 | [@depends_on_private_data](decorators.md#depends_on_private_data) | Inject server-side secret data               | Decorators |
 | [@depends_on_interrupt](decorators.md#depends_on_interrupt)       | Collect user input during execution          | Decorators |
+| [@depends_on_await_for](decorators.md#depends_on_await_for)       | Gate execution behind another tool's run     | Decorators |
+| [@depends_on_reevaluate](decorators.md#depends_on_reevaluate)     | Trigger orchestrator reevaluation after a run | Decorators |
+| [@compose_artifact_policy](decorators.md#compose_artifact_policy) | Policy for tools that compose artifacts      | Decorators |
 
 ### Configuration
 

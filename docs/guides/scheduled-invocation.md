@@ -241,10 +241,15 @@ The builder mirrors the underlying scope. Use the async terminals when
 you're already inside an event loop:
 
 ```python
-job = await_for_setup_then(agent.cron('*/1 * * * *').ainvoke(messages))
+job = agent.cron('*/1 * * * *').ainvoke(messages)
 job = agent.cron('*/1 * * * *').astream(messages)
 job = swarm.cron('*/1 * * * *').abatch(many_inputs)
 ```
+
+The schedule builder's `ainvoke` / `astream` / `abatch` are synchronous
+factory methods that return a `ScheduledJob`; do not `await` them. Each
+*fire* of the resulting job will execute via the matching async terminal
+on the underlying `Agent` / `Swarm`.
 
 `ainvoke` / `astream` are also available directly on `Agent` and
 `Swarm` if you just want async execution without a schedule.

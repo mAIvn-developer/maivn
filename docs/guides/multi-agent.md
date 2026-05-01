@@ -282,21 +282,27 @@ agent = swarm.get_agent(agent_id)
 
 ### Single Final Output
 
-Only ONE source of final output is allowed:
+When more than one agent (or the swarm itself) declares a `final_tool`, exactly one
+agent must be marked `use_as_final_output=True` to disambiguate which agent owns the
+swarm's final response. The check runs at swarm validation time:
 
 ```python
-# Error: multiple use_as_final_output
+# Error: two agents marked use_as_final_output, validated when swarm.invoke runs
 agent1 = Agent(..., use_as_final_output=True)
-agent2 = Agent(..., use_as_final_output=True)  # Error!
+agent2 = Agent(..., use_as_final_output=True)
 
 swarm = Swarm(agents=[agent1, agent2])
+swarm.invoke(...)  # Error: Multiple swarm agents marked use_as_final_output=True
 ```
+
+If only one agent declares a `final_tool`, no `use_as_final_output` flag is required —
+that agent automatically owns the final response.
 
 ### Swarm Must Have Agents
 
 ```python
 swarm = Swarm(name='empty', agents=[])
-swarm.invoke(...)  # Error: Swarm.invoke requires at least one Agent
+swarm.invoke(...)  # Error: Swarm.invoke requires at least one Agent in the swarm.
 ```
 
 ## Complete Example

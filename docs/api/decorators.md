@@ -170,8 +170,12 @@ def compose_artifact_policy(
     *,
     mode: Literal['forbid', 'allow', 'require'] = 'allow',
     approval: Literal['none', 'explicit'] = 'none',
-) -> Callable
+) -> Callable[[Callable | type[BaseModel]], Callable | type[BaseModel]]
 ```
+
+> Unlike the other dependency decorators, `compose_artifact_policy` may be applied to
+> either a callable or a Pydantic `BaseModel` subclass — for model tools, `arg_name`
+> refers to a model field name.
 
 ### Parameters
 
@@ -222,8 +226,12 @@ def depends_on_interrupt(
     arg_name: str,
     input_handler: Callable[[str], Any],
     prompt: str = "",
+    input_type: InputType | None = None,
+    choices: list[str] | None = None,
 ) -> Callable
 ```
+
+`InputType` is `Literal['text', 'choice', 'boolean', 'number', 'email', 'password']`.
 
 ### Parameters
 
@@ -232,6 +240,8 @@ def depends_on_interrupt(
 | `arg_name`      | `str`                  | Required | Function argument to receive user input |
 | `input_handler` | `Callable[[str], Any]` | Required | Function that collects input            |
 | `prompt`        | `str`                  | `""`     | Prompt displayed to the user (optional) |
+| `input_type`    | `InputType \| None`    | `None`   | Override the input type. When unset, auto-detected from the parameter's type annotation (e.g., `bool` -> `'boolean'`, `int`/`float` -> `'number'`, `Literal[...]` -> `'choice'`, otherwise `'text'`) |
+| `choices`       | `list[str] \| None`    | `None`   | Override choices for `'choice'` inputs. When unset, auto-detected from `Literal[...]` annotations |
 
 ### Example
 
@@ -297,10 +307,13 @@ Declare a sequencing dependency without injecting another tool's output into an 
 ```python
 def depends_on_await_for(
     tool_ref: str | BaseTool | Callable,
+    *,
     timing: Literal['before', 'after'] = 'after',
     instance_control: Literal['each', 'all'] = 'each',
 ) -> Callable
 ```
+
+> `timing` and `instance_control` are keyword-only.
 
 ### Parameters
 
@@ -336,10 +349,13 @@ Declare that planning must pause at a specific boundary and insert `reevaluate`.
 ```python
 def depends_on_reevaluate(
     tool_ref: str | BaseTool | Callable,
+    *,
     timing: Literal['before', 'after'] = 'after',
     instance_control: Literal['each', 'all'] = 'each',
 ) -> Callable
 ```
+
+> `timing` and `instance_control` are keyword-only.
 
 ### Parameters
 

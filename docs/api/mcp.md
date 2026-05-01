@@ -34,6 +34,9 @@ MCPServer(
     working_dir: str | None = None,
     headers: dict[str, str] | None = None,
     protocol_version: str = '2025-06-18',
+    client_name: str = SDK_DEFAULT,
+    client_title: str = SDK_DEFAULT,
+    client_version: str = SDK_DEFAULT,
     tool_name_prefix: str | None = None,
     tool_name_separator: str = '__',
     default_tool_args: dict[str, Any] | None = None,
@@ -63,7 +66,10 @@ MCPServer(
 | `working_dir`             | `str \| None`                  | `None`         | Working directory for stdio server                            |
 | `headers`                 | `dict[str, str] \| None`       | `None`         | HTTP headers                                                  |
 | `protocol_version`        | `str`                          | `'2025-06-18'` | MCP protocol version                                          |
-| `tool_name_prefix`        | `str \| None`                  | Server name    | Prefix for tool names                                         |
+| `client_name`             | `str`                          | SDK default    | Identifier sent to the MCP server during initialization       |
+| `client_title`            | `str`                          | SDK default    | Friendly client title sent during MCP initialization          |
+| `client_version`          | `str`                          | SDK default    | Client version sent during MCP initialization                 |
+| `tool_name_prefix`        | `str \| None`                  | `None`         | Prefix for tool names. When unset, the effective prefix falls back to `name` |
 | `tool_name_separator`     | `str`                          | `'__'`         | Separator between prefix and name                             |
 | `default_tool_args`       | `dict \| None`                 | `None`         | Default args for all tools                                    |
 | `tool_defaults`           | `dict[str, dict] \| None`      | `None`         | Per-tool default arguments                                    |
@@ -146,7 +152,7 @@ MCPAutoSetup(
 | `args`        | `list[str]`              | `[]`     | Arguments to pass to the server |
 | `env`         | `dict[str, str] \| None` | `None`   | Environment variables           |
 | `working_dir` | `str \| None`            | `None`   | Working directory               |
-| `uvx_command` | `str \| None`            | `'uvx'`  | Override uvx binary name        |
+| `uvx_command` | `str \| None`            | `None`   | Override uvx binary name. When unset, the SDK resolves to `'uvx'` at runtime |
 
 ### Example
 
@@ -288,6 +294,16 @@ mcp_server = MCPServer(
     ),
 )
 ```
+
+### Parameters
+
+| Parameter                  | Type        | Default                                       | Description                                                                 |
+| -------------------------- | ----------- | --------------------------------------------- | --------------------------------------------------------------------------- |
+| `enabled`                  | `bool`      | `False`                                       | Enable soft-error detection on MCP responses                                |
+| `max_retries`              | `int`       | `1`                                           | Number of automatic retries on soft errors (must be `>= 0`)                 |
+| `initial_backoff_seconds`  | `float`     | `5.0`                                         | Initial wait between retries                                                |
+| `max_backoff_seconds`      | `float`     | `60.0`                                        | Upper bound on retry wait                                                   |
+| `keys`                     | `list[str]` | `['Note', 'Information', 'Error Message']`    | Keys to scan in the response body for soft-error indicators                 |
 
 When a soft error is detected:
 
