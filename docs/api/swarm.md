@@ -79,12 +79,9 @@ Notes:
 ### Skills and Resources
 
 `skills` and `resources` on a swarm are normalized by the SDK into `MemoryAssetsConfig`
-on the typed request. The server projects that config into its internal runtime metadata
-after validation.
+on the typed request and forwarded to the platform alongside the swarm roster.
 
 Per-agent `skills`/`resources` are also surfaced in the typed swarm roster config.
-
-Legacy note: `documents` remains accepted as a compatibility alias for older SDK code.
 
 ### Invocation Config Objects
 

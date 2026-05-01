@@ -22,7 +22,7 @@ uv add maivn
 To install the public Studio companion and enable `maivn studio` from a normal shell:
 
 ```bash
-pip install maivn-studio
+pip install "maivn[studio]"
 ```
 
 ## Step 1: Set Up Your API Key
@@ -201,7 +201,7 @@ public_bridge = EventBridge("session-1", audience="frontend_safe")
 internal_bridge = EventBridge("session-1", audience="internal")
 ```
 
-Use `frontend_safe` for customer-facing browser sessions. Use `internal` for trusted tools such as mAIvn Studio, Booth, or your own internal debug consoles.
+Use `frontend_safe` for customer-facing browser sessions. Use `internal` for trusted tools such as mAIvn Studio or your own internal debug consoles.
 
 Frontend client examples in JavaScript, TypeScript, Swift, Kotlin, Go, Python, Rust, .NET, and more live in the [frontend events guide](frontend-events.md).
 
@@ -225,8 +225,8 @@ Now that you have a working agent, explore these topics:
 - [Multi-Agent Guide](multi-agent.md) - Coordinate multiple agents
 - [System Tools Guide](system-tools.md) - Built-in server capabilities
 - [Memory and Recall Guide](memory-and-recall.md) - Summarize, retrieve, and index context across turns
-- [mAIvn Studio Guide](maivn-studio.md) - Run demos with UI + API and inspect live event streams
-- [Studio Authoring and Debugging](maivn-studio-authoring-and-debugging.md) - Make demos Studio-ready
+- [mAIvn Studio Guide](maivn-studio.md) - Run apps with UI + API and inspect live event streams
+- [Studio Authoring and Debugging](maivn-studio-authoring-and-debugging.md) - Make apps Studio-ready
 - [Frontend Events](frontend-events.md) - One-line backend mount + frontend client examples in JavaScript, TypeScript, Swift, Kotlin, Go, Python, Rust, .NET, and more
 
 ## Troubleshooting

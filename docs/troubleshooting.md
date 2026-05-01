@@ -317,8 +317,8 @@ If you're still stuck:
 
 1. Check the [API Reference](api/README.md)
 2. Review the [Guides](guides/getting-started.md)
-3. Examine demo code in `apps/maivn-demos`
-4. Check server logs for server-side errors
+3. Run a known-good app in [mAIvn Studio](guides/maivn-studio.md) and compare event traces
+4. Inspect a failing run from the **Executions** explorer in the developer portal
 
 ## See Also
 

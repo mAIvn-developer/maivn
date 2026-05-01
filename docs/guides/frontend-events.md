@@ -829,7 +829,7 @@ The `mount_events` helper accepts the same keyword too.
 
 **Default-deny for unknown event types:** if a custom event type lands on a `frontend_safe` bridge, the bridge logs a WARNING and runs a generic injected-fields scrub anyway. Add your custom type to the security policy if you need fine-grained handling.
 
-Use `audience="internal"` for trusted developer/admin tools (mAIvn Studio, Booth, internal observability dashboards). Use `audience="frontend_safe"` for anything reaching an end user.
+Use `audience="internal"` for trusted developer/admin tools (mAIvn Studio, your own internal observability dashboards). Use `audience="frontend_safe"` for anything reaching an end user.
 
 ---
 
@@ -900,7 +900,7 @@ async def test_my_agent_emits_status():
     assert types == ["session_start", "status_message", "final"]
 ```
 
-For integration tests of the SSE endpoint, use FastAPI's `TestClient` or `httpx.AsyncClient` with an ASGI transport. See [`libraries/maivn/tests/application/test_events_fastapi.py`](../../tests/application/test_events_fastapi.py) for end-to-end examples.
+For integration tests of the SSE endpoint, use FastAPI's `TestClient` or `httpx.AsyncClient` with an ASGI transport. The pattern is straightforward: spin up the FastAPI app with `mount_events`, fire a request that emits onto the bridge for a known `session_id`, and assert on the SSE frames the test client receives.
 
 ---
 
@@ -931,7 +931,6 @@ Tighten `heartbeat_interval` (e.g. `5.0`) — the default 15s is below most mana
 
 ## Related
 
-- [`docs/api/events.md`](../api/events.md) — full event-name and payload reference
-- [`docs/best-practices.md`](../best-practices.md) — broader SDK patterns
-- [`apps/maivn-studio`](../../../../apps/maivn-studio) — reference frontend (SvelteKit)
-- [`apps/maivn-booth`](../../../../apps/maivn-booth) — reference frontend (SvelteKit)
+- [Events](../api/events.md) — full event-name and payload reference
+- [Best Practices](../best-practices.md) — broader SDK patterns
+- [mAIvn Studio](maivn-studio.md) — local UI for inspecting live event streams while building agents

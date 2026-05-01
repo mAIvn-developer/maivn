@@ -45,6 +45,140 @@ agent.cron('0 0 1 * *')                 # midnight on the 1st
 agent.cron('0 9 * * MON-FRI', tz='America/New_York')
 ```
 
+### Reading a cron expression
+
+A cron string is five space-separated fields. Each one bounds *when*
+the schedule fires; the run only fires on a tick where **all five**
+match. Read left-to-right as a list of permissions, not a list of
+delays.
+
+```text
+ ┌──────────── minute        (0-59)
+ │  ┌───────── hour          (0-23, 24-hour clock)
+ │  │  ┌────── day of month  (1-31)
+ │  │  │  ┌─── month         (1-12 or JAN-DEC)
+ │  │  │  │  ┌ day of week   (0-6 or SUN-SAT, with 0 = Sunday)
+ │  │  │  │  │
+ *  *  *  *  *
+```
+
+Operators inside any field:
+
+| Syntax    | Meaning                                          | Example       | Reads as                         |
+| --------- | ------------------------------------------------ | ------------- | -------------------------------- |
+| `*`       | every value in this field                        | `* * * * *`   | every minute, every hour, …      |
+| `N`       | exactly that value                               | `0 9 * * *`   | 09:00 every day                  |
+| `A,B,C`   | a list of specific values                        | `0 9,12,17 * * *` | 09:00, 12:00, and 17:00 daily |
+| `A-B`     | inclusive range                                  | `0 9 * * MON-FRI` | weekdays at 09:00            |
+| `*/N`     | every N units, starting from the field's minimum | `*/5 * * * *` | every 5 minutes (xx:00, xx:05, xx:10, …) |
+| `A-B/N`   | every N units, but only inside the range         | `0 9-17/2 * * *` | 09:00, 11:00, 13:00, 15:00, 17:00 on every day |
+
+> [!tip]
+> `*/5 * * * *` does **not** mean "5 minutes after I save this job."
+> It means "every minute whose number is divisible by 5" — so if you
+> register it at 12:34:50, the next fire is 12:35, then 12:40, then
+> 12:45. If you need an even-spacing wall-clock cadence relative to
+> registration, use `scope.every(timedelta(minutes=5))` instead.
+
+> [!warning]
+> When both `day-of-month` and `day-of-week` are set to something
+> other than `*`, croniter follows the cron tradition and treats them
+> as **OR**, not AND. `0 9 1 * MON` fires on the 1st of every month
+> *and* on every Monday — not just Mondays that fall on the 1st.
+
+### Common patterns
+
+```python
+# Every-N cadence
+agent.cron('* * * * *')                 # every minute
+agent.cron('*/5 * * * *')               # every 5 minutes
+agent.cron('*/15 * * * *')              # every 15 minutes
+agent.cron('0 * * * *')                 # top of every hour
+agent.cron('0 */6 * * *')               # every 6 hours (00:00, 06:00, 12:00, 18:00)
+
+# Specific times of day
+agent.cron('30 9 * * *')                # 09:30 daily
+agent.cron('0 9,12,17 * * *')           # 09:00, 12:00, 17:00 daily
+agent.cron('0 9 * * MON-FRI')           # 09:00 on weekdays
+agent.cron('0 9 * * SAT,SUN')           # 09:00 on weekends
+
+# Calendar-anchored
+agent.cron('0 0 1 * *')                 # midnight on the 1st of every month
+agent.cron('0 0 1 1 *')                 # midnight on Jan 1 (yearly)
+agent.cron('0 9 15 * *')                # 09:00 on the 15th of every month
+
+# Workday windows
+agent.cron('*/10 9-17 * * MON-FRI')     # every 10 min, 09:00-17:50, weekdays
+agent.cron('0 8-18 * * MON-FRI')        # top of every hour from 08:00 to 18:00, weekdays
+```
+
+### Pick a minute that isn't `0` or `30`
+
+For "approximately every hour" or "every morning around 9," prefer
+off-grid minutes like `7`, `23`, or `47`. Every system in the world
+uses `0 * * * *` and `0 9 * * *`, so those instants get crowded with
+unrelated traffic — your downstream APIs, observability, and rate
+limits all see a synchronized spike. A few minutes of offset costs
+nothing and meaningfully lowers contention:
+
+```python
+agent.cron('7 * * * *')                 # hourly, but on the :07
+agent.cron('23 9 * * MON-FRI')          # weekdays at 09:23
+```
+
+When the user *does* mean a specific clock time ("09:00 on the dot
+for the SLA report"), keep `0 9 * * *` — but make that an explicit
+decision, not a default.
+
+### Time zones and DST
+
+The `tz=` argument is what most users actually want. Without it the
+expression is evaluated in UTC, which silently drifts twice a year
+relative to wall-clock business hours.
+
+```python
+agent.cron('0 9 * * MON-FRI', tz='America/New_York')
+agent.cron('0 9 * * MON-FRI', tz='Europe/London')
+```
+
+DST transitions are handled by croniter:
+
+- on the spring-forward boundary, a fire that would have landed in
+  the skipped hour is shifted to the next valid minute
+- on the fall-back boundary, the schedule does **not** double-fire
+  during the repeated hour
+
+If a job must run on real elapsed time regardless of DST, use
+`scope.every(...)` instead of `cron(...)`.
+
+### Six-field expressions (seconds)
+
+croniter accepts an optional sixth field at the front for sub-minute
+schedules. The SDK accepts the same form, but most production
+schedules do not need it — fixed-interval `every()` is usually
+clearer for sub-minute cadence.
+
+```python
+agent.cron('*/30 * * * * *')            # every 30 seconds (6-field)
+agent.every(timedelta(seconds=30))      # equivalent, more readable
+```
+
+### Validating a cron expression
+
+Use `CronSchedule(...).upcoming(n)` to preview the next `n` fire times
+without registering a job — the fastest way to confirm an expression
+does what you think before it goes live:
+
+```python
+from datetime import datetime, timezone
+from maivn import CronSchedule
+
+CronSchedule('0 9 * * MON-FRI', tz='America/New_York').upcoming(
+    5,
+    after=datetime(2026, 4, 27, tzinfo=timezone.utc),
+)
+```
+
 `scope.every(interval, ...)` — fixed cadence aligned to a start time:
 
 ```python
@@ -222,7 +356,7 @@ hundred milliseconds.
 
 ## Studio
 
-mAIvn Studio surfaces the same configuration on every demo's
+mAIvn Studio surfaces the same configuration on every app's
 **Schedule** tab — cron expression, jitter range and distribution,
 misfire/overlap policy, retry, and a live runs table. Configurations
 made in Studio call directly into the SDK; the underlying

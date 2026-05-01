@@ -50,16 +50,15 @@ response = agent.invoke(
 | Scope default | `Agent(...)`, `Swarm(...)` | Applied to every call from that scope |
 | Invocation override | `invoke()`, `stream()`, `ainvoke()`, `astream()` | Merged over scope defaults for one call |
 | Compiled request | `compile_state()` | Produces a `SessionRequest` with typed config fields |
-| Server runtime | session service | Projects typed config into internal runtime metadata after validation |
 
-Request `metadata` is application-owned. Reserved runtime-control keys such as
-`allowed_system_tools`, `allow_reevaluate_loop`, `structured_output_intent`,
-`memory_defined_skills`, and `swarm_agent_roster` are rejected at the SDK/shared
-model boundary.
+Request `metadata` is application-owned and intended for your own labels and
+correlation IDs. Runtime-control keys (`allowed_system_tools`, `allow_reevaluate_loop`,
+`structured_output_intent`, and similar) are rejected at the SDK boundary — use the
+typed config objects on this page instead.
 
 ## SystemToolsConfig
 
-Controls server-side system tool availability and approvals.
+Controls which system tools are available to a run and which arguments may consume their output.
 
 ```python
 SystemToolsConfig(

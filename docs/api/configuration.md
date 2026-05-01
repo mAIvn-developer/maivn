@@ -122,39 +122,10 @@ print(config.server.timeout_seconds)
 
 If no configuration is set, returns a default configuration.
 
-### set_configuration()
-
-Set the active configuration (internal use).
-
-```python
-from maivn._internal.utils.configuration import set_configuration
-
-custom_config = MaivnConfiguration(...)
-set_configuration(custom_config)
-```
-
-### reset_configuration()
-
-Reset to default configuration (internal use).
-
-```python
-from maivn._internal.utils.configuration import reset_configuration
-
-reset_configuration()
-```
-
-### temporary_configuration()
-
-Context manager for temporary configuration changes (useful for testing).
-
-```python
-from maivn._internal.utils.configuration import temporary_configuration
-
-with temporary_configuration(custom_config):
-    # Uses custom_config within this block
-    agent.invoke([...])
-# Original configuration restored
-```
+For most applications, configuration is read once at process start from environment
+variables (see below) and does not need to be mutated at runtime. To override values,
+construct a fresh `Client` (or `Agent`) with the explicit fields you want to change —
+client-level values take precedence over the active configuration.
 
 ## Examples
 

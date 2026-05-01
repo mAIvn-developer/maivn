@@ -201,10 +201,7 @@ Project resource methods:
 - `delete_memory_resource(project_id, resource_id)`
 - `list_unbound_memory_resource_candidates(project_id, ...)`
 
-Compatibility note:
-
-- use the `resource`-named methods for new SDK code
-- document-named methods remain available as compatibility aliases over the same backend contracts
+Use the `resource`-named methods for new code.
 
 Example:
 

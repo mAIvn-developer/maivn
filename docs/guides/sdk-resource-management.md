@@ -11,12 +11,6 @@ The SDK exposes two related management surfaces:
 - project memory resources: skills, insights, and bound resources
 - organization memory governance: memory policy and purge controls
 
-Compatibility note:
-
-- the SDK uses resource-oriented language in guides and examples
-- canonical backend contracts still use document-oriented endpoint and field names where required for compatibility
-- document-named SDK methods remain available as compatibility aliases
-
 ## Import
 
 ```python
