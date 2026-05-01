@@ -49,4 +49,4 @@ This guide covers account sign-in behavior in the mAIvn Developer Portal and how
 - Signing out immediately ends your active session.
 - Opening protected routes while signed out redirects you to `/login`.
 - Profile, organization, project, and billing pages require authentication.
-- Security-sensitive actions (for example profile or credential updates) require a valid in-session request token.
+- Security-sensitive actions (for example profile or credential updates) require a valid in-session CSRF token.

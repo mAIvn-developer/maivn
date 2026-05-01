@@ -19,7 +19,7 @@ Portal curation sits on top of the runtime memory split:
 
 ## Organization Memory Policy
 
-Path: `Organization -> Settings -> Memory Management`
+Open the **Organization Settings** page and scroll to the **Memory Management** section.
 
 Controls:
 
@@ -37,7 +37,7 @@ SDK `memory_config` can only request equal or lower behavior than the org ceilin
 
 ## Organization Memory Purge
 
-Path: `Organization -> Settings -> Memory Purge`
+On the same **Organization Settings** page, scroll to the **Memory Purge** section.
 
 You can purge persisted memory by:
 
@@ -79,7 +79,7 @@ Operational model:
 
 Tier note:
 
-- Insight management is available on Professional and Enterprise plans.
+- Insight management is available on Professional and Enterprise tiers.
 
 ## Project Memory Resources
 

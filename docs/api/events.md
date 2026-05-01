@@ -216,8 +216,8 @@ Raw server event returned by `agent.stream()` and `swarm.stream()`.
 
 ```python
 class RawSSEEvent(BaseModel):
-    name: str
-    payload: Any
+    name: str                 # Event name from the SSE stream
+    payload: Any = {}         # Decoded event payload; defaults to an empty dict
 ```
 
 ### `AppEvent`

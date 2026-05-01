@@ -118,7 +118,9 @@ expected.
 ## Session Debugging Workflow
 
 1. Pick the app, optionally choose a variant, send a controlled test message.
-2. Watch the **Events** tab for the live SSE stream.
+2. Watch the **Inspect** tab for the live SSE stream. (The Inspector also
+   surfaces the **Recall** tab for memory state, **Config** for the active
+   invocation config, and **Schedule** for upcoming scheduled fires.)
 3. Resolve any `interrupt_required` prompts inline.
 4. Send follow-ups in the same session to keep `thread_id` continuity.
 5. Use the per-event detail view for replayable event history.

@@ -81,9 +81,12 @@ response = agent.invoke(messages)
 ## AIMessage
 
 Represents assistant responses. Typically returned by the agent, not created manually.
+`AIMessage` is re-exported from `langchain_core.messages` and accepts the full set of
+keyword arguments documented there (e.g., `tool_calls`, `additional_kwargs`,
+`response_metadata`). The minimal shape used in most app code is:
 
 ```python
-AIMessage(content: str)
+AIMessage(content: str, **kwargs)
 ```
 
 ### Example

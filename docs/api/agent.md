@@ -30,6 +30,7 @@ Agent(
     use_as_final_output: bool = False,
     included_nested_synthesis: bool | Literal['auto'] = 'auto',
     private_data: dict = {},
+    allow_private_in_system_tools: bool = False,
     memory_config: MemoryConfig | dict[str, Any] = {},
     system_tools_config: SystemToolsConfig | dict[str, Any] = {},
     orchestration_config: SessionOrchestrationConfig | dict[str, Any] = {},
@@ -42,11 +43,14 @@ Agent(
 )
 ```
 
+> All parameters are keyword-only at the call site (Pydantic model fields). The
+> ordering above is for readability — pass arguments by keyword.
+
 ### Parameters
 
 | Parameter                   | Type                             | Default    | Description                                                                                                                                                            |
 | --------------------------- | -------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`                      | `str \| None`                    | Class name | Agent name (used in logs and identification)                                                                                                                           |
+| `name`                      | `str \| None`                    | `None`     | Agent name (used in logs and identification). When unset, the `id` property falls back to the class name                                                                |
 | `description`               | `str \| None`                    | `None`     | Human-readable description of agent purpose                                                                                                                            |
 | `system_prompt`             | `str \| SystemMessage \| None`   | `None`     | System message injected into conversations                                                                                                                             |
 | `api_key`                   | `str \| None`                    | `None`     | API key for server authentication                                                                                                                                      |
@@ -57,6 +61,7 @@ Agent(
 | `use_as_final_output`       | `bool`                           | `False`    | When in a Swarm, designate this agent's output as final                                                                                                                |
 | `included_nested_synthesis` | `bool \| Literal['auto']`        | `'auto'`   | Nested synthesis mode for Swarm invocations: `True` always includes synthesized response, `False` returns tool results only, `'auto'` lets orchestrator/runtime decide |
 | `private_data`              | `dict`                           | `{}`       | Server-side secret data for dependency injection                                                                                                                       |
+| `allow_private_in_system_tools` | `bool`                       | `False`    | Permit `private_data` placeholders to flow through system tools (web search, repl). Defaults to `False`; opt in only when needed                                       |
 | `memory_config`             | `MemoryConfig \| dict[str, Any]` | `{}`       | Default typed memory configuration applied on every invocation from this scope                                                                                         |
 | `system_tools_config`       | `SystemToolsConfig \| dict`      | `{}`       | Default typed system-tool allowlists and approval controls applied on every invocation                                                                                  |
 | `orchestration_config`      | `SessionOrchestrationConfig \| dict` | `{}`   | Default typed orchestration loop controls applied on every invocation                                                                                                   |
@@ -729,6 +734,26 @@ def structured_output(model: type[BaseModel]) -> StructuredOutputInvocationBuild
 #### Returns
 
 `StructuredOutputInvocationBuilder` with an `invoke()` method that accepts:
+
+```python
+def invoke(
+    messages: Sequence[BaseMessage],
+    *,
+    force_final_tool: bool = False,
+    model: Literal['fast', 'balanced', 'max'] | None = None,
+    reasoning: Literal['minimal', 'low', 'medium', 'high'] | None = None,
+    stream_response: bool = True,
+    thread_id: str | None = None,
+    verbose: bool = False,
+    metadata: dict[str, Any] | None = None,
+    memory_config: MemoryConfig | dict[str, Any] | None = None,
+    system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
+    orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
+    allow_private_in_system_tools: bool | None = None,
+) -> SessionResponse
+```
+
+All parameters after `messages` are keyword-only.
 
 | Parameter   | Type                                          | Default  | Description                                                  |
 | ----------- | --------------------------------------------- | -------- | ------------------------------------------------------------ |

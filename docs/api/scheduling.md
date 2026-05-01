@@ -75,14 +75,16 @@ def every(
     *,
     tz: str | datetime.timezone | None = None,
     start: datetime | None = None,
-    jitter: ... = None,
-    # plus the same kwargs accepted by cron()
+    jitter: JitterSpec | timedelta | float | tuple | None = None,
+    # plus misfire / overlap_policy / max_overlap / end_at / max_runs / name /
+    # retry / emit_events kwargs accepted by cron()
 ) -> CronInvocationBuilder
 ```
 
 Fires at fixed intervals. A bare number is interpreted as seconds. The
 first fire is at `start` (default `now`), with subsequent fires at whole
-multiples of `interval`.
+multiples of `interval`. Note that `every()` uses `start=` (not `start_at=`,
+which is the cron form).
 
 ### at()
 
@@ -91,7 +93,7 @@ def at(
     when: datetime,
     *,
     tz: str | datetime.timezone | None = None,
-    jitter: ... = None,
+    jitter: JitterSpec | timedelta | float | tuple | None = None,
     name: str | None = None,
     retry: Retry | None = None,
     emit_events: bool = False,
@@ -267,7 +269,7 @@ class RunRecord:
     metadata: dict[str, Any] = {}
 
     @property
-    def duration -> timedelta | None  # finished_at - fired_at
+    def duration(self) -> timedelta | None: ...  # finished_at - fired_at
 ```
 
 `status` is one of: `pending`, `running`, `succeeded`, `failed`,

@@ -44,6 +44,9 @@ Key sections:
 - `env`: environment file and required variables
 - `discovery`: app scan paths and excludes
 - `saved_prompts`: persisted prompts shown in Studio
+- `apps`: explicit app declarations (in addition to discovery)
+- `agents`: standalone agent declarations
+- `swarms`: standalone swarm declarations
 
 ```json
 {

@@ -49,8 +49,8 @@ For per-run drill-down, use the `Executions` page.
 
 Open `Billing -> Executions` (or `/billing/{org_id}/executions`) to inspect individual runs:
 
-1. Select a run in the left rail.
-2. Review high-level token and duration stats.
+1. Select a thread in the left rail to load its runs.
+2. Pick a run from the right pane to review high-level token and duration stats.
 3. Expand action and assignment nodes to drill into tool/system events.
 4. Inspect event metadata and sanitized previews for troubleshooting.
 

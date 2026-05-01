@@ -10,21 +10,24 @@ from maivn import configure_logging, get_logger
 
 ## configure_logging()
 
-Initialize SDK logging with a file path.
+Initialize the SDK's process-wide logger. Optional `log_file_path` writes log
+records to a file in addition to standard output.
 
 ```python
-def configure_logging(log_file_path: Path | str) -> Logger
+def configure_logging(log_file_path: Path | str | None = None) -> MaivnSDKLogger
 ```
 
 ### Parameters
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `log_file_path` | `Path \| str` | Path to the log file |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `log_file_path` | `Path \| str \| None` | `None` | Optional path to write log records. When `None`, the SDK logs to stdout only |
 
 ### Returns
 
-A configured `Logger` instance.
+The process-wide `MaivnSDKLogger` instance. Subsequent calls return the same
+singleton — passing a different `log_file_path` after first configuration is a
+no-op.
 
 ### Example
 
@@ -40,17 +43,23 @@ logger.info('SDK initialized')
 
 ## get_logger()
 
-Get the SDK logger instance.
+Return the SDK's process-wide logger. The first call configures the logger
+lazily; subsequent calls return the same instance.
 
 ```python
-def get_logger(name: str | None = None) -> Logger
+def get_logger(log_file_path: Path | str | None = None) -> MaivnSDKLogger
 ```
 
 ### Parameters
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | `str \| None` | Optional logger name (for sub-loggers) |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `log_file_path` | `Path \| str \| None` | `None` | Forwarded to `configure_logging` on first call. Ignored on subsequent calls because the logger is a process-wide singleton |
+
+> The SDK does not expose named/child loggers. There is no `name` parameter and
+> no `get_logger('tools')` / `get_logger('agents')` pattern — use Python's
+> standard `logging.getLogger(__name__)` if you need module-scoped loggers in
+> your own code.
 
 ### Example
 
@@ -64,17 +73,6 @@ logger.warning('Warning message')
 logger.error('Error message')
 ```
 
-### Named Loggers
-
-```python
-# Create named sub-loggers
-tool_logger = get_logger('tools')
-agent_logger = get_logger('agents')
-
-tool_logger.info('Tool executed')
-agent_logger.info('Agent invoked')
-```
-
 ## Configuration
 
 ### Environment Variables
@@ -83,7 +81,7 @@ agent_logger.info('Agent invoked')
 |----------|-------------|---------|
 | `MAIVN_LOG_LEVEL` | Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `INFO` |
 | `MAIVN_LOG_FORMAT` | Custom format string | SDK default |
-| `MAIVN_ENABLE_TIMING_LOGS` | Enable timing logs (`true`/`false`) | `false` |
+| `MAIVN_ENABLE_TIMING_LOGS` | Enable timing logs (`true`/`false`) | `true` |
 
 ### Log Levels
 

@@ -32,47 +32,46 @@ class MaivnConfiguration:
 
 Server connection settings.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `base_url` | `str` | SDK constant | API server base URL |
-| `mock_base_url` | `str` | SDK constant | Mock server base URL |
-| `timeout_seconds` | `float` | `600.0` | HTTP request timeout |
-| `max_retries` | `int` | `3` | Max retry attempts |
-| `deployment_timezone` | `str` | `'UTC'` | Server timezone |
+| Field                 | Type    | Default | Description          |
+| --------------------- | ------- | ------- | -------------------- |
+| `timeout_seconds`     | `float` | `600.0` | HTTP request timeout |
+| `max_retries`         | `int`   | `3`     | Max retry attempts   |
+| `deployment_timezone` | `str`   | `'UTC'` | Server timezone      |
 
 ### ExecutionConfiguration
 
 Execution timing and limits.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `default_timeout_seconds` | `float` | `600.0` | Default execution timeout |
-| `pending_event_timeout_seconds` | `float` | `0.2` | Event polling timeout |
-| `max_parallel_tools` | `int` | `8` | Max parallel tool executions |
-| `enable_background_execution` | `bool` | `True` | Run tool execution using background threads |
-| `tool_execution_timeout_seconds` | `float` | `900.0` | Per-tool timeout (15 min) |
-| `dependency_wait_timeout_seconds` | `float` | `300.0` | Dependency resolution timeout |
-| `total_execution_timeout_seconds` | `float \| None` | `7200.0` | Total session timeout (2 hours) |
-| `max_prompt_length_for_tool_name` | `int` | `30` | Max prompt length for naming |
-| `tool_name_hash_modulo` | `int` | `10000` | Hash modulo for tool IDs |
+| Field                             | Type            | Default  | Description                                                              |
+| --------------------------------- | --------------- | -------- | ------------------------------------------------------------------------ |
+| `default_timeout_seconds`         | `float`         | `600.0`  | Default execution timeout                                                |
+| `pending_event_timeout_seconds`   | `float`         | `0.2`    | Event polling timeout                                                    |
+| `max_parallel_tools`              | `int`           | `8`      | Max parallel tool executions                                             |
+| `enable_background_execution`     | `bool`          | `True`   | Run tool execution using background threads                              |
+| `tool_execution_timeout_seconds`  | `float`         | `900.0`  | Per-tool timeout (15 min)                                                |
+| `dependency_wait_timeout_seconds` | `float`         | `300.0`  | Dependency resolution timeout                                            |
+| `total_execution_timeout_seconds` | `float \| None` | `7200.0` | Total session timeout (2 hours)                                          |
+| `max_prompt_length_for_tool_name` | `int`           | `30`     | Max prompt length for naming (overridable via `MAIVN_MAX_PROMPT_LENGTH`) |
+| `tool_name_hash_modulo`           | `int`           | `10000`  | Hash modulo for tool IDs (overridable via `MAIVN_TOOL_NAME_HASH_MODULO`) |
 
 ### SecurityConfiguration
 
 Authentication settings.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `api_key` | `str \| None` | `None` | API key for authentication |
+| Field             | Type          | Default | Description                                              |
+| ----------------- | ------------- | ------- | -------------------------------------------------------- |
+| `api_key`         | `str \| None` | `None`  | API key for authentication                               |
+| `require_api_key` | `bool`        | `True`  | Whether the SDK refuses to send unauthenticated requests |
 
 ### LoggingConfiguration
 
 Logging settings.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `level` | `str` | `'INFO'` | Log level |
-| `format_string` | `str \| None` | `'%(asctime)s - %(name)s - %(levelname)s - %(message)s'` | Log format string |
-| `enable_timing_logs` | `bool` | `True` | Enable timing logs |
+| Field                | Type   | Default                                                  | Description        |
+| -------------------- | ------ | -------------------------------------------------------- | ------------------ |
+| `level`              | `str`  | `'INFO'`                                                 | Log level          |
+| `format_string`      | `str`  | `'%(asctime)s - %(name)s - %(levelname)s - %(message)s'` | Log format string  |
+| `enable_timing_logs` | `bool` | `True`                                                   | Enable timing logs |
 
 ## ConfigurationBuilder
 
@@ -90,22 +89,24 @@ This is the recommended way to configure the SDK in production.
 
 ## Environment Variables
 
-| Variable | Config Path | Description |
-|----------|-------------|-------------|
-| `MAIVN_API_KEY` | `security.api_key` | API key for authentication |
-| `MAIVN_TIMEOUT` | `server.timeout_seconds` | HTTP request timeout |
-| `MAIVN_MAX_RETRIES` | `server.max_retries` | Max retry attempts |
-| `MAIVN_DEPLOYMENT_TIMEZONE` | `server.deployment_timezone` | Server timezone |
-| `MAIVN_EXECUTION_TIMEOUT` | `execution.default_timeout_seconds` | Default timeout |
-| `MAIVN_PENDING_EVENT_TIMEOUT` | `execution.pending_event_timeout_seconds` | Event timeout |
-| `MAIVN_MAX_PARALLEL_TOOLS` | `execution.max_parallel_tools` | Parallel limit |
-| `MAIVN_ENABLE_BACKGROUND_EXECUTION` | `execution.enable_background_execution` | Background execution (false = inline) |
-| `MAIVN_TOOL_EXECUTION_TIMEOUT` | `execution.tool_execution_timeout_seconds` | Per-tool timeout |
-| `MAIVN_DEPENDENCY_WAIT_TIMEOUT` | `execution.dependency_wait_timeout_seconds` | Dependency timeout |
-| `MAIVN_TOTAL_EXECUTION_TIMEOUT` | `execution.total_execution_timeout_seconds` | Total timeout |
-| `MAIVN_LOG_LEVEL` | `logging.level` | Log level |
-| `MAIVN_LOG_FORMAT` | `logging.format_string` | Log format |
-| `MAIVN_ENABLE_TIMING_LOGS` | `logging.enable_timing_logs` | Timing logs |
+| Variable                            | Config Path                                 | Description                                  |
+| ----------------------------------- | ------------------------------------------- | -------------------------------------------- |
+| `MAIVN_API_KEY`                     | `security.api_key`                          | API key for authentication                   |
+| `MAIVN_TIMEOUT`                     | `server.timeout_seconds`                    | HTTP request timeout                         |
+| `MAIVN_MAX_RETRIES`                 | `server.max_retries`                        | Max retry attempts                           |
+| `MAIVN_DEPLOYMENT_TIMEZONE`         | `server.deployment_timezone`                | Server timezone                              |
+| `MAIVN_EXECUTION_TIMEOUT`           | `execution.default_timeout_seconds`         | Default timeout                              |
+| `MAIVN_PENDING_EVENT_TIMEOUT`       | `execution.pending_event_timeout_seconds`   | Event timeout                                |
+| `MAIVN_MAX_PARALLEL_TOOLS`          | `execution.max_parallel_tools`              | Parallel limit                               |
+| `MAIVN_ENABLE_BACKGROUND_EXECUTION` | `execution.enable_background_execution`     | Background execution (false = inline)        |
+| `MAIVN_TOOL_EXECUTION_TIMEOUT`      | `execution.tool_execution_timeout_seconds`  | Per-tool timeout                             |
+| `MAIVN_DEPENDENCY_WAIT_TIMEOUT`     | `execution.dependency_wait_timeout_seconds` | Dependency timeout                           |
+| `MAIVN_TOTAL_EXECUTION_TIMEOUT`     | `execution.total_execution_timeout_seconds` | Total timeout                                |
+| `MAIVN_MAX_PROMPT_LENGTH`           | `execution.max_prompt_length_for_tool_name` | Max prompt length used when naming tools     |
+| `MAIVN_TOOL_NAME_HASH_MODULO`       | `execution.tool_name_hash_modulo`           | Hash modulo applied when generating tool IDs |
+| `MAIVN_LOG_LEVEL`                   | `logging.level`                             | Log level                                    |
+| `MAIVN_LOG_FORMAT`                  | `logging.format_string`                     | Log format                                   |
+| `MAIVN_ENABLE_TIMING_LOGS`          | `logging.enable_timing_logs`                | Timing logs                                  |
 
 ## Configuration Functions
 

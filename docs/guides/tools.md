@@ -126,7 +126,12 @@ def add_numbers(a: int, b: int) -> dict:
 
 ### Key Requirements
 
-1. **Return a dict**: Tools should return JSON-serializable dictionaries
+1. **Return a JSON-compatible value**: Tools may return any value that the SDK can
+   serialize — `dict`, `list`, primitive (`str`/`int`/`float`/`bool`/`None`), Pydantic
+   `BaseModel` (serialized via `model_dump(mode='json')`), dataclass (via
+   `dataclasses.asdict`), or `set`/`tuple` (converted to lists). Returning a `dict`
+   with named fields is recommended because the LLM consumes the result as JSON and
+   benefits from explicit field names, but it is not enforced.
 2. **Type hints**: Use type hints for parameters (helps the LLM understand usage)
 3. **Description**: Provide a description via `description=` argument or docstring
 
@@ -325,7 +330,9 @@ def log_request(request: dict) -> dict:
     return {'logged': True}
 ```
 
-**Note**: Cannot be combined with `final_tool=True`.
+**Note**: `always_execute` and `final_tool` are orthogonal — they describe execution
+frequency and output role, respectively, and may be combined on the same tool when
+needed.
 
 ### final_tool
 
@@ -375,6 +382,11 @@ def my_tool() -> dict:
 
 ## Return Values
 
+The SDK runs every tool result through `to_jsonable`, which handles dicts, lists,
+primitives, Pydantic models, dataclasses, sets, and tuples. Pick whichever shape
+fits the operation; named fields (dict or model) tend to read more clearly to the
+LLM than positional structures.
+
 ### Returning Dictionaries
 
 ```python
@@ -387,9 +399,38 @@ def get_data() -> dict:
     }
 ```
 
+### Returning Pydantic Models or Dataclasses
+
+```python
+from pydantic import BaseModel
+
+class GetDataResult(BaseModel):
+    status: str
+    data: list[dict]
+    count: int
+
+@agent.toolify()
+def get_data() -> GetDataResult:
+    return GetDataResult(status='success', data=[...], count=10)
+```
+
+### Returning Primitives or Lists
+
+```python
+@agent.toolify()
+def count_items() -> int:
+    return 42
+
+@agent.toolify()
+def list_active_users() -> list[str]:
+    return ['alice', 'bob']
+```
+
 ### Returning Errors
 
-Return errors as dict with 'error' key:
+A common convention is to return a dict with an `'error'` key so the LLM can
+reason about failures. This is a recipe, not a hard requirement — raising an
+exception or returning any other shape both work.
 
 ```python
 @agent.toolify()

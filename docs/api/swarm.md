@@ -22,6 +22,7 @@ Swarm(
     system_prompt: str | SystemMessage | None = None,
     agents: list[Agent] = [],
     private_data: dict = {},
+    allow_private_in_system_tools: bool = False,
     memory_config: MemoryConfig | dict[str, Any] = {},
     system_tools_config: SystemToolsConfig | dict[str, Any] = {},
     orchestration_config: SessionOrchestrationConfig | dict[str, Any] = {},
@@ -34,15 +35,18 @@ Swarm(
 )
 ```
 
+> All parameters are keyword-only at the call site (Pydantic model fields).
+
 ### Parameters
 
 | Parameter             | Type                             | Default    | Description                                                          |
 | --------------------- | -------------------------------- | ---------- | -------------------------------------------------------------------- |
-| `name`                | `str \| None`                    | Class name | Swarm name for identification                                        |
+| `name`                | `str \| None`                    | `None`     | Swarm name for identification (`id` falls back to class name when unset) |
 | `description`         | `str \| None`                    | `None`     | Human-readable swarm description                                     |
 | `system_prompt`       | `str \| SystemMessage \| None`   | `None`     | System message for swarm context                                     |
 | `agents`              | `list[Agent]`                    | `[]`       | Initial list of agents                                               |
 | `private_data`        | `dict`                           | `{}`       | Swarm-level private data                                             |
+| `allow_private_in_system_tools` | `bool`                  | `False`    | Permit `private_data` placeholders to flow through system tools (web search, repl). Defaults to `False`; opt in only when needed |
 | `memory_config`       | `MemoryConfig \| dict[str, Any]` | `{}`       | Default typed memory configuration applied on every swarm invocation |
 | `system_tools_config` | `SystemToolsConfig \| dict`      | `{}`       | Default typed system-tool allowlists and approval controls applied on every swarm invocation |
 | `orchestration_config` | `SessionOrchestrationConfig \| dict` | `{}`   | Default typed orchestration loop controls applied on every swarm invocation |

@@ -364,10 +364,10 @@ you can validate your own policy ahead of construction:
 ```python
 from maivn import HIPAA_SAFE_HARBOR_CATEGORIES
 print(sorted(HIPAA_SAFE_HARBOR_CATEGORIES))
-# ['account_id', 'biometric_id', 'certificate_id', 'date', 'datetime',
-#  'device_id', 'email', 'fax', 'health_plan_id', 'ip_address',
-#  'license_id', 'medical_record_number', 'person', 'phone', 'ssn',
-#  'swift', 'url', 'vehicle_id', 'iban', 'credit_card']
+# ['account_id', 'biometric_id', 'certificate_id', 'credit_card', 'date',
+#  'datetime', 'device_id', 'email', 'fax', 'health_plan_id', 'iban',
+#  'ip_address', 'license_id', 'medical_record_number', 'person', 'phone',
+#  'ssn', 'swift', 'url', 'vehicle_id']
 ```
 
 ### Where to Set It
@@ -585,7 +585,7 @@ else:
     }
 ```
 
-### 6. System Tools Privacy
+### 5. System Tools Privacy
 
 When using system tools with private data:
 
@@ -607,7 +607,7 @@ agent.private_data = {'user_email': 'john@example.com'}
 # - Never expose email to external services
 ```
 
-### 7. Minimal Exposure
+### 6. Minimal Exposure
 
 Only include private data that's actually needed:
 
