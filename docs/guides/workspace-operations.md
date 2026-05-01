@@ -79,4 +79,4 @@ If no prior project exists, the portal falls back to your first accessible proje
 
 ![Developer Portal docs experience](/developer_portal/maivn_portal_docs__getting_started.png "Use integrated docs during team onboarding and workspace setup")
 
-![image placeholder: Organization members and invitations management pages](/developer_portal/placeholders/organization-members-invitations.png "Capture role assignment, member list, and invitation states with sanitized emails")
+![Organization members and invitations management pages](/developer_portal/placeholders/organization-members-invitations.png "Members and invitations management")

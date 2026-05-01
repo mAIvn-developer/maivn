@@ -33,7 +33,7 @@ This guide covers account sign-in behavior in the mAIvn Developer Portal and how
 - Refresh the page and try again.
 - If the issue persists, contact support.
 
-![image placeholder: Portal login form with invalid-credentials message](/developer_portal/placeholders/login-invalid-credentials.png "Capture with non-production data and generic error copy only")
+![Portal login form with invalid-credentials message](/developer_portal/placeholders/login-invalid-credentials.png "Sign-in form when credentials are rejected")
 
 ## Password Reset
 
@@ -42,7 +42,7 @@ This guide covers account sign-in behavior in the mAIvn Developer Portal and how
 3. Open the reset link sent to your inbox.
 4. Set a new password and sign in again.
 
-![image placeholder: Forgot-password request and password-reset confirmation screens](/developer_portal/placeholders/password-reset-flow.png "Capture request form and confirmation state using a test account")
+![Forgot-password request and password-reset confirmation screens](/developer_portal/placeholders/password-reset-flow.png "Password reset request flow")
 
 ## Session Behavior
 

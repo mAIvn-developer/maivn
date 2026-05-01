@@ -111,29 +111,29 @@ configure_logging(log_path)
 agent = Agent(name='my_agent', api_key='...')
 ```
 
-### Demo Pattern
+### Sample App Pattern
 
-Common pattern used in maivn demos:
+Common pattern for a self-contained sample app:
 
 ```python
 from pathlib import Path
 from maivn import Agent, configure_logging
 
 # Centralized log location
-LOG_FILE = Path(__file__).parent.parent.parent / 'logs' / 'sdk_demo.log'
+LOG_FILE = Path(__file__).parent.parent.parent / 'logs' / 'sdk_app.log'
 LOG_FILE.parent.mkdir(exist_ok=True)
 
 logger = configure_logging(LOG_FILE)
-logger.info(f'Starting demo: {__file__}')
+logger.info(f'Starting app: {__file__}')
 
 agent = Agent(
-    name='demo_agent',
+    name='sample_agent',
     api_key='...',
 )
 
-# ... demo code ...
+# ... app code ...
 
-logger.info('Demo completed')
+logger.info('App completed')
 ```
 
 ### Event Builder Tracing

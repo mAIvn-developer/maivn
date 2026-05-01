@@ -53,6 +53,20 @@ Parses `expression` with `croniter` and schedules the next-best fire time
 in the given `tz` (default UTC). Supports standard 5-field cron, with
 6-field (seconds) variants accepted by croniter.
 
+The five fields are `minute hour day-of-month month day-of-week`. Useful
+operators per field:
+
+- `*` — every value
+- `N` — exactly that value
+- `A,B,C` — list of specific values
+- `A-B` — inclusive range
+- `*/N` — every Nth value, starting from the field minimum
+  (e.g., `*/5` in the minute field = every minute divisible by 5)
+
+For the full pattern reference, common recipes, time-zone / DST behavior,
+and a cron preview helper, see [Scheduled Invocation →
+Reading a cron expression](../guides/scheduled-invocation.md#reading-a-cron-expression).
+
 ### every()
 
 ```python

@@ -291,7 +291,7 @@ public_bridge = EventBridge('session-1', audience='frontend_safe')
 internal_bridge = EventBridge('session-1', audience='internal')
 ```
 
-Use `frontend_safe` when the event stream reaches end users. Use `internal` only for trusted tooling such as mAIvn Studio, Booth, or your own internal operator consoles.
+Use `frontend_safe` when the event stream reaches end users. Use `internal` only for trusted tooling such as mAIvn Studio or your own internal operator consoles.
 
 For the easiest possible end-to-end setup, use the FastAPI adapter — one line wires `GET /maivn/events/{session_id}` and your frontend (in any language) can consume it via `EventSource` or any SSE client:
 
@@ -322,7 +322,7 @@ mcp_server = MCPServer(
 )
 ```
 
-Keep `inherit_env=True` for compatibility when you trust the subprocess and want the simplest setup. Tighten it for third-party tools, demos, or mixed-trust environments.
+Keep `inherit_env=True` for compatibility when you trust the subprocess and want the simplest setup. Tighten it for third-party tools, sample apps, or mixed-trust environments.
 
 ## Error Handling
 

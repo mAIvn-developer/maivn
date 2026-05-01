@@ -123,13 +123,11 @@ Notes:
 
 ### Skills and Resources
 
-`skills` and `resources` let you attach memory assets to the scope.
-The SDK normalizes these payloads into `MemoryAssetsConfig` on each request.
-The server projects that typed config into its internal runtime metadata after validation.
+`skills` and `resources` let you attach memory assets to the scope. The SDK
+normalizes these payloads into `MemoryAssetsConfig` on each request and forwards
+them to the platform alongside your invocation.
 
 Use this for scope-bound runbooks/checklists without hand-building request metadata per call.
-
-Legacy note: `documents` remains accepted as a compatibility alias for older SDK code.
 
 ### Invocation Config Objects
 
@@ -264,7 +262,7 @@ labels and correlation data only.
 
 #### Examples
 
-````python
+```python
 from maivn import SystemToolsConfig
 from maivn.messages import HumanMessage
 
@@ -883,4 +881,3 @@ Both `Agent` and `Swarm` inherit these capabilities.
 - [Decorators](decorators.md) - Dependency decorators
 - [Tools Guide](../guides/tools.md) - Tool definition patterns
 - [Structured Output Guide](../guides/structured-output.md) - Final tool pattern
-````

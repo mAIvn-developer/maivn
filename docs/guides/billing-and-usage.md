@@ -11,7 +11,7 @@ The portal provides four billing pages per organization:
 - `Executions`: run-level inspection with event tree and structured output
 - `Invoices`: historical billing records
 
-![image placeholder: Billing subscription page showing current plan and status](/developer_portal/placeholders/billing-subscription.png "Capture with demo organization and non-sensitive billing labels only")
+![image placeholder: Billing subscription page showing current plan and status](/developer_portal/placeholders/billing-subscription.png "Capture with a sample organization and non-sensitive billing labels only")
 
 ## Usage Interpretation
 
