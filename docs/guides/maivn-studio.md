@@ -97,7 +97,7 @@ APP_INVOCATION = {
 This keeps Studio runs aligned with the same policy checks enforced in normal
 SDK invocation.
 
-![Studio app list and variant selection](/maivn_studio/maivn_studio_demos.png "Studio app list with variant selection")
+![Studio app list and variant selection](/maivn_studio/maivn_studio_apps.png "Studio app list with variant selection")
 
 ## Sessions and the Chat Composer
 
