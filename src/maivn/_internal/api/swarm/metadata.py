@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 from maivn_shared import (
+    AgentDependency,
     MemoryAssetsConfig,
     MemoryConfig,
     SessionRequest,
@@ -30,8 +31,16 @@ def enrich_state_metadata(
 ) -> None:
     """Enrich state with typed swarm and memory asset configuration."""
     invocation_tool_map = _build_invocation_tool_map(swarm)
+    agent_id_to_name = {
+        getattr(agent, "id", ""): getattr(agent, "name", "")
+        for agent in swarm.agents
+        if getattr(agent, "id", None) and getattr(agent, "name", None)
+    }
     roster: list[SwarmAgentConfig] = [
-        _build_agent_roster_entry(swarm, agent, invocation_tool_map) for agent in swarm.agents
+        _build_agent_roster_entry(
+            swarm, agent, invocation_tool_map, agent_id_to_name=agent_id_to_name
+        )
+        for agent in swarm.agents
     ]
 
     resolved_swarm_memory_config = swarm.resolve_memory_config(memory_config)
@@ -100,6 +109,8 @@ def _build_agent_roster_entry(
     swarm: Swarm,
     agent: Agent,
     invocation_tool_map: dict[str, str],
+    *,
+    agent_id_to_name: dict[str, str],
 ) -> SwarmAgentConfig:
     """Build a roster entry for an agent."""
     agent_id = getattr(agent, "id", None)
@@ -118,6 +129,9 @@ def _build_agent_roster_entry(
         has_final_tool=has_final_tool,
         tool_count=tool_count,
     )
+    invokes_via_dependency = _collect_agent_dependency_targets(
+        tools, agent_id_to_name=agent_id_to_name
+    )
 
     roster_entry: dict[str, Any] = {
         "agent_id": agent_id,
@@ -129,9 +143,53 @@ def _build_agent_roster_entry(
         "has_final_tool": has_final_tool,
         "invocation_tool_id": invocation_tool_map.get(agent_id or ""),
     }
+    if invokes_via_dependency:
+        roster_entry["invokes_via_dependency"] = invokes_via_dependency
     _apply_agent_memory_config(roster_entry, agent)
     _apply_agent_memory_assets(roster_entry, agent, swarm)
     return SwarmAgentConfig.model_validate(roster_entry)
+
+
+def _collect_agent_dependency_targets(
+    tools: list[Any],
+    *,
+    agent_id_to_name: dict[str, str],
+) -> list[str]:
+    """Walk tools for ``@depends_on_agent`` and return the swarm-resolvable
+    target agent names (deduped, in declaration order).
+
+    The orchestrator gets these so it knows which agents are already going to
+    be invoked as a tool dependency by another roster member, so it can avoid
+    scheduling a redundant separate stage. Only swarm-member targets are
+    surfaced — out-of-roster agent_ids are dropped because the orchestrator
+    can't act on them.
+
+    Reads from ``BaseTool.dependencies`` (the canonical compiled location);
+    falls back to the pre-compile ``_dependencies`` / ``__maivn_pending_deps__``
+    attribute for tools whose decorator chain hasn't materialized yet.
+    """
+    targets: list[str] = []
+    seen: set[str] = set()
+    for tool in tools:
+        deps: Any = getattr(tool, "dependencies", None)
+        if not deps:
+            deps = getattr(tool, "_dependencies", None)
+        if not deps:
+            deps = getattr(tool, "__maivn_pending_deps__", None)
+        if not deps:
+            continue
+        for dep in deps:
+            if not isinstance(dep, AgentDependency):
+                continue
+            target_id = getattr(dep, "agent_id", None)
+            if not isinstance(target_id, str) or not target_id:
+                continue
+            target_name = agent_id_to_name.get(target_id)
+            if not target_name or target_name in seen:
+                continue
+            targets.append(target_name)
+            seen.add(target_name)
+    return targets
 
 
 # MARK: Roster Helpers

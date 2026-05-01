@@ -392,10 +392,16 @@ class Swarm(BaseScope):
         invocation_tool_map: dict[str, str],
     ) -> dict[str, Any]:
         """Build a roster entry for an agent."""
+        agent_id_to_name = {
+            getattr(member, "id", ""): getattr(member, "name", "")
+            for member in self.agents
+            if getattr(member, "id", None) and getattr(member, "name", None)
+        }
         return _swarm_build_agent_roster_entry(
             self,
             agent,
             invocation_tool_map,
+            agent_id_to_name=agent_id_to_name,
         ).model_dump(exclude_none=True)
 
     # MARK: - Tool Registration
