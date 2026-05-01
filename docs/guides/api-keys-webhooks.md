@@ -15,7 +15,7 @@ Use API keys when your application needs server-to-server access.
 
 ![Developer Portal workspace dashboard](/developer_portal/maivn_portal_dashboard.png "Projects are the entry point for API key and webhook management")
 
-![image placeholder: Project API keys table and key-creation modal](/developer_portal/placeholders/project-api-keys.png "Capture active and revoked key rows using non-production prefixes only")
+![Project API keys table with active keys and the key-creation modal](/developer_portal/placeholders/project-api-keys.png "Project API keys page")
 
 ### Visibility model
 
@@ -41,9 +41,9 @@ Each webhook includes:
 - Retry idempotently on duplicates/timeouts.
 - Track consecutive failures and disable noisy endpoints.
 
-![image placeholder: Project webhooks list with active and inactive endpoints](/developer_portal/placeholders/project-webhooks-list.png "Capture endpoint URL patterns with test domains only")
+![Project webhooks list with active endpoints](/developer_portal/placeholders/project-webhooks-list.png "Project webhooks page")
 
-![image placeholder: Webhook delivery history view with success and failed attempts](/developer_portal/placeholders/webhook-deliveries.png "Capture event types and statuses with sanitized payload metadata")
+![Webhook delivery history page with status filters and empty state](/developer_portal/placeholders/webhook-deliveries.png "Webhook delivery history")
 
 ## Security Checklist
 

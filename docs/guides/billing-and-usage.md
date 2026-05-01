@@ -11,7 +11,7 @@ The portal provides four billing pages per organization:
 - `Executions`: run-level inspection with event tree and structured output
 - `Invoices`: historical billing records
 
-![image placeholder: Billing subscription page showing current plan and status](/developer_portal/placeholders/billing-subscription.png "Capture with a sample organization and non-sensitive billing labels only")
+![Billing subscription page showing current plan and status](/developer_portal/placeholders/billing-subscription.png "Billing subscription page")
 
 ## Usage Interpretation
 
@@ -64,13 +64,13 @@ When you change plans:
 2. Billing period remains aligned with current cycle rules.
 3. Team members immediately see updated usage ceilings.
 
-![image placeholder: Billing usage dashboard with token, request, and storage charts](/developer_portal/placeholders/billing-usage.png "Capture percentage bars using synthetic usage numbers")
+![Billing usage dashboard with token, request, and storage quota cards](/developer_portal/placeholders/billing-usage.png "Billing usage page")
 
-![image placeholder: Usage intelligence view with filters, charts, and project distribution](/developer_portal/placeholders/billing-usage-intelligence.png "Capture filters, timeline chart, and project distribution using synthetic, non-sensitive data")
+![Usage intelligence view with filters, charts, and project distribution](/developer_portal/placeholders/billing-usage-intelligence.png "Usage intelligence view")
 
-![image placeholder: Executions explorer with run list and per-run event tree](/developer_portal/placeholders/billing-executions-explorer.png "Capture run summary cards, selected run detail, and event tree using synthetic data")
+![Executions explorer with run list and per-run event tree](/developer_portal/placeholders/billing-executions-explorer.png "Executions explorer")
 
-![image placeholder: Billing invoices table with period, amount, and status](/developer_portal/placeholders/billing-invoices.png "Capture test invoice rows with sample amounts only")
+![Billing invoices table with period, amount, and status](/developer_portal/placeholders/billing-invoices.png "Billing invoices")
 
 ## Operational Playbook
 
