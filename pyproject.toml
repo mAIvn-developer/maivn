@@ -5,27 +5,29 @@ build-backend = "hatchling.build"
 [project]
 name = "maivn"
 dynamic = ["version"]
-description = "Maivn Python SDK"
+description = "mAIvn Python SDK for building agentic systems with typed tools and dependencies"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "LICENSE" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Chad Heathcote", email = "developer@maivn.io" }]
-keywords = ["sdk", "maivn"]
+keywords = ["sdk", "maivn", "ai", "agents", "llm", "agentic"]
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: Apache Software License",
+    "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
 ]
-
 dependencies = [
     # SDK runtime
     "croniter>=2.0.1",
     "docstring-parser>=0.17.0",
-    "maivn-shared>=0.1.0,<0.2.0",
+    "maivn-shared>=0.2.0,<0.3.0",
     "prompt-toolkit>=3.0.52",
     "python-dotenv>=1.2.2",
     "rich>=14.3.4",
@@ -34,10 +36,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-studio = ["maivn-studio>=0.1.0,<0.2.0"]
+studio = ["maivn-studio>=0.2.0,<0.3.0"]
 # Drop-in FastAPI/Starlette adapter for streaming bridge events to a
 # frontend. Both deps are MIT-licensed (fully OSI-approved).
 fastapi = ["fastapi>=0.136.1", "sse-starlette>=2.1.3"]
+
+[project.urls]
+Homepage = "https://maivn.io"
+Documentation = "https://github.com/mAIvn-developer/maivn/tree/master/docs"
+Repository = "https://github.com/mAIvn-developer/maivn"
+Issues = "https://github.com/mAIvn-developer/maivn/issues"
+Changelog = "https://github.com/mAIvn-developer/maivn/blob/master/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
