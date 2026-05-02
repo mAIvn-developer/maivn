@@ -55,6 +55,7 @@ class StreamingSSEClient(SSEClient):
         """
         from urllib.request import Request, urlopen
 
+        self._validate_stream_url(url)
         merged_headers: dict[str, str] = {}
         if headers:
             merged_headers = {
@@ -63,7 +64,11 @@ class StreamingSSEClient(SSEClient):
         merged_headers["Accept"] = "text/event-stream"
         req = Request(url, headers=merged_headers)
         try:
-            with cast(IO[bytes], urlopen(req, timeout=self._timeout)) as resp:
+            # _validate_stream_url rejects file: and custom schemes before urlopen.
+            with cast(
+                IO[bytes],
+                urlopen(req, timeout=self._timeout),  # noqa: S310  # nosec B310
+            ) as resp:
                 buf = b""
                 while True:
                     chunk = resp.readline()
@@ -84,6 +89,15 @@ class StreamingSSEClient(SSEClient):
             ) from exc
 
     # MARK: - Private Methods
+
+    @staticmethod
+    def _validate_stream_url(url: str) -> None:
+        """Reject local-file and custom-scheme URLs before urllib opens them."""
+        from urllib.parse import urlsplit
+
+        parsed = urlsplit(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("SSE stream URL must be an absolute http:// or https:// URL")
 
     def _is_event_complete(self, buf: bytes) -> bool:
         """Check if the buffer contains a complete SSE event.

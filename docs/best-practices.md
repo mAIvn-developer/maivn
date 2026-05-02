@@ -315,14 +315,13 @@ mcp_server = MCPServer(
     transport='stdio',
     command='python',
     args=['-m', 'my_mcp_server'],
-    inherit_env=False,
     inherit_env_allowlist=['OPENAI_API_KEY'],
     env={'SERVICE_TOKEN': 'explicit-token'},
     stdio_response_timeout_seconds=30,
 )
 ```
 
-Keep `inherit_env=True` for compatibility when you trust the subprocess and want the simplest setup. Tighten it for third-party tools, sample apps, or mixed-trust environments.
+The SDK defaults to a minimal subprocess environment. Set `inherit_env=True` only when you trust the MCP server and it genuinely needs the full parent shell environment.
 
 ## Error Handling
 

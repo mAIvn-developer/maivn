@@ -27,14 +27,39 @@ def test_stdio_response_timeout_raises_timeout() -> None:
 
 def test_stdio_server_without_timeout_emits_warning() -> None:
     with pytest.warns(RuntimeWarning, match="no stdio_response_timeout_seconds configured"):
-        MCPServer(
+        server = MCPServer(
             name="demo",
             transport="stdio",
             command="python",
         )
+    assert server.inherit_env is False
 
 
-def test_stdio_client_build_process_env_defaults_to_parent_env_copy() -> None:
+def test_stdio_client_build_process_env_defaults_to_minimal_runtime_env() -> None:
+    client = _McpStdioClient.__new__(_McpStdioClient)
+    client._server = SimpleNamespace(
+        env=None,
+        inherit_env=False,
+        inherit_env_allowlist=None,
+    )
+
+    with patch.dict(
+        os.environ,
+        {
+            "PATH": "C:\\Python",
+            "SystemRoot": "C:\\Windows",
+            "MAIVN_API_KEY": "secret",
+        },
+        clear=True,
+    ):
+        env = client._build_process_env()
+
+    assert env["PATH"] == "C:\\Python"
+    assert env.get("SystemRoot") == "C:\\Windows" or env.get("SYSTEMROOT") == "C:\\Windows"
+    assert "MAIVN_API_KEY" not in env
+
+
+def test_stdio_client_build_process_env_can_explicitly_inherit_parent_env() -> None:
     client = _McpStdioClient.__new__(_McpStdioClient)
     client._server = SimpleNamespace(
         env=None,

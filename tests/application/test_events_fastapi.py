@@ -103,6 +103,13 @@ def test_get_event_bridge_creates_on_demand_then_returns_same_instance(
     assert first is second
 
 
+def test_get_event_bridge_defaults_to_frontend_safe_audience(
+    fresh_registry: BridgeRegistry,
+) -> None:
+    bridge = get_event_bridge("safe-default", registry=fresh_registry)
+    assert bridge.audience == "frontend_safe"
+
+
 def test_get_event_bridge_with_create_false_raises_for_missing(
     fresh_registry: BridgeRegistry,
 ) -> None:

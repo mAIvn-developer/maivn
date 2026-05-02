@@ -92,7 +92,7 @@ The `mount_events` helper wraps `EventBridge` and `BridgeRegistry` behind a Fast
 - **Comment-frame keep-alives** so frontends never need to subscribe to or filter a heartbeat event type
 - **Bounded history + queue** with configurable backpressure (`block` / `drop_oldest` / `drop_newest`)
 - **Schema validation** that catches malformed events before they hit the wire
-- **Audience-based redaction** (`internal` vs `frontend_safe`) so you don't accidentally leak injected private data to the browser
+- **Audience-based redaction** (`internal` vs `frontend_safe`) so you don't accidentally leak injected private data to the browser. The FastAPI helper creates `frontend_safe` bridges by default.
 - **Per-session, per-process bridge registry** with explicit lifecycle (create / get / remove)
 - **Optional auth hook** as a normal FastAPI dependency
 
