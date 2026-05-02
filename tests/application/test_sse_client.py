@@ -62,3 +62,17 @@ def test_iter_events_raises_when_stream_closes(monkeypatch: pytest.MonkeyPatch) 
     client = StreamingSSEClient(timeout=1.0)
     with pytest.raises(RuntimeError, match="Failed to read SSE event stream"):
         next(client.iter_events("http://example.com/stream"))
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file:///tmp/session-events",
+        "ftp://example.com/stream",
+        "/relative/events",
+    ],
+)
+def test_iter_events_rejects_non_http_stream_urls(url: str) -> None:
+    client = StreamingSSEClient(timeout=1.0)
+    with pytest.raises(ValueError, match="absolute http:// or https://"):
+        next(client.iter_events(url))

@@ -22,7 +22,7 @@ from fastapi import FastAPI
 from maivn.events.fastapi import get_event_bridge, mount_events
 
 app = FastAPI()
-mount_events(app)  # → GET /maivn/events/{session_id}
+mount_events(app)  # → GET /maivn/events/{session_id}, frontend_safe by default
 
 @app.post("/start/{session_id}")
 async def start(session_id: str):

@@ -43,7 +43,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
-from . import BridgeRegistry, EventBridge
+from . import BridgeAudience, BridgeRegistry, EventBridge
 
 if TYPE_CHECKING:
     from fastapi import APIRouter, FastAPI
@@ -90,6 +90,7 @@ def get_event_bridge(
     create: bool = True,
     factory: BridgeFactory | None = None,
     registry: BridgeRegistry | None = None,
+    audience: BridgeAudience = "frontend_safe",
 ) -> EventBridge:
     """Return the bridge for ``session_id``, creating one if needed.
 
@@ -108,6 +109,10 @@ def get_event_bridge(
     registry:
         Use a custom registry instead of the module-level default. Useful
         for tests or for partitioning bridges across mounted sub-apps.
+    audience:
+        Audience used when creating a bridge without a custom factory. The
+        FastAPI adapter defaults to ``"frontend_safe"`` because events are
+        usually consumed by end-user browser clients.
     """
     target_registry = registry if registry is not None else _default_registry
     existing = target_registry.get(session_id)
@@ -115,7 +120,8 @@ def get_event_bridge(
         return existing
     if not create:
         raise KeyError(f"No event bridge registered for session {session_id!r}")
-    return target_registry.create(session_id, factory=factory)
+    bridge_factory = factory or (lambda sid: EventBridge(sid, audience=audience))
+    return target_registry.create(session_id, factory=bridge_factory)
 
 
 def remove_event_bridge(
@@ -140,6 +146,7 @@ def create_event_router(
     auth: AuthHook | None = None,
     factory: BridgeFactory | None = None,
     registry: BridgeRegistry | None = None,
+    audience: BridgeAudience = "frontend_safe",
     heartbeat_interval: float | None = None,
     tags: list[str] | None = None,
 ) -> APIRouter:
@@ -166,6 +173,9 @@ def create_event_router(
         Optional :class:`EventBridge` factory; see :func:`get_event_bridge`.
     registry:
         Optional :class:`BridgeRegistry`; see :func:`get_event_bridge`.
+    audience:
+        Audience used for automatically created bridges when ``factory`` is
+        not supplied. Defaults to ``"frontend_safe"`` for browser-facing SSE.
     heartbeat_interval:
         Override the bridge default for this endpoint only. Useful when
         the client lives behind a proxy with an aggressive idle timeout.
@@ -203,6 +213,7 @@ def create_event_router(
             create=True,
             factory=factory,
             registry=target_registry,
+            audience=audience,
         )
         return EventSourceResponse(
             bridge.generate_sse(
@@ -222,6 +233,7 @@ def mount_events(
     auth: AuthHook | None = None,
     factory: BridgeFactory | None = None,
     registry: BridgeRegistry | None = None,
+    audience: BridgeAudience = "frontend_safe",
     heartbeat_interval: float | None = None,
     tags: list[str] | None = None,
 ) -> APIRouter:
@@ -237,6 +249,7 @@ def mount_events(
         auth=auth,
         factory=factory,
         registry=registry,
+        audience=audience,
         heartbeat_interval=heartbeat_interval,
         tags=tags,
     )

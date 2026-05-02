@@ -29,7 +29,7 @@ MCPServer(
     command: str | None = None,
     args: list[str] = [],
     env: dict[str, str] | None = None,
-    inherit_env: bool = True,
+    inherit_env: bool = False,
     inherit_env_allowlist: list[str] | None = None,
     working_dir: str | None = None,
     headers: dict[str, str] | None = None,
@@ -61,8 +61,8 @@ MCPServer(
 | `command`                 | `str \| None`                  | `None`         | Command to launch stdio server                                |
 | `args`                    | `list[str]`                    | `[]`           | Arguments for stdio server                                    |
 | `env`                     | `dict[str, str] \| None`       | `None`         | Environment variables                                         |
-| `inherit_env`             | `bool`                         | `True`         | Whether stdio servers inherit the parent process environment  |
-| `inherit_env_allowlist`   | `list[str] \| None`            | `None`         | Optional parent env vars to inherit when tightening stdio env |
+| `inherit_env`             | `bool`                         | `False`        | Whether stdio servers inherit the full parent process environment |
+| `inherit_env_allowlist`   | `list[str] \| None`            | `None`         | Optional parent env vars to inherit with the minimal runtime env |
 | `working_dir`             | `str \| None`                  | `None`         | Working directory for stdio server                            |
 | `headers`                 | `dict[str, str] \| None`       | `None`         | HTTP headers                                                  |
 | `protocol_version`        | `str`                          | `'2025-06-18'` | MCP protocol version                                          |
@@ -106,14 +106,13 @@ mcp_server = MCPServer(
     transport='stdio',
     command='python',
     args=['-m', 'my_mcp_server'],
-    inherit_env=False,
     inherit_env_allowlist=['OPENAI_API_KEY'],
     env={'API_KEY': 'explicit-token'},
     stdio_response_timeout_seconds=30,
 )
 ```
 
-When `inherit_env=False`, maivn still carries a small runtime baseline such as `PATH` so the subprocess can start. Add provider credentials through `env` or `inherit_env_allowlist` explicitly when you want tighter control.
+By default, maivn carries only a small runtime baseline such as `PATH` so the subprocess can start. Add provider credentials through `env` or `inherit_env_allowlist` explicitly. Set `inherit_env=True` only for trusted subprocesses that need the full parent shell environment.
 
 ### http Transport
 

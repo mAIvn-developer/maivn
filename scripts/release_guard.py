@@ -37,7 +37,11 @@ def fetch_published_versions(project_name: str) -> list[Version]:
     url = f"https://pypi.org/pypi/{project_name}/json"
     request = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        # Fixed HTTPS PyPI API URL; no user-controlled scheme reaches urlopen.
+        with urllib.request.urlopen(  # noqa: S310  # nosec B310
+            request,
+            timeout=15,
+        ) as response:
             payload = json.load(response)
     except urllib.error.HTTPError as exc:
         if exc.code == 404:

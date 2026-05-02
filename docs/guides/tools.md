@@ -28,7 +28,6 @@ mcp_server = MCPServer(
     transport='stdio',
     command='python',
     args=['-m', 'my_mcp_server'],
-    inherit_env=False,
     inherit_env_allowlist=['OPENAI_API_KEY'],
     env={'SERVICE_TOKEN': 'explicit-token'},
 )

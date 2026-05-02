@@ -47,17 +47,19 @@ class MCPServer(BaseModel):
     args: list[str] = Field(default_factory=list, description="Arguments for stdio MCP server")
     env: dict[str, str] | None = Field(default=None, description="Environment variables")
     inherit_env: bool = Field(
-        default=True,
+        default=False,
         description=(
-            "Whether a stdio MCP server inherits the parent process environment. "
-            "Disable or combine with inherit_env_allowlist for tighter control."
+            "Whether a stdio MCP server inherits the full parent process environment. "
+            "Defaults to False so third-party MCP servers do not receive shell secrets "
+            "unless callers explicitly opt in."
         ),
     )
     inherit_env_allowlist: list[str] | None = Field(
         default=None,
         description=(
             "Optional parent environment variable names to inherit. When set, only "
-            "these variables plus a minimal runtime baseline are inherited."
+            "these variables plus a minimal runtime baseline are inherited, even if "
+            "inherit_env is True."
         ),
     )
     working_dir: str | None = Field(default=None, description="Working directory for stdio server")
