@@ -367,7 +367,7 @@ response = content_team.events().invoke(
     force_final_tool=True,
 )
 
-print(response.content)
+print(response.result)
 ```
 
 ## Best Practices
