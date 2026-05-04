@@ -21,71 +21,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Determine shared dependency access
-        id: shared_access
-        shell: bash
-        run: |
-          if [[ "${{ github.event.repository.private }}" == "false" ]]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "enabled=false" >> "$GITHUB_OUTPUT"
-          {
-            echo "### Validation skipped"
-            echo
-            echo "Shared dependency validation is disabled because this repository is not public yet."
-            echo "Full validation will resume once the public-repo rollout is complete."
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - uses: actions/setup-python@v5
-        if: steps.shared_access.outputs.enabled == 'true'
         with:
           python-version: "3.12"
 
       - uses: astral-sh/setup-uv@v6
-        if: steps.shared_access.outputs.enabled == 'true'
         with:
           enable-cache: true
 
-      - name: Check out maivn-shared
-        if: steps.shared_access.outputs.enabled == 'true'
-        uses: actions/checkout@v4
-        with:
-          path: .deps/maivn-shared
-          repository: ${{ format('{0}/maivn-shared', github.repository_owner) }}
-          ref: master
-          token: ${{ github.token }}
-
-      - name: Inject local maivn-shared source override
-        if: steps.shared_access.outputs.enabled == 'true'
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          pyproject = Path("pyproject.toml")
-          text = pyproject.read_text(encoding="utf-8")
-          marker = "\n[tool.uv.sources]\nmaivn-shared = { path = \".deps/maivn-shared\", editable = true }\n"
-          if "[tool.uv.sources]" not in text:
-              pyproject.write_text(text.rstrip() + marker, encoding="utf-8")
-          PY
-
       - name: Sync environment
-        if: steps.shared_access.outputs.enabled == 'true'
         run: uv sync --frozen
 
       - name: Validate OSS license report
-        if: steps.shared_access.outputs.enabled == 'true'
-        run: uv run --no-sync python scripts/oss_license_audit.py --check
+        run: uv run --no-sync python scripts/oss_license_audit.py
 
       - name: Ruff
-        if: steps.shared_access.outputs.enabled == 'true'
         run: uv run --no-sync ruff check .
 
       - name: Pyright
-        if: steps.shared_access.outputs.enabled == 'true'
         run: uv run --no-sync pyright src/maivn
 
       - name: Pytest
-        if: steps.shared_access.outputs.enabled == 'true'
         run: uv run --no-sync pytest
