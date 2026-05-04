@@ -99,7 +99,7 @@ response = agent.invoke([
     HumanMessage(content='What is the weather in Austin?')
 ])
 
-print(response.content)
+print(response.response)
 ```
 
 ## Complete Example
@@ -129,7 +129,7 @@ response = agent.invoke([
     HumanMessage(content='What is the weather in Austin?')
 ])
 
-print(response.content)
+print(response.response)
 ```
 
 ## Step 5: Add Structured Output
@@ -153,7 +153,7 @@ response = agent.invoke(
 )
 
 # Response contains structured data matching WeatherReport
-print(response.content)
+print(response.result)
 ```
 
 ## Step 6: Inspect Execution Events
