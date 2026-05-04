@@ -36,6 +36,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+studio = ["maivn-studio>=0.2.0,<0.3.0"]
 # Drop-in FastAPI/Starlette adapter for streaming bridge events to a
 # frontend. Both deps are MIT-licensed (fully OSI-approved).
 fastapi = ["fastapi>=0.136.1", "sse-starlette>=2.1.3"]
