@@ -51,6 +51,8 @@ If you prefer to install the companion package directly, `pip install maivn-stud
 ### Basic Agent with Tools
 
 ```python
+import os
+
 from maivn import Agent
 from maivn.messages import HumanMessage
 
@@ -58,7 +60,7 @@ agent = Agent(
     name='weather_agent',
     description='Provides weather information',
     system_prompt='You are a helpful weather assistant.',
-    api_key='your-api-key',  # or set MAIVN_API_KEY env var
+    api_key=os.environ['MAIVN_API_KEY'],
 )
 
 @agent.toolify(description='Get current weather for a city')
@@ -66,8 +68,11 @@ def get_weather(city: str) -> dict:
     return {'city': city, 'temp': 72, 'condition': 'sunny'}
 
 response = agent.invoke([HumanMessage(content='What is the weather in Austin?')])
-print(response.content)
+print(response.response)
 ```
+
+`invoke()` returns a `SessionResponse`. Use `response.response` for the final
+assistant text and `response.result` for structured or final-tool outputs.
 
 You can also register tools without decorators:
 
@@ -331,13 +336,13 @@ Import from `maivn.messages`:
 
 | Variable                        | Description                    | Default  |
 | ------------------------------- | ------------------------------ | -------- |
-| `MAIVN_API_KEY`                 | API key for authentication     | Required |
+| `MAIVN_API_KEY`                 | API key loaded by env-based setup or your own `os.environ` lookup | None |
 | `MAIVN_TIMEOUT`                 | HTTP request timeout (seconds) | 600      |
 | `MAIVN_TOOL_EXECUTION_TIMEOUT`  | Per-tool timeout (seconds)     | 900      |
 | `MAIVN_DEPENDENCY_WAIT_TIMEOUT` | Dependency resolution timeout  | 300      |
 | `MAIVN_TOTAL_EXECUTION_TIMEOUT` | Total session timeout          | 7200     |
 | `MAIVN_ENABLE_BACKGROUND_EXECUTION` | Background tool execution | True     |
-| `MAIVN_LOG_LEVEL`               | Logging level                  | INFO     |
+| `MAIVN_LOG_LEVEL`               | Console log level              | OFF      |
 | `MAIVN_DEPLOYMENT_TIMEZONE`     | Server timezone                | UTC      |
 
 `MAIVN_ENABLE_BACKGROUND_EXECUTION` controls whether tool calls are dispatched

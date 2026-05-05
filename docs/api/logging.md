@@ -11,7 +11,8 @@ from maivn import configure_logging, get_logger
 ## configure_logging()
 
 Initialize the SDK's process-wide logger. Optional `log_file_path` writes log
-records to a file in addition to standard output.
+records to a file. Console logging is off by default; set `MAIVN_LOG_LEVEL`
+before importing/configuring SDK logging when you want console output.
 
 ```python
 def configure_logging(log_file_path: Path | str | None = None) -> MaivnSDKLogger
@@ -21,7 +22,7 @@ def configure_logging(log_file_path: Path | str | None = None) -> MaivnSDKLogger
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `log_file_path` | `Path \| str \| None` | `None` | Optional path to write log records. When `None`, the SDK logs to stdout only |
+| `log_file_path` | `Path \| str \| None` | `None` | Optional path to write log records. When `None`, no file logging is configured |
 
 ### Returns
 
@@ -79,7 +80,7 @@ logger.error('Error message')
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MAIVN_LOG_LEVEL` | Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `INFO` |
+| `MAIVN_LOG_LEVEL` | Console log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `OFF` |
 | `MAIVN_LOG_FORMAT` | Custom format string | SDK default |
 | `MAIVN_ENABLE_TIMING_LOGS` | Enable timing logs (`true`/`false`) | `true` |
 
@@ -150,6 +151,9 @@ This outputs execution progress to the terminal (or your custom event sink), sep
 
 ### Default Format
 
+When console logging is enabled or a file path is configured, records use the
+configured formatter:
+
 ```
 2024-01-15 10:30:45,123 - maivn - INFO - Agent initialized: my_agent
 2024-01-15 10:30:45,456 - maivn - DEBUG - Compiling tools for agent
@@ -158,7 +162,7 @@ This outputs execution progress to the terminal (or your custom event sink), sep
 
 ### With Timing Logs
 
-When `MAIVN_ENABLE_TIMING_LOGS=true`:
+When `MAIVN_ENABLE_TIMING_LOGS=true` and logging output is enabled:
 
 ```
 2024-01-15 10:30:45,123 - maivn - INFO - [TIMING] Tool execution: 1.234s
@@ -169,7 +173,7 @@ When `MAIVN_ENABLE_TIMING_LOGS=true`:
 
 1. **Initialize early**: Call `configure_logging()` before creating agents
 2. **Use log directories**: Store logs in a dedicated `logs/` directory
-3. **Set appropriate levels**: Use `DEBUG` for development, `INFO` for production
+3. **Set appropriate levels**: Use `MAIVN_LOG_LEVEL=DEBUG` for console debugging, or keep console logging off and rely on a log file in production
 4. **Check logs for errors**: Review logs when debugging issues
 
 ## See Also

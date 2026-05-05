@@ -29,7 +29,7 @@ Agent(
     tools: list[Any] = [],
     use_as_final_output: bool = False,
     included_nested_synthesis: bool | Literal['auto'] = 'auto',
-    private_data: dict = {},
+    private_data: dict | list[PrivateData] = {},
     allow_private_in_system_tools: bool = False,
     memory_config: MemoryConfig | dict[str, Any] = {},
     system_tools_config: SystemToolsConfig | dict[str, Any] = {},
@@ -60,8 +60,8 @@ Agent(
 | `tools`                     | `list[Any]`                      | `[]`       | Initial tools to register on this agent. Accepts callables, Pydantic model classes, and prebuilt SDK tool objects                                                      |
 | `use_as_final_output`       | `bool`                           | `False`    | When in a Swarm, designate this agent's output as final                                                                                                                |
 | `included_nested_synthesis` | `bool \| Literal['auto']`        | `'auto'`   | Nested synthesis mode for Swarm invocations: `True` always includes synthesized response, `False` returns tool results only, `'auto'` lets orchestrator/runtime decide |
-| `private_data`              | `dict`                           | `{}`       | Server-side secret data for dependency injection                                                                                                                       |
-| `allow_private_in_system_tools` | `bool`                       | `False`    | Permit `private_data` placeholders to flow through system tools (web search, repl). Defaults to `False`; opt in only when needed                                       |
+| `private_data`              | `dict \| list[PrivateData]`      | `{}`       | Server-side secret data for dependency injection                                                                                                                       |
+| `allow_private_in_system_tools` | `bool`                       | `False`    | Permit raw `private_data` values to flow through system tools (web search, repl). Defaults to `False`; opt in only when needed                                         |
 | `memory_config`             | `MemoryConfig \| dict[str, Any]` | `{}`       | Default typed memory configuration applied on every invocation from this scope                                                                                         |
 | `system_tools_config`       | `SystemToolsConfig \| dict`      | `{}`       | Default typed system-tool allowlists and approval controls applied on every invocation                                                                                  |
 | `orchestration_config`      | `SessionOrchestrationConfig \| dict` | `{}`   | Default typed orchestration loop controls applied on every invocation                                                                                                   |
@@ -240,9 +240,12 @@ def invoke(
 
 `SessionResponse` containing:
 
-- `content`: The response content
-- `tool_results`: Results from executed tools
+- `response`: The final assistant response text
+- `responses`: Assistant response texts emitted during the session
+- `result`: Structured or final-tool output, when applicable
 - `metadata`: Response metadata
+- `token_usage`: Token usage summary, when available
+- `status` / `error`: Execution status and failure details
 
 #### Typed runtime controls
 
@@ -395,7 +398,7 @@ Preview server-side redaction for a `RedactedMessage` without starting an invoca
 def preview_redaction(
     message: RedactedMessage,
     *,
-    known_pii_values: list[str] | None = None,
+    known_pii_values: list[str | PrivateData] | None = None,
     private_data: dict[str, Any] | None = None,
 ) -> RedactionPreviewResponse
 ```
@@ -407,7 +410,7 @@ Use this when you want to inspect which placeholders will be inserted, which val
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
 | `message` | `RedactedMessage` | Required | Candidate message to redact on the server |
-| `known_pii_values` | `list[str] \| None` | `None` | Optional literal values that must be redacted if found |
+| `known_pii_values` | `list[str \| PrivateData] \| None` | `None` | Optional literal values or `PrivateData` descriptors that must be redacted if found |
 | `private_data` | `dict[str, Any] \| None` | `None` | Optional extra private data merged with the scope's existing `private_data` |
 
 #### Returns
@@ -875,17 +878,21 @@ agent = Agent(
 )
 ```
 
-## Context Manager
+## Resource Cleanup
 
-Agent supports context manager protocol for resource cleanup:
+Call `close()` when you are done with an agent that registered MCP servers or
+other long-lived resources:
 
 ```python
-with Agent(name='temp', api_key='...') as agent:
+agent = Agent(name='temp', api_key='...')
+try:
     @agent.toolify()
     def my_tool() -> dict:
         return {}
+
     response = agent.invoke([...])
-# Resources automatically cleaned up
+finally:
+    agent.close()
 ```
 
 ## BaseScope

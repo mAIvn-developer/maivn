@@ -176,16 +176,18 @@ Organization governance methods:
 
 - `get_organization_memory_policy(org_id)`
 - `update_organization_memory_policy(org_id, policy)`
-- `purge_organization_memory(org_id, *, project_id=None, session_id=None)`
+- `purge_organization_memory(org_id, *, confirm_token="PURGE_MEMORY", project_id=None, session_id=None)`
 
 Project resource methods:
 
 - `list_project_memory_resources(project_id)`
 - `list_memory_skills(project_id, ...)`
+- `get_memory_skill(project_id, skill_id)`
 - `create_memory_skill(project_id, payload)`
 - `update_memory_skill(project_id, skill_id, payload)`
 - `delete_memory_skill(project_id, skill_id)`
 - `list_memory_insights(project_id, ...)`
+- `get_memory_insight(project_id, insight_id)`
 - `create_memory_insight(project_id, payload)`
 - `update_memory_insight(project_id, insight_id, payload)`
 - `promote_memory_insight(project_id, insight_id, *, target_scope)`
@@ -321,6 +323,7 @@ Uses these environment variables:
 
 - `MAIVN_API_KEY` - API key
 - `MAIVN_TIMEOUT` - HTTP timeout
+- `MAIVN_DEPLOYMENT_TIMEZONE` - Server/deployment timezone fallback
 - `MAIVN_TOOL_EXECUTION_TIMEOUT` - Per-tool timeout
 - `MAIVN_DEPENDENCY_WAIT_TIMEOUT` - Dependency timeout
 - `MAIVN_TOTAL_EXECUTION_TIMEOUT` - Total timeout

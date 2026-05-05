@@ -96,7 +96,7 @@ Use the bridge audience to match the trust level of the frontend:
 
 ## Dedup behavior
 
-The bridge always dedupes `interrupt_required` events by `(prompt, arg_name | data_key)`. The reporter path and the contract-stream replay can otherwise surface the same prompt twice — without dedup, a frontend would render two prompts for one logical interrupt.
+By default, the bridge dedupes `interrupt_required` events by `(prompt, arg_name | data_key)`. The reporter path and the contract-stream replay can otherwise surface the same prompt twice — without dedup, a frontend would render two prompts for one logical interrupt.
 
 `status_message` dedup is opt-in (`dedupe_status_messages=True`) for apps that surface the same status through multiple reporting paths. Most apps emit deliberate status updates that can legitimately repeat, so the default is off.
 

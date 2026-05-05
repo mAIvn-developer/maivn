@@ -192,6 +192,7 @@ Timeout values are resolved in this order:
 # 1. client.tool_execution_timeout if set
 # 2. config.execution.tool_execution_timeout_seconds if set
 # 3. Default: 900 seconds
+```
 
 ## Background Execution
 
@@ -199,7 +200,6 @@ Timeout values are resolved in this order:
 through the background executor (thread pool). When set to `False`, tool execution
 is performed inline and sequentially, which can improve determinism but may reduce
 throughput.
-```
 
 ## See Also
 

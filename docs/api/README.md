@@ -8,6 +8,9 @@ The maivn SDK exports its public API from the top-level `maivn` package:
 
 ```python
 from maivn import (
+    # Version
+    __version__,
+
     # Core Classes
     Agent,
     Swarm,
@@ -108,6 +111,18 @@ from maivn import (
     NormalizedStreamState,
     RawSSEEvent,
     UIEvent,
+    build_agent_assignment_payload,
+    build_assistant_chunk_payload,
+    build_enrichment_payload,
+    build_error_payload,
+    build_final_payload,
+    build_interrupt_required_payload,
+    build_session_start_payload,
+    build_status_message_payload,
+    build_system_tool_chunk_payload,
+    build_system_tool_complete_payload,
+    build_system_tool_start_payload,
+    build_tool_event_payload,
     forward_normalized_event,
     forward_normalized_stream,
     normalize_stream,

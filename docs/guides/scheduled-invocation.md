@@ -182,14 +182,18 @@ CronSchedule('0 9 * * MON-FRI', tz='America/New_York').upcoming(
 `scope.every(interval, ...)` — fixed cadence aligned to a start time:
 
 ```python
-agent.every(timedelta(minutes=5))                       # every 5 minutes from now
-agent.every(60, start=datetime(2026, 5, 1, tzinfo=UTC)) # every minute from May 1
+from datetime import datetime, timedelta, timezone
+
+agent.every(timedelta(minutes=5))  # every 5 minutes from now
+agent.every(60, start=datetime(2026, 5, 1, tzinfo=timezone.utc))  # every minute from May 1
 ```
 
 `scope.at(when, ...)` — one-shot; useful for "in two weeks, do X":
 
 ```python
-when = datetime.now(UTC) + timedelta(days=14)
+from datetime import datetime, timedelta, timezone
+
+when = datetime.now(timezone.utc) + timedelta(days=14)
 agent.at(when).invoke(messages)
 ```
 

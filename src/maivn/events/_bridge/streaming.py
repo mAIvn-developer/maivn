@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from collections.abc import AsyncGenerator
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from .serialization import logger
@@ -49,7 +49,7 @@ async def _replay_history(
     *,
     last_event_id: str | None,
     replayed_ids: set[str],
-) -> AsyncIterator[dict[str, Any]]:
+) -> AsyncGenerator[dict[str, Any], None]:
     # Snapshot up front so concurrent emits during replay don't reorder
     # what the consumer sees. asyncio.Queue.put_nowait into a non-empty
     # queue is sync, so this snapshot is consistent under the single-
@@ -122,7 +122,7 @@ def _build_keepalive_frame() -> dict[str, Any]:
     subscribe to or filter a heartbeat event type. Matches sse-starlette's
     built-in ping shape.
     """
-    timestamp = datetime.now(UTC).isoformat()
+    timestamp = datetime.now(timezone.utc).isoformat()
     return {"comment": f"keepalive {timestamp}"}
 
 
@@ -131,7 +131,7 @@ async def generate_sse_events(
     *,
     last_event_id: str | None = None,
     heartbeat_interval: float | None = None,
-) -> AsyncIterator[dict[str, Any]]:
+) -> AsyncGenerator[dict[str, Any], None]:
     """Yield SSE-shaped dicts for the lifetime of one client connection.
 
     The generator is structured so that ``GeneratorExit`` /

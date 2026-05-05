@@ -26,8 +26,9 @@ Represents user input to the agent.
 
 ```python
 HumanMessage(
-    content: str,
+    content: Any,
     attachments: list[dict[str, Any]] | None = None,
+    allow_attachment_file_paths: bool = True,
 )
 ```
 
@@ -65,6 +66,10 @@ Supported attachment content inputs:
 - `content_bytes`
 - `text_content`
 - `file`
+
+`allow_attachment_file_paths=False` rejects local file path values in `file`;
+use it when validating wire payloads that should carry `content_base64` or
+`text_content` instead of host-local paths.
 
 Attachments are normalized into `additional_kwargs.attachments`.
 
@@ -196,10 +201,11 @@ Message type for handling sensitive data with automatic PII detection. When you 
 
 ```python
 RedactedMessage(
-    content: str,
+    content: Any,
     known_pii_values: list[str | PrivateData] | None = None,
     pii_whitelist: PIIWhitelist | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    allow_attachment_file_paths: bool = True,
 )
 ```
 
