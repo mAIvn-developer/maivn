@@ -21,7 +21,7 @@ Swarm(
     description: str | None = None,
     system_prompt: str | SystemMessage | None = None,
     agents: list[Agent] = [],
-    private_data: dict = {},
+    private_data: dict | list[PrivateData] = {},
     allow_private_in_system_tools: bool = False,
     memory_config: MemoryConfig | dict[str, Any] = {},
     system_tools_config: SystemToolsConfig | dict[str, Any] = {},
@@ -45,8 +45,8 @@ Swarm(
 | `description`         | `str \| None`                    | `None`     | Human-readable swarm description                                     |
 | `system_prompt`       | `str \| SystemMessage \| None`   | `None`     | System message for swarm context                                     |
 | `agents`              | `list[Agent]`                    | `[]`       | Initial list of agents                                               |
-| `private_data`        | `dict`                           | `{}`       | Swarm-level private data                                             |
-| `allow_private_in_system_tools` | `bool`                  | `False`    | Permit `private_data` placeholders to flow through system tools (web search, repl). Defaults to `False`; opt in only when needed |
+| `private_data`        | `dict \| list[PrivateData]`      | `{}`       | Swarm-level private data                                             |
+| `allow_private_in_system_tools` | `bool`                  | `False`    | Permit raw `private_data` values to flow through system tools (web search, repl). Defaults to `False`; opt in only when needed |
 | `memory_config`       | `MemoryConfig \| dict[str, Any]` | `{}`       | Default typed memory configuration applied on every swarm invocation |
 | `system_tools_config` | `SystemToolsConfig \| dict`      | `{}`       | Default typed system-tool allowlists and approval controls applied on every swarm invocation |
 | `orchestration_config` | `SessionOrchestrationConfig \| dict` | `{}`   | Default typed orchestration loop controls applied on every swarm invocation |
@@ -244,7 +244,7 @@ Preview server-side redaction for a `RedactedMessage` without starting a swarm i
 def preview_redaction(
     message: RedactedMessage,
     *,
-    known_pii_values: list[str] | None = None,
+    known_pii_values: list[str | PrivateData] | None = None,
     private_data: dict[str, Any] | None = None,
 ) -> RedactionPreviewResponse
 ```

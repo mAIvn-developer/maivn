@@ -378,13 +378,13 @@ Each agent should have a clear, focused role:
 
 ```python
 # Good: clear responsibilities
-researcher = Agent(name='researcher', description='Finds information')
-analyst = Agent(name='analyst', description='Analyzes data')
-writer = Agent(name='writer', description='Writes content')
+researcher = Agent(name='researcher', description='Finds information', api_key='...')
+analyst = Agent(name='analyst', description='Analyzes data', api_key='...')
+writer = Agent(name='writer', description='Writes content', api_key='...')
 
 # Avoid: overlapping responsibilities
-agent1 = Agent(name='agent1', description='Does research and analysis')
-agent2 = Agent(name='agent2', description='Does analysis and writing')
+agent1 = Agent(name='agent1', description='Does research and analysis', api_key='...')
+agent2 = Agent(name='agent2', description='Does analysis and writing', api_key='...')
 ```
 
 ### 2. Minimal Dependencies

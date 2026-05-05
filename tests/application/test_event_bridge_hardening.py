@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from typing import Any, cast
 
 import pytest
 
@@ -146,7 +147,7 @@ def test_reopen_clears_identity_state_so_new_turn_uses_fresh_ids() -> None:
 def test_frontend_safe_unknown_event_scrubs_injected_fields(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    async def _run() -> dict[str, object]:
+    async def _run() -> dict[str, Any]:
         bridge = EventBridge("custom-evt", audience="frontend_safe")
         await bridge.emit(
             "triage_card",
@@ -163,13 +164,14 @@ def test_frontend_safe_unknown_event_scrubs_injected_fields(
 
     with caplog.at_level(logging.WARNING, logger="maivn.events._bridge.security"):
         data = asyncio.run(_run())
+    details = cast(dict[str, Any], data["details"])
 
     # Visible content is untouched.
     assert data["title"] == "ok"
-    assert data["details"]["visible"] == "yes"
+    assert details["visible"] == "yes"
     # Injected payloads are summarized, not echoed.
-    assert data["details"]["private_data_injected"] == ["ssn"]
-    assert data["details"]["interrupt_data_injected"] == ["secret-prompt"]
+    assert details["private_data_injected"] == ["ssn"]
+    assert details["interrupt_data_injected"] == ["secret-prompt"]
     # Operator gets a warning so unknown event types surface in monitoring.
     assert any("triage_card" in rec.message for rec in caplog.records)
 
@@ -208,7 +210,7 @@ def test_safe_event_payload_preserves_id_and_type_on_failure() -> None:
 
 
 def test_serialization_handles_datetime_uuid_decimal_set_and_bytes() -> None:
-    from datetime import UTC, datetime
+    from datetime import datetime, timezone
     from decimal import Decimal
     from uuid import UUID
 
@@ -217,7 +219,7 @@ def test_serialization_handles_datetime_uuid_decimal_set_and_bytes() -> None:
         "type": "x",
         "timestamp": "ts",
         "data": {
-            "when": datetime(2026, 4, 27, tzinfo=UTC),
+            "when": datetime(2026, 4, 27, tzinfo=timezone.utc),
             "uid": UUID("00000000-0000-0000-0000-000000000001"),
             "amount": Decimal("3.14"),
             "tags": {"b", "a"},
@@ -280,10 +282,10 @@ def test_history_evictions_count_increments_when_buffer_full() -> None:
 
 
 def test_per_stream_heartbeat_override() -> None:
-    async def _run() -> dict[str, str]:
+    async def _run() -> dict[str, Any]:
         bridge = EventBridge("hb-override", heartbeat_interval=60.0)
         gen = bridge.generate_sse(heartbeat_interval=0.001)
-        first = await asyncio.wait_for(anext(gen), timeout=1.0)
+        first = cast(dict[str, Any], await asyncio.wait_for(anext(gen), timeout=1.0))
         bridge.close()
         await gen.aclose()
         return first

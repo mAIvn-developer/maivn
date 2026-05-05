@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from .serialization import build_safe_event_payload
@@ -25,7 +25,7 @@ class UIEvent:
         if not self.id:
             self.id = str(uuid.uuid4())
         if not self.timestamp:
-            self.timestamp = datetime.now(UTC).isoformat()
+            self.timestamp = datetime.now(timezone.utc).isoformat()
 
     def to_sse(self) -> dict[str, Any]:
         """Build an ``EventSourceResponse``-compatible payload."""

@@ -70,8 +70,6 @@ class ConfigurationBuilder:
         - MAIVN_LOG_FORMAT: Custom log format string
         - MAIVN_ENABLE_TIMING_LOGS: Enable timing-related logs
 
-        Note: Base URLs are fixed constants and cannot be configured.
-
         Returns:
             Complete configuration instance
         """

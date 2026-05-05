@@ -4,7 +4,7 @@ This runbook explains how to build, test, and validate the Python SDK after chan
 
 ## Prerequisites
 
-- Python 3.11+
+- Python 3.10+
 - [uv](https://github.com/astral-sh/uv) for dependency management (preferred)
 
 All commands assume the monorepo root (adjust paths if running on another OS).

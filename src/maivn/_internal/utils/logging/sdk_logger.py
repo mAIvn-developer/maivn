@@ -35,8 +35,8 @@ class MaivnSDKLogger(MaivnLogger):
     - Tool execution tracking
     - Automatic [MAIVN] component prefix
 
-    By default, only console logging is enabled. Users can optionally provide
-    a log file path to enable file logging.
+    By default, console logging is off. Users can optionally provide a log file
+    path to enable file logging.
     """
 
     _COMPONENT_PREFIX = "MAIVN"

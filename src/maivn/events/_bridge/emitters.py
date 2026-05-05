@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from ..._internal.utils.reporting.app_event_payloads import (
@@ -161,7 +161,7 @@ async def emit_interrupt_required(
             total_interrupts=total_interrupts,
             input_type=input_type,
             choices=choices,
-            timestamp=datetime.now(UTC).isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
         ),
     )
 

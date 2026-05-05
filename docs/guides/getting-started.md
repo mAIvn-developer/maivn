@@ -33,11 +33,14 @@ Set your API key as an environment variable:
 export MAIVN_API_KEY=your-api-key
 ```
 
-Or pass it directly when creating an agent (less recommended for production).
+The `Agent` constructor does not read environment variables automatically; read
+the key explicitly or pass a preconfigured `Client`.
 
 ## Step 2: Create Your First Agent
 
 ```python
+import os
+
 from maivn import Agent
 from maivn.messages import HumanMessage
 
@@ -46,7 +49,7 @@ agent = Agent(
     name='my_first_agent',
     description='A helpful assistant',
     system_prompt='You are a helpful assistant that provides clear, concise answers.',
-    api_key='your-api-key',  # Or use MAIVN_API_KEY env var
+    api_key=os.environ['MAIVN_API_KEY'],
 )
 ```
 
@@ -233,7 +236,9 @@ Now that you have a working agent, explore these topics:
 
 ### "Agent requires either a Client instance or an api_key"
 
-Make sure you provide either `api_key` to the Agent constructor or set the `MAIVN_API_KEY` environment variable.
+Make sure you provide either `api_key` or `client` to the `Agent` constructor.
+If you store the key in `MAIVN_API_KEY`, read it explicitly with
+`os.environ['MAIVN_API_KEY']` or construct a client with `ClientBuilder.from_environment()`.
 
 ### Tools not being called
 

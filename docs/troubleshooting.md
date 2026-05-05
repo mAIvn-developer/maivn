@@ -20,7 +20,9 @@ agent = Agent(name='my_agent', api_key='your-api-key')
 
 # Option 2: Use environment variable
 # Set MAIVN_API_KEY in your environment
-agent = Agent(name='my_agent', api_key=os.environ.get('MAIVN_API_KEY'))
+import os
+
+agent = Agent(name='my_agent', api_key=os.environ['MAIVN_API_KEY'])
 
 # Option 3: Provide a Client
 client = Client(api_key='your-api-key')
@@ -305,10 +307,10 @@ They shouldn't be. If you see this:
 
 Before debugging, verify:
 
-- [ ] `MAIVN_API_KEY` (or `MAIVN_DEV_API_KEY` for development) is set
+- [ ] An API key is available to your app and passed to `Agent` or `Client`
 - [ ] maivn server is running and accessible
 - [ ] Network connectivity to server
-- [ ] Correct Python version (3.11+)
+- [ ] Correct Python version (3.10+)
 - [ ] All dependencies installed (`uv sync` or `pip install maivn`)
 
 ## Getting Help

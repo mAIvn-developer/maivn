@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any, Literal
 
 from .dedup import build_interrupt_fingerprint, build_status_fingerprint
@@ -419,7 +419,7 @@ class EventBridge:
         last_event_id: str | None = None,
         *,
         heartbeat_interval: float | None = None,
-    ) -> AsyncIterator[dict[str, Any]]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """Generate SSE events for streaming to client.
 
         Keep-alives are emitted as SSE comment frames (``: keepalive ...\\n\\n``)

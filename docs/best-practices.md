@@ -13,10 +13,11 @@ Use descriptive names that reflect purpose:
 agent = Agent(
     name='customer_support_agent',
     description='Handles customer inquiries and support tickets',
+    api_key='...',
 )
 
 # Avoid
-agent = Agent(name='agent1')
+agent = Agent(name='agent1', api_key='...')
 ```
 
 ### Effective System Prompts
@@ -48,12 +49,12 @@ Each agent should have a clear, focused responsibility:
 
 ```python
 # Good: focused agents
-researcher = Agent(name='researcher', description='Finds information')
-analyst = Agent(name='analyst', description='Analyzes data')
-writer = Agent(name='writer', description='Writes content')
+researcher = Agent(name='researcher', description='Finds information', api_key='...')
+analyst = Agent(name='analyst', description='Analyzes data', api_key='...')
+writer = Agent(name='writer', description='Writes content', api_key='...')
 
 # Avoid: unfocused agent
-general = Agent(name='everything', description='Does all tasks')
+general = Agent(name='everything', description='Does all tasks', api_key='...')
 ```
 
 ## Tool Design
@@ -388,12 +389,6 @@ agent = Agent(
 Clean up resources when done:
 
 ```python
-# Using context manager
-with Agent(name='temp', api_key='...') as agent:
-    response = agent.invoke([...])
-# Resources cleaned up automatically
-
-# Or explicit cleanup
 agent = Agent(name='temp', api_key='...')
 try:
     response = agent.invoke([...])
@@ -471,9 +466,9 @@ Each agent in a swarm should have a distinct role:
 swarm = Swarm(
     name='content_team',
     agents=[
-        Agent(name='researcher', description='Finds information'),
-        Agent(name='analyst', description='Analyzes findings'),
-        Agent(name='writer', description='Writes final content'),
+        Agent(name='researcher', description='Finds information', api_key='...'),
+        Agent(name='analyst', description='Analyzes findings', api_key='...'),
+        Agent(name='writer', description='Writes final content', api_key='...'),
     ],
 )
 ```
@@ -484,7 +479,7 @@ Designate exactly one source of final output:
 
 ```python
 # Option 1: final output agent
-writer = Agent(name='writer', use_as_final_output=True)
+writer = Agent(name='writer', api_key='...', use_as_final_output=True)
 
 # Option 2: swarm-level final tool
 @swarm.toolify(final_tool=True)
