@@ -236,6 +236,8 @@ class DetailedWeatherReport(BaseModel):
 - You can nest models to any depth
 - Lists of models are supported (e.g., `list[Location]`)
 - Optional nested models work as expected (e.g., `location: Location | None = None`)
+- Nested models are schema definitions, not independently schedulable tools. They do
+  not inherit the parent model's `always_execute` or `final_tool` flags
 
 **Decorators and nested models:**
 
@@ -320,18 +322,23 @@ def get_weather(city: str) -> dict:
 
 ### always_execute
 
-Force the tool to always run:
+Require the registered tool to be scheduled at least once:
 
 ```python
 @agent.toolify(always_execute=True)
 def log_request(request: dict) -> dict:
-    # Always executed, regardless of LLM decision
     return {'logged': True}
 ```
 
 **Note**: `always_execute` and `final_tool` are orthogonal — they describe execution
 frequency and output role, respectively, and may be combined on the same tool when
 needed.
+
+`always_execute=True` applies only to the top-level registered tool. The assignment
+planner enforces it for regular agent calls and nested Swarm member calls, so it is
+appropriate for required audits, verification reports, or typed handoff tools. Do not
+use it for every utility function; it increases work and can make simple requests do
+unnecessary tool calls.
 
 ### final_tool
 
@@ -428,8 +435,10 @@ def list_active_users() -> list[str]:
 ### Returning Errors
 
 A common convention is to return a dict with an `'error'` key so the LLM can
-reason about failures. This is a recipe, not a hard requirement — raising an
-exception or returning any other shape both work.
+reason about failures. The runtime marks that result as an error. A string return
+that starts with `Error:` is also treated as an error for compatibility with simple
+tools. Raising an exception is still the clearest option when the tool cannot
+produce a valid result.
 
 ```python
 @agent.toolify()

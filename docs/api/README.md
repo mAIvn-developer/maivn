@@ -45,7 +45,10 @@ from maivn import (
     MemorySkillConfig,
     MemorySkillExtractionConfig,
     SessionExecutionConfig,
+    FinalOutputMode,
+    OrchestrationMode,
     SessionOrchestrationConfig,
+    StopStrategy,
     StructuredOutputConfig,
     SwarmAgentConfig,
     SwarmConfig,
@@ -179,6 +182,7 @@ from maivn.messages import HumanMessage, AIMessage, SystemMessage
 | [MemoryConfig](session-config.md#memoryconfig)                | Memory retrieval, summarization, and persistence | Session Config |
 | [SystemToolsConfig](session-config.md#systemtoolsconfig)      | System-tool allowlists and approvals             | Session Config |
 | [SessionOrchestrationConfig](session-config.md#sessionorchestrationconfig) | Reevaluate-loop and orchestration cycle controls | Session Config |
+| `FinalOutputMode`, `OrchestrationMode`, `StopStrategy`        | Literal aliases used by `SessionOrchestrationConfig` | Session Config |
 | [MemoryAssetsConfig](session-config.md#memoryassetsconfig)    | Per-request user-defined skills and resources    | Session Config |
 | [SwarmConfig](session-config.md#swarmconfig)                  | Typed swarm transport config                     | Session Config |
 | [StructuredOutputConfig](session-config.md#structuredoutputconfig) | Structured-output transport intent           | Session Config |

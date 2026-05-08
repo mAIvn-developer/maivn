@@ -39,23 +39,23 @@ Swarm(
 
 ### Parameters
 
-| Parameter             | Type                             | Default    | Description                                                          |
-| --------------------- | -------------------------------- | ---------- | -------------------------------------------------------------------- |
-| `name`                | `str \| None`                    | `None`     | Swarm name for identification (`id` falls back to class name when unset) |
-| `description`         | `str \| None`                    | `None`     | Human-readable swarm description                                     |
-| `system_prompt`       | `str \| SystemMessage \| None`   | `None`     | System message for swarm context                                     |
-| `agents`              | `list[Agent]`                    | `[]`       | Initial list of agents                                               |
-| `private_data`        | `dict \| list[PrivateData]`      | `{}`       | Swarm-level private data                                             |
-| `allow_private_in_system_tools` | `bool`                  | `False`    | Permit raw `private_data` values to flow through system tools (web search, repl). Defaults to `False`; opt in only when needed |
-| `memory_config`       | `MemoryConfig \| dict[str, Any]` | `{}`       | Default typed memory configuration applied on every swarm invocation |
-| `system_tools_config` | `SystemToolsConfig \| dict`      | `{}`       | Default typed system-tool allowlists and approval controls applied on every swarm invocation |
-| `orchestration_config` | `SessionOrchestrationConfig \| dict` | `{}`   | Default typed orchestration loop controls applied on every swarm invocation |
-| `skills`              | `list[dict[str, Any]]`           | `[]`       | Optional user-defined memory skill payloads surfaced through `MemoryAssetsConfig` |
-| `resources`           | `list[dict[str, Any]]`           | `[]`       | Optional bound resource payloads surfaced through `MemoryAssetsConfig` |
-| `tags`                | `list[str]`                      | `[]`       | Tags for organization                                                |
-| `before_execute`      | `Callable \| None`               | `None`     | Hook before execution                                                |
-| `after_execute`       | `Callable \| None`               | `None`     | Hook after execution                                                 |
-| `hook_execution_mode` | `Literal`                        | `'tool'`   | When hooks fire                                                      |
+| Parameter                       | Type                                 | Default  | Description                                                                                                                    |
+| ------------------------------- | ------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `name`                          | `str \| None`                        | `None`   | Swarm name for identification (`id` falls back to class name when unset)                                                       |
+| `description`                   | `str \| None`                        | `None`   | Human-readable swarm description                                                                                               |
+| `system_prompt`                 | `str \| SystemMessage \| None`       | `None`   | System message for swarm context                                                                                               |
+| `agents`                        | `list[Agent]`                        | `[]`     | Initial list of agents                                                                                                         |
+| `private_data`                  | `dict \| list[PrivateData]`          | `{}`     | Swarm-level private data                                                                                                       |
+| `allow_private_in_system_tools` | `bool`                               | `False`  | Permit raw `private_data` values to flow through system tools (web search, repl). Defaults to `False`; opt in only when needed |
+| `memory_config`                 | `MemoryConfig \| dict[str, Any]`     | `{}`     | Default typed memory configuration applied on every swarm invocation                                                           |
+| `system_tools_config`           | `SystemToolsConfig \| dict`          | `{}`     | Default typed system-tool allowlists and approval controls applied on every swarm invocation                                   |
+| `orchestration_config`          | `SessionOrchestrationConfig \| dict` | `{}`     | Default typed orchestration loop controls applied on every swarm invocation                                                    |
+| `skills`                        | `list[dict[str, Any]]`               | `[]`     | Optional user-defined memory skill payloads surfaced through `MemoryAssetsConfig`                                              |
+| `resources`                     | `list[dict[str, Any]]`               | `[]`     | Optional bound resource payloads surfaced through `MemoryAssetsConfig`                                                         |
+| `tags`                          | `list[str]`                          | `[]`     | Tags for organization                                                                                                          |
+| `before_execute`                | `Callable \| None`                   | `None`   | Hook before execution                                                                                                          |
+| `after_execute`                 | `Callable \| None`                   | `None`   | Hook after execution                                                                                                           |
+| `hook_execution_mode`           | `Literal`                            | `'tool'` | When hooks fire                                                                                                                |
 
 ### Memory Configuration
 
@@ -97,13 +97,51 @@ Per-agent `skills`/`resources` are also surfaced in the typed swarm roster confi
 Use these fields for runtime controls. Request `metadata` is reserved for application labels,
 correlation IDs, and other user-owned data.
 
-| Component | Constructor field | Invocation field | Reference |
-| --------- | ----------------- | ---------------- | --------- |
-| Memory behavior | `memory_config` | `memory_config` | [`MemoryConfig`](session-config.md#memoryconfig) |
-| System tools | `system_tools_config` | `system_tools_config` | [`SystemToolsConfig`](session-config.md#systemtoolsconfig) |
-| Orchestration loop | `orchestration_config` | `orchestration_config` | [`SessionOrchestrationConfig`](session-config.md#sessionorchestrationconfig) |
-| Memory assets | `skills`, `resources` | n/a | [`MemoryAssetsConfig`](session-config.md#memoryassetsconfig) |
-| Swarm roster transport | generated by SDK | generated by SDK | [`SwarmConfig`](session-config.md#swarmconfig) |
+| Component              | Constructor field      | Invocation field       | Reference                                                                    |
+| ---------------------- | ---------------------- | ---------------------- | ---------------------------------------------------------------------------- |
+| Memory behavior        | `memory_config`        | `memory_config`        | [`MemoryConfig`](session-config.md#memoryconfig)                             |
+| System tools           | `system_tools_config`  | `system_tools_config`  | [`SystemToolsConfig`](session-config.md#systemtoolsconfig)                   |
+| Orchestration loop     | `orchestration_config` | `orchestration_config` | [`SessionOrchestrationConfig`](session-config.md#sessionorchestrationconfig) |
+| Memory assets          | `skills`, `resources`  | n/a                    | [`MemoryAssetsConfig`](session-config.md#memoryassetsconfig)                 |
+| Swarm roster transport | generated by SDK       | generated by SDK       | [`SwarmConfig`](session-config.md#swarmconfig)                               |
+
+### Final Output Agents and Supervision Policy
+
+`use_as_final_output=True` identifies the swarm member whose output can become the
+user-facing response. It does not have to mean the run is complete. Completion behavior
+is controlled by `SessionOrchestrationConfig`:
+
+```python
+from maivn import SessionOrchestrationConfig, Swarm
+
+swarm = Swarm(
+    name="repair_swarm",
+    agents=[verifier, editor, director],
+    orchestration_config=SessionOrchestrationConfig(
+        mode="supervisor_loop",
+        final_output_mode="supervised",
+        allow_followup_actions=True,
+        stop_strategy="objective_satisfied",
+        max_cycles=5,
+    ),
+)
+```
+
+Use `final_output_mode="terminal"` for reporting-only swarms where the final-output
+agent should end the run immediately. Use `final_output_mode="supervised"` when the
+orchestrator should inspect results from the final-output agent and decide whether more
+actions are required. Repair, validation, and multi-pass cleanup workflows should prefer
+`mode="supervisor_loop"` plus `stop_strategy="objective_satisfied"`.
+
+Supervised Swarms may deploy the same member agent more than once. Each deployment is
+a distinct invocation with its own server-minted action ID, even when the display name
+is the same. If your frontend groups events, key repeated member cards by invocation
+ID or assignment/action ID rather than by agent name.
+
+If a member agent must return a typed report every time it is deployed, set
+`Agent(..., force_final_tool=True)` on that member and register the report model as
+`final_tool=True` (optionally also `always_execute=True`). That per-agent flag is
+honored for nested Swarm invocations.
 
 ## Methods
 
@@ -131,20 +169,20 @@ def invoke(
 
 #### Parameters
 
-| Parameter                       | Type                                     | Default  | Description                                                                            |
-| ------------------------------- | ---------------------------------------- | -------- | -------------------------------------------------------------------------------------- |
-| `messages`                      | `Sequence[BaseMessage] \| BaseMessage`   | Required | Messages to send                                                                       |
-| `model`                         | `Any`                                    | `None`   | LLM selection hint                                                                     |
-| `reasoning`                     | `Any`                                    | `None`   | Reasoning level                                                                        |
-| `force_final_tool`              | `bool`                                   | `False`  | Force final tool output                                                                |
-| `stream_response`               | `bool`                                   | `True`   | Request streamed model output from the server transport                                |
-| `thread_id`                     | `str \| None`                            | `None`   | Thread ID for continuity                                                               |
-| `verbose`                       | `bool`                                   | `False`  | Legacy terminal tracing flag. Prefer `events().invoke(...)`.                           |
-| `metadata`                      | `dict \| None`                           | `None`   | Application metadata only. Reserved runtime-control keys are rejected.                 |
-| `memory_config`                 | `MemoryConfig \| dict[str, Any] \| None` | `None`   | Per-invocation memory override merged over swarm defaults                              |
-| `system_tools_config`           | `SystemToolsConfig \| dict \| None`      | `None`   | Per-invocation system-tool allowlist and approval controls                             |
-| `orchestration_config`          | `SessionOrchestrationConfig \| dict \| None` | `None` | Per-invocation orchestration loop controls such as reevaluate-loop and cycle limits    |
-| `allow_private_in_system_tools` | `bool \| None`                           | `None`   | Optional override to allow raw private data access in system tools (advanced use only) |
+| Parameter                       | Type                                         | Default  | Description                                                                            |
+| ------------------------------- | -------------------------------------------- | -------- | -------------------------------------------------------------------------------------- |
+| `messages`                      | `Sequence[BaseMessage] \| BaseMessage`       | Required | Messages to send                                                                       |
+| `model`                         | `Any`                                        | `None`   | LLM selection hint                                                                     |
+| `reasoning`                     | `Any`                                        | `None`   | Reasoning level                                                                        |
+| `force_final_tool`              | `bool`                                       | `False`  | Force final tool output                                                                |
+| `stream_response`               | `bool`                                       | `True`   | Request streamed model output from the server transport                                |
+| `thread_id`                     | `str \| None`                                | `None`   | Thread ID for continuity                                                               |
+| `verbose`                       | `bool`                                       | `False`  | Legacy terminal tracing flag. Prefer `events().invoke(...)`.                           |
+| `metadata`                      | `dict \| None`                               | `None`   | Application metadata only. Reserved runtime-control keys are rejected.                 |
+| `memory_config`                 | `MemoryConfig \| dict[str, Any] \| None`     | `None`   | Per-invocation memory override merged over swarm defaults                              |
+| `system_tools_config`           | `SystemToolsConfig \| dict \| None`          | `None`   | Per-invocation system-tool allowlist and approval controls                             |
+| `orchestration_config`          | `SessionOrchestrationConfig \| dict \| None` | `None`   | Per-invocation orchestration loop controls such as reevaluate-loop and cycle limits    |
+| `allow_private_in_system_tools` | `bool \| None`                               | `None`   | Optional override to allow raw private data access in system tools (advanced use only) |
 
 #### Returns
 
@@ -292,21 +330,21 @@ def stream(
 
 #### Parameters
 
-| Parameter                       | Type                                     | Default  | Description                                                                            |
-| ------------------------------- | ---------------------------------------- | -------- | -------------------------------------------------------------------------------------- |
-| `messages`                      | `Sequence[BaseMessage] \| BaseMessage`   | Required | Messages to send to the swarm                                                          |
-| `model`                         | `Any`                                    | `None`   | LLM selection hint                                                                      |
-| `reasoning`                     | `Any`                                    | `None`   | Reasoning level                                                                        |
-| `force_final_tool`              | `bool`                                   | `False`  | Force the final tool or final-output agent result                                      |
-| `stream_response`               | `bool`                                   | `True`   | Request streamed model output from the server transport                                |
-| `status_messages`               | `bool`                                   | `False`  | Opt into normalized status-message events for frontend progress displays               |
-| `thread_id`                     | `str \| None`                            | `None`   | Thread ID for continuity                                                               |
-| `verbose`                       | `bool`                                   | `False`  | Legacy terminal tracing flag. Prefer `events().stream(...)`.                           |
-| `metadata`                      | `dict[str, Any] \| None`                 | `None`   | Application metadata only. Reserved runtime-control keys are rejected.                 |
-| `memory_config`                 | `MemoryConfig \| dict[str, Any] \| None` | `None`   | Per-invocation memory override merged over swarm defaults                              |
-| `system_tools_config`           | `SystemToolsConfig \| dict[str, Any] \| None` | `None` | Per-invocation system-tool allowlist and approval controls                             |
-| `orchestration_config`          | `SessionOrchestrationConfig \| dict[str, Any] \| None` | `None` | Per-invocation orchestration loop controls                             |
-| `allow_private_in_system_tools` | `bool \| None`                           | `None`   | Optional override to allow raw private data access in system tools                     |
+| Parameter                       | Type                                                   | Default  | Description                                                              |
+| ------------------------------- | ------------------------------------------------------ | -------- | ------------------------------------------------------------------------ |
+| `messages`                      | `Sequence[BaseMessage] \| BaseMessage`                 | Required | Messages to send to the swarm                                            |
+| `model`                         | `Any`                                                  | `None`   | LLM selection hint                                                       |
+| `reasoning`                     | `Any`                                                  | `None`   | Reasoning level                                                          |
+| `force_final_tool`              | `bool`                                                 | `False`  | Force the final tool or final-output agent result                        |
+| `stream_response`               | `bool`                                                 | `True`   | Request streamed model output from the server transport                  |
+| `status_messages`               | `bool`                                                 | `False`  | Opt into normalized status-message events for frontend progress displays |
+| `thread_id`                     | `str \| None`                                          | `None`   | Thread ID for continuity                                                 |
+| `verbose`                       | `bool`                                                 | `False`  | Legacy terminal tracing flag. Prefer `events().stream(...)`.             |
+| `metadata`                      | `dict[str, Any] \| None`                               | `None`   | Application metadata only. Reserved runtime-control keys are rejected.   |
+| `memory_config`                 | `MemoryConfig \| dict[str, Any] \| None`               | `None`   | Per-invocation memory override merged over swarm defaults                |
+| `system_tools_config`           | `SystemToolsConfig \| dict[str, Any] \| None`          | `None`   | Per-invocation system-tool allowlist and approval controls               |
+| `orchestration_config`          | `SessionOrchestrationConfig \| dict[str, Any] \| None` | `None`   | Per-invocation orchestration loop controls                               |
+| `allow_private_in_system_tools` | `bool \| None`                                         | `None`   | Optional override to allow raw private data access in system tools       |
 
 The iterator yields every server event as it arrives, including:
 

@@ -100,6 +100,25 @@ APP_INVOCATION = {
 This keeps Studio runs aligned with the same policy checks enforced in normal
 SDK invocation.
 
+For apps that intentionally run multi-pass workflows, include the orchestration
+policy in `APP_INVOCATION`:
+
+```python
+APP_INVOCATION = {
+    "force_final_tool": True,
+    "orchestration_config": {
+        "mode": "supervisor_loop",
+        "final_output_mode": "supervised",
+        "allow_followup_actions": True,
+        "stop_strategy": "objective_satisfied",
+        "max_cycles": 5,
+    },
+}
+```
+
+This is the recommended shape for repair-to-green or validation-loop apps where
+Studio should show follow-up agent deployments before the final report.
+
 ![Studio app list and variant selection](/maivn_studio/maivn_studio_apps.png "Studio app list with variant selection")
 
 ## Sessions and the Chat Composer
@@ -161,6 +180,11 @@ For the canonical packet contract and bridge-family normalization details, see:
 
 - [Events](../api/events.md)
 - [Frontend Events](frontend-events.md)
+
+When a supervised Swarm redeploys the same agent multiple times, Studio renders each
+deployment as a separate nested agent card. The card key is the invocation or
+assignment ID, not the agent name, so repeated `coding_agent` or `verifier` runs stay
+visible as distinct passes.
 
 ![Studio event stream view](/maivn_studio/maivn_studio_events.png "Live event stream in Studio")
 

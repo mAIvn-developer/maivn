@@ -184,7 +184,7 @@ class Document(BaseModel):
 
 ### force_final_tool
 
-Guarantees the final tool is used:
+Guarantees the final tool is used for a single invocation:
 
 ```python
 response = agent.invoke(
@@ -192,6 +192,26 @@ response = agent.invoke(
     force_final_tool=True,
 )
 ```
+
+Registering a `final_tool=True` model does not make it mandatory by itself. This
+keeps final tools available for the planner without forcing them into every turn.
+If the agent is a typed handoff boundary and should always return its final-tool
+schema, set the constructor-level default:
+
+```python
+agent = Agent(
+    name='report_agent',
+    api_key='...',
+    force_final_tool=True,
+)
+
+agent.add_tool(Report, name='report', final_tool=True, always_execute=True)
+```
+
+The constructor flag is especially useful in Swarms. Nested member invocations honor
+`agent.force_final_tool=True`, so the swarm receives a typed handoff even when the
+member is deployed indirectly by the orchestrator. A per-call
+`invoke(..., force_final_tool=True)` still forces just that one invocation.
 
 ### When to Use final_tool Pattern
 
@@ -246,6 +266,12 @@ def logger() -> dict: ...
 @agent.toolify(final_tool=True)
 class Report(BaseModel): ...
 ```
+
+When a top-level registered tool has `always_execute=True`, the assignment planner
+must schedule it at least once. This deterministic enforcement applies to regular
+agent calls and to nested Swarm member calls. Nested Pydantic models referenced by a
+top-level model field are schema definitions only; they do not inherit
+`always_execute` or `final_tool` and are not scheduled as separate tools.
 
 ### force_final_tool Requires a Final Tool
 

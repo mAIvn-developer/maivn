@@ -53,6 +53,24 @@ APP_INVOCATION = {
 }
 ```
 
+For supervised multi-pass apps, set orchestration defaults in the same object:
+
+```python
+APP_INVOCATION = {
+    "orchestration_config": {
+        "mode": "supervisor_loop",
+        "final_output_mode": "supervised",
+        "allow_followup_actions": True,
+        "stop_strategy": "objective_satisfied",
+        "allow_reevaluate_loop": True,
+        "max_cycles": 5,
+    },
+}
+```
+
+Studio treats repeated deployments of the same agent as separate invocations. UI code should key
+cards by invocation, assignment, or action ID rather than `agent_name` alone.
+
 Supported keys:
 
 - `model`

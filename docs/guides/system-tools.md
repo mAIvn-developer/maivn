@@ -309,11 +309,16 @@ Use `compose_artifact` when:
 
 Prefer direct tool args when the content is short and does not need a dedicated artifact synthesis step
 
+If `compose_artifact` cannot produce a value, the runtime treats that as a tool
+error instead of forwarding `None` into the downstream argument. The error message
+includes the artifact summary when available, so downstream tools do not need to
+defensively validate a missing artifact value before running.
+
 ## Think
 
 ### Purpose
 
-Route complex reasoning tasks to the optimal LLM.
+Route higher-level analysis tasks to the optimal LLM.
 
 ### How It Works
 
@@ -324,10 +329,15 @@ Route complex reasoning tasks to the optimal LLM.
 
 ### When It's Used
 
-- Complex mathematical reasoning
-- Multi-step logical deduction
-- Tasks requiring extended context
-- Problems needing specialized capabilities
+- Interpreting verification results, logs, traces, or conflicting tool outputs
+- Evaluating code, architecture, or trade-offs after evidence has been gathered
+- Complex mathematical reasoning or multi-step logical deduction
+- Tasks requiring extended context or specialized capabilities
+
+Do not use `think` for direct lookup, simple arithmetic, trivial summaries, or as
+a substitute for a dedicated function tool. When `think` receives prior tool
+results, its output should preserve failed checks, nonzero return codes, tool
+errors, and unverified assumptions instead of summarizing them as success.
 
 ## System Prompt Guidance
 

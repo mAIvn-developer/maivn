@@ -142,6 +142,35 @@ response = swarm.invoke(
 )
 ```
 
+### Supervised Multi-Pass Workflows
+
+For repair, validation, cleanup, and other workflows where the first pass may expose
+new work, configure the swarm with `SessionOrchestrationConfig`:
+
+```python
+from maivn import SessionOrchestrationConfig
+
+repair_swarm = Swarm(
+    name='repair_team',
+    agents=[verifier, editor, director],
+    orchestration_config=SessionOrchestrationConfig(
+        mode='supervisor_loop',
+        final_output_mode='supervised',
+        allow_followup_actions=True,
+        stop_strategy='objective_satisfied',
+        max_cycles=5,
+    ),
+)
+```
+
+In supervised mode, `use_as_final_output=True` means "this member can produce the
+user-facing answer"; it does not necessarily mean "stop immediately." The orchestrator
+can inspect that output and schedule more work until the objective is satisfied or the
+cycle limit is reached.
+
+A supervised swarm can deploy the same agent multiple times. Treat each deployment as
+a distinct invocation keyed by its assignment/action ID, not by the agent name.
+
 ## Final Output Patterns
 
 ### Pattern 1: Final Output Agent

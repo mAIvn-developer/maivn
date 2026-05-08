@@ -137,6 +137,14 @@ The bridge also canonicalizes instance identity for the event families that driv
 
 This makes it safer for frontends to key cards, timelines, and activity chips off nested descriptor IDs instead of trying to reconcile multiple transport-level IDs themselves.
 
+For Swarm member invocations, do not key UI state by `agent_name` alone. A
+`supervisor_loop` can deploy the same agent name multiple times, and each deployment
+is a separate invocation. Prefer `assignment.assignment_id`, `tool.tool_id`, or the
+server action/invocation ID exposed in the normalized payload. If both `tool_event`
+and `agent_assignment` describe the same in-flight member action but arrive with
+different raw IDs, merge only that in-flight lifecycle; a later `executing` event for
+the same agent name after the previous card completed is a new invocation.
+
 ### Known events vs custom events
 
 Unknown/custom event names still pass through unchanged.

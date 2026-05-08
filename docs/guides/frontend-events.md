@@ -155,6 +155,14 @@ The `data.data` field carries the type-specific payload. See [`docs/api/events.m
 
 The bridge auto-closes after any **terminal** event (`final`, `error`, `session_end`) so clients can stop reading.
 
+For multi-agent UIs, treat `agent_name` as a display label, not an identity key. A
+supervised Swarm can redeploy the same agent name several times. Key cards by
+`assignment_id`, `tool_id`, or the normalized nested descriptor ID. If a `tool_event`
+and an `agent_assignment` are both reporting the same in-flight Swarm action with
+different raw IDs, merge that lifecycle into one card; if the prior card is already
+completed and a new `executing` event arrives for the same agent name, render a new
+card.
+
 ### Custom event types
 
 You can emit any custom event name via `bridge.emit("my_event", payload)`. Frontend dispatch keys off the type, so unknown types pass through unchanged. For end-user-facing bridges (`audience="frontend_safe"`), unknown types still get a generic injected-fields scrub — see [Audiences](#audiences).

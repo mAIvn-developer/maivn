@@ -8,6 +8,7 @@ from __future__ import annotations
 # MARK: - Shared Models
 from maivn_shared import (
     HIPAA_SAFE_HARBOR_CATEGORIES,
+    FinalOutputMode,
     MemoryAssetsConfig,
     MemoryConfig,
     MemoryInsightExtractionConfig,
@@ -18,6 +19,7 @@ from maivn_shared import (
     MemorySharingScope,
     MemorySkillConfig,
     MemorySkillExtractionConfig,
+    OrchestrationMode,
     PIIWhitelist,
     PIIWhitelistEntry,
     PrivateData,
@@ -26,10 +28,14 @@ from maivn_shared import (
     RedactionPreviewResponse,
     SessionExecutionConfig,
     SessionOrchestrationConfig,
+    StopStrategy,
     StructuredOutputConfig,
     SwarmAgentConfig,
     SwarmConfig,
     SystemToolsConfig,
+)
+from maivn_shared import (
+    SessionResponse as SessionResponse,
 )
 
 # MARK: - Version
@@ -228,8 +234,11 @@ __all__ = [
     "MemorySharingScope",
     "MemorySkillConfig",
     "MemorySkillExtractionConfig",
+    "FinalOutputMode",
+    "OrchestrationMode",
     "SessionExecutionConfig",
     "SessionOrchestrationConfig",
+    "StopStrategy",
     "StructuredOutputConfig",
     "SwarmAgentConfig",
     "SwarmConfig",

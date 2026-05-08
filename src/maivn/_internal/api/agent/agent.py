@@ -95,6 +95,18 @@ class Agent(BaseScope):
             "response (only one Swarm member may set this)."
         ),
     )
+    force_final_tool: bool = Field(
+        default=False,
+        description=(
+            "When True, every invocation of this agent (including nested swarm "
+            "invocations from another agent) is forced to schedule and execute its "
+            "registered final_tool. Defaults to False so registering a final_tool "
+            "on an agent leaves it OPTIONAL — the assignment_agent decides whether "
+            "to use it. Set this to True only when the developer requires the "
+            "structured final_tool output on every invocation (e.g. typed swarm "
+            "handoffs that downstream agents depend on)."
+        ),
+    )
     included_nested_synthesis: bool | Literal["auto"] = Field(
         default="auto",
         description=("Control nested synthesis behavior for this agent when invoked by a Swarm."),
