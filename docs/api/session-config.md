@@ -45,11 +45,11 @@ response = agent.invoke(
 
 ## Configuration Layers
 
-| Layer | Where | Merge behavior |
-| ----- | ----- | -------------- |
-| Scope default | `Agent(...)`, `Swarm(...)` | Applied to every call from that scope |
-| Invocation override | `invoke()`, `stream()`, `ainvoke()`, `astream()` | Merged over scope defaults for one call |
-| Compiled request | `compile_state()` | Produces a `SessionRequest` with typed config fields |
+| Layer               | Where                                            | Merge behavior                                       |
+| ------------------- | ------------------------------------------------ | ---------------------------------------------------- |
+| Scope default       | `Agent(...)`, `Swarm(...)`                       | Applied to every call from that scope                |
+| Invocation override | `invoke()`, `stream()`, `ainvoke()`, `astream()` | Merged over scope defaults for one call              |
+| Compiled request    | `compile_state()`                                | Produces a `SessionRequest` with typed config fields |
 
 Request `metadata` is application-owned and intended for your own labels and
 correlation IDs. Runtime-control keys (`allowed_system_tools`, `allow_reevaluate_loop`,
@@ -69,12 +69,12 @@ SystemToolsConfig(
 )
 ```
 
-| Field | Type | Default | Description |
-| ----- | ---- | ------- | ----------- |
-| `allowed_tools` | `list[str] \| None` | `None` | System tool allowlist. Use `[]` to disable all system tools for the call. |
-| `approved_compose_artifact_targets` | `list[str] \| bool \| None` | `None` | Explicit `compose_artifact` target approvals, or `True` to approve all targets. |
-| `allow_private_data` | `bool \| None` | `None` | Allow system tools to receive raw `private_data` values. Advanced use only. |
-| `allow_private_data_placeholders` | `bool \| None` | `None` | Allow system tools to receive private-data placeholders. The SDK enables this by default when resolving invocation config. |
+| Field                               | Type                        | Default | Description                                                                                                                |
+| ----------------------------------- | --------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `allowed_tools`                     | `list[str] \| None`         | `None`  | System tool allowlist. Use `[]` to disable all system tools for the call.                                                  |
+| `approved_compose_artifact_targets` | `list[str] \| bool \| None` | `None`  | Explicit `compose_artifact` target approvals, or `True` to approve all targets.                                            |
+| `allow_private_data`                | `bool \| None`              | `None`  | Allow system tools to receive raw `private_data` values. Advanced use only.                                                |
+| `allow_private_data_placeholders`   | `bool \| None`              | `None`  | Allow system tools to receive private-data placeholders. The SDK enables this by default when resolving invocation config. |
 
 ```python
 agent.invoke(
@@ -88,26 +88,90 @@ agent.invoke(
 
 ## SessionOrchestrationConfig
 
-Controls server orchestration loop behavior.
+Controls server orchestration loop behavior for both `Agent` and `Swarm`
+invocations. Use it to choose whether the runtime should execute a single planned
+batch or supervise completed results and allow the orchestrator to create more
+actions before producing a final response.
 
 ```python
 SessionOrchestrationConfig(
+    mode: Literal[
+        "single_shot_dag",
+        "supervisor_loop",
+        "strict_user_dag",
+        "hybrid",
+    ] | None = None,
+    final_output_mode: Literal[
+        "terminal",
+        "supervised",
+        "aggregator_only",
+    ] | None = None,
+    allow_followup_actions: bool | None = None,
+    stop_strategy: Literal[
+        "orchestrator_decides",
+        "final_tool_completed",
+        "objective_satisfied",
+        "max_cycles",
+        "blocker_detected",
+    ] | None = None,
     allow_reevaluate_loop: bool | None = None,
     max_cycles: int | None = None,
 )
 ```
 
-| Field | Type | Default | Description |
-| ----- | ---- | ------- | ----------- |
-| `allow_reevaluate_loop` | `bool \| None` | `None` | Allows reevaluate dependencies to continue after a complete result is available. |
-| `max_cycles` | `int \| None` | `None` | Maximum orchestration loop cycles for this request. Must be greater than zero. |
+| Field                    | Type           | Default | Description                                                                                                                                            |
+| ------------------------ | -------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `mode`                   | `str \| None`  | `None`  | Planning mode. `None` preserves server defaults. Use `supervisor_loop` for repair or multi-step workflows that should inspect results before stopping. |
+| `final_output_mode`      | `str \| None`  | `None`  | Whether a final tool or final-output swarm agent is terminal, supervised, or an aggregator only.                                                       |
+| `allow_followup_actions` | `bool \| None` | `None`  | Explicitly allow or disallow more actions after a completed batch. Supervised policies imply this when unset.                                          |
+| `stop_strategy`          | `str \| None`  | `None`  | Completion strategy. Use `objective_satisfied` for workflows that must prove a target state before final response.                                     |
+| `allow_reevaluate_loop`  | `bool \| None` | `None`  | Allows reevaluate dependencies to continue after a complete result is available.                                                                       |
+| `max_cycles`             | `int \| None`  | `None`  | Maximum orchestration loop cycles for this request. Must be greater than zero.                                                                         |
 
 ```python
 agent.invoke(
     messages,
-    orchestration_config={"allow_reevaluate_loop": True, "max_cycles": 6},
+    orchestration_config=SessionOrchestrationConfig(
+        mode="supervisor_loop",
+        final_output_mode="supervised",
+        allow_followup_actions=True,
+        stop_strategy="objective_satisfied",
+        allow_reevaluate_loop=True,
+        max_cycles=6,
+    ),
 )
 ```
+
+Recommended policy choices:
+
+| Workflow                                               | Recommended policy                                                                                |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| Simple Q&A or read-only report                         | `mode="single_shot_dag"`, `final_output_mode="terminal"`                                          |
+| Exact user/developer DAG                               | `mode="strict_user_dag"`, `allow_followup_actions=False`                                          |
+| Repair-to-green, data cleanup, or validation loops     | `mode="supervisor_loop"`, `final_output_mode="supervised"`, `stop_strategy="objective_satisfied"` |
+| Developer-provided first step with autonomous recovery | `mode="hybrid"`, `final_output_mode="supervised"`                                                 |
+
+`max_cycles` defaults to the server's configured orchestration cycle limit when unset.
+The server environment variable `MAIVN_AGENTS_MAX_ORCHESTRATION_CYCLES` controls that
+default, and invocation-level `max_cycles` can only downscope the server limit.
+
+Policy fields are projected into request metadata for the server runtime:
+
+| Config field | Metadata key |
+| ------------ | ------------ |
+| `mode` | `orchestration_mode` |
+| `final_output_mode` | `final_output_mode` |
+| `allow_followup_actions` | `allow_followup_actions` |
+| `stop_strategy` | `stop_strategy` |
+| `allow_reevaluate_loop` | `allow_reevaluate_loop` |
+| `max_cycles` | `max_orchestration_cycles` |
+
+The runtime treats a request as supervised when any of these are true:
+`allow_followup_actions=True`, `mode` is `supervisor_loop` or `hybrid`,
+`final_output_mode` is `supervised` or `aggregator_only`, or `stop_strategy` is
+`orchestrator_decides` or `objective_satisfied`. Supervised sessions can continue
+after a final-output agent or final tool produces a result so the orchestrator can
+inspect evidence and schedule follow-up actions.
 
 ## MemoryConfig
 
@@ -129,15 +193,15 @@ MemoryConfig(
 )
 ```
 
-| Field | Type | Default | Description |
-| ----- | ---- | ------- | ----------- |
-| `enabled` | `bool \| None` | `None` | Public memory master toggle for the invocation. |
-| `level` | `"none" \| "glimpse" \| "focus" \| "clarity" \| None` | `None` | Memory behavior level. |
-| `summarization_enabled` | `bool \| None` | `None` | Optional summarization override. |
-| `persistence_mode` | `"persist_none" \| "vector_only" \| "vector_plus_graph" \| None` | `None` | Optional persistence downscope. |
-| `retrieval` | `MemoryRetrievalConfig \| None` | `None` | Retrieval limits and signal toggles. |
-| `skill_extraction` | `MemorySkillExtractionConfig \| None` | `None` | Skill extraction controls. |
-| `insight_extraction` | `MemoryInsightExtractionConfig \| None` | `None` | Insight extraction controls. |
+| Field                   | Type                                                             | Default | Description                                     |
+| ----------------------- | ---------------------------------------------------------------- | ------- | ----------------------------------------------- |
+| `enabled`               | `bool \| None`                                                   | `None`  | Public memory master toggle for the invocation. |
+| `level`                 | `"none" \| "glimpse" \| "focus" \| "clarity" \| None`            | `None`  | Memory behavior level.                          |
+| `summarization_enabled` | `bool \| None`                                                   | `None`  | Optional summarization override.                |
+| `persistence_mode`      | `"persist_none" \| "vector_only" \| "vector_plus_graph" \| None` | `None`  | Optional persistence downscope.                 |
+| `retrieval`             | `MemoryRetrievalConfig \| None`                                  | `None`  | Retrieval limits and signal toggles.            |
+| `skill_extraction`      | `MemorySkillExtractionConfig \| None`                            | `None`  | Skill extraction controls.                      |
+| `insight_extraction`    | `MemoryInsightExtractionConfig \| None`                          | `None`  | Insight extraction controls.                    |
 
 ```python
 MemoryRetrievalConfig(
@@ -153,17 +217,17 @@ MemoryRetrievalConfig(
 )
 ```
 
-| Retrieval field | Type | Validation |
-| --------------- | ---- | ---------- |
-| `top_k` | `int \| None` | `>= 1` |
-| `candidate_limit` | `int \| None` | `>= 1` and must be `>= top_k` when both are set |
-| `skills_enabled` | `bool \| None` | Optional skill recall toggle |
-| `insights_enabled` | `bool \| None` | Optional insight recall toggle |
-| `resources_enabled` | `bool \| None` | Optional resource recall toggle |
-| `skill_injection_max_count` | `int \| None` | `>= 1` |
-| `insight_injection_max_count` | `int \| None` | `>= 1` |
-| `resource_injection_max_count` | `int \| None` | `>= 1` |
-| `insight_relevance_floor` | `float \| None` | `0.0` to `1.0` |
+| Retrieval field                | Type            | Validation                                      |
+| ------------------------------ | --------------- | ----------------------------------------------- |
+| `top_k`                        | `int \| None`   | `>= 1`                                          |
+| `candidate_limit`              | `int \| None`   | `>= 1` and must be `>= top_k` when both are set |
+| `skills_enabled`               | `bool \| None`  | Optional skill recall toggle                    |
+| `insights_enabled`             | `bool \| None`  | Optional insight recall toggle                  |
+| `resources_enabled`            | `bool \| None`  | Optional resource recall toggle                 |
+| `skill_injection_max_count`    | `int \| None`   | `>= 1`                                          |
+| `insight_injection_max_count`  | `int \| None`   | `>= 1`                                          |
+| `resource_injection_max_count` | `int \| None`   | `>= 1`                                          |
+| `insight_relevance_floor`      | `float \| None` | `0.0` to `1.0`                                  |
 
 ```python
 MemorySkillExtractionConfig(
@@ -198,11 +262,11 @@ MemoryAssetsConfig(
 )
 ```
 
-| Field | Type | Default | Description |
-| ----- | ---- | ------- | ----------- |
-| `defined_skills` | `list[MemorySkillConfig]` | `[]` | User-defined skill payloads available for retrieval. |
-| `bound_resources` | `list[MemoryResourceConfig]` | `[]` | Bound resource payloads available for retrieval. |
-| `recall_turn_active` | `bool \| None` | `None` | Marks a recall-active turn for server-side memory behavior. |
+| Field                | Type                         | Default | Description                                                 |
+| -------------------- | ---------------------------- | ------- | ----------------------------------------------------------- |
+| `defined_skills`     | `list[MemorySkillConfig]`    | `[]`    | User-defined skill payloads available for retrieval.        |
+| `bound_resources`    | `list[MemoryResourceConfig]` | `[]`    | Bound resource payloads available for retrieval.            |
+| `recall_turn_active` | `bool \| None`               | `None`  | Marks a recall-active turn for server-side memory behavior. |
 
 ### MemorySkillConfig
 
@@ -255,6 +319,10 @@ MemoryResourceConfig(
 `MemoryResourceConfig` requires at least one of `title`, `name`, `resource_id`,
 or `id`.
 
+When `resource_id` is provided with fresh `content_base64`, the server compares the supplied
+content hash to the stored resource. Matching content reuses and rebinds the existing resource;
+changed content registers a new version and marks the previous active resource `superseded`.
+
 ## SwarmConfig
 
 Carries typed swarm orchestration transport data. Most users should configure
@@ -281,19 +349,19 @@ SwarmConfig(
 )
 ```
 
-| Field | Type | Description |
-| ----- | ---- | ----------- |
-| `invocation_intent` | `bool \| None` | Marks the request as a swarm invocation. |
-| `swarm_id`, `swarm_name`, `swarm_description`, `swarm_system_prompt` | `str \| None` | Swarm identity and prompt context. |
-| `agent_roster` | `list[SwarmAgentConfig]` | Typed member roster sent to the server. |
-| `agent_invocation_tool_map` | `dict[str, str]` | Maps generated member invocation tool IDs to agent IDs. |
-| `agent_invocation` | `bool \| None` | Marks a nested agent invocation. |
-| `use_as_final_output` | `bool \| None` | Marks whether the invoked member should produce the final output. |
-| `invoked_agent_id`, `invoked_agent_name` | `str \| None` | Nested member identity. |
-| `included_nested_synthesis` | `"auto" \| True \| False \| None` | Nested synthesis mode for member invocations. |
-| `sdk_delivery_mode` | `str \| None` | SDK transport mode used by server routing. |
-| `agent_dependency_context` | `dict[str, Any] \| None` | Dependency payload for nested agent execution. |
-| `agent_dependency_context_keys` | `list[str] \| None` | Dependency context key list for nested execution. |
+| Field                                                                | Type                              | Description                                                       |
+| -------------------------------------------------------------------- | --------------------------------- | ----------------------------------------------------------------- |
+| `invocation_intent`                                                  | `bool \| None`                    | Marks the request as a swarm invocation.                          |
+| `swarm_id`, `swarm_name`, `swarm_description`, `swarm_system_prompt` | `str \| None`                     | Swarm identity and prompt context.                                |
+| `agent_roster`                                                       | `list[SwarmAgentConfig]`          | Typed member roster sent to the server.                           |
+| `agent_invocation_tool_map`                                          | `dict[str, str]`                  | Maps generated member invocation tool IDs to agent IDs.           |
+| `agent_invocation`                                                   | `bool \| None`                    | Marks a nested agent invocation.                                  |
+| `use_as_final_output`                                                | `bool \| None`                    | Marks whether the invoked member should produce the final output. |
+| `invoked_agent_id`, `invoked_agent_name`                             | `str \| None`                     | Nested member identity.                                           |
+| `included_nested_synthesis`                                          | `"auto" \| True \| False \| None` | Nested synthesis mode for member invocations.                     |
+| `sdk_delivery_mode`                                                  | `str \| None`                     | SDK transport mode used by server routing.                        |
+| `agent_dependency_context`                                           | `dict[str, Any] \| None`          | Dependency payload for nested agent execution.                    |
+| `agent_dependency_context_keys`                                      | `list[str] \| None`               | Dependency context key list for nested execution.                 |
 
 ### SwarmAgentConfig
 
@@ -327,10 +395,10 @@ StructuredOutputConfig(
 )
 ```
 
-| Field | Type | Default | Description |
-| ----- | ---- | ------- | ----------- |
-| `enabled` | `bool \| None` | `None` | Whether structured-output routing is requested. |
-| `model` | `str \| None` | `None` | Structured-output model name recorded for server routing and observability. |
+| Field     | Type           | Default | Description                                                                 |
+| --------- | -------------- | ------- | --------------------------------------------------------------------------- |
+| `enabled` | `bool \| None` | `None`  | Whether structured-output routing is requested.                             |
+| `model`   | `str \| None`  | `None`  | Structured-output model name recorded for server routing and observability. |
 
 ## SessionExecutionConfig
 
@@ -347,13 +415,13 @@ SessionExecutionConfig(
 )
 ```
 
-| Field | Type | Default | Description |
-| ----- | ---- | ------- | ----------- |
-| `agent_id` | `str \| None` | `None` | SDK agent identifier. |
-| `timeout` | `int \| float \| None` | `None` | Execution timeout. Must be non-negative. |
-| `sdk_delivery_mode` | `str \| None` | `None` | SDK delivery mode used by server-side routing. |
-| `client_timezone` | `str \| None` | `None` | Client IANA timezone used for datetime-aware execution. |
-| `sdk_deployment_timezone` | `str \| None` | `None` | SDK deployment timezone fallback. |
+| Field                     | Type                   | Default | Description                                             |
+| ------------------------- | ---------------------- | ------- | ------------------------------------------------------- |
+| `agent_id`                | `str \| None`          | `None`  | SDK agent identifier.                                   |
+| `timeout`                 | `int \| float \| None` | `None`  | Execution timeout. Must be non-negative.                |
+| `sdk_delivery_mode`       | `str \| None`          | `None`  | SDK delivery mode used by server-side routing.          |
+| `client_timezone`         | `str \| None`          | `None`  | Client IANA timezone used for datetime-aware execution. |
+| `sdk_deployment_timezone` | `str \| None`          | `None`  | SDK deployment timezone fallback.                       |
 
 ## Metadata Boundary
 

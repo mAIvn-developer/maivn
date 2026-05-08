@@ -4,6 +4,7 @@ Used by state compilation to augment an agent's tool list."""
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from maivn_shared import (
@@ -31,6 +32,8 @@ from .dynamic_tool_factory_response import DynamicToolFactoryResponseMixin
 
 if TYPE_CHECKING:
     from maivn._internal.api.base_scope import BaseScope
+
+logger = logging.getLogger(__name__)
 
 
 class DynamicToolFactory(
@@ -235,10 +238,28 @@ class DynamicToolFactory(
             stream_token = allow_nested_response_stream.set(
                 current_sdk_delivery_mode.get() == "stream"
             )
+            # Honor explicit per-agent opt-in via `agent.force_final_tool`. The
+            # caller's `force_final_tool` argument always wins; otherwise we fall
+            # back to the agent's developer-declared default. Agents that
+            # register a final_tool intentionally remain optional (the
+            # assignment_agent decides when to use them) unless the developer
+            # marks the agent itself as `force_final_tool=True` to require it.
+            agent_default_force_final_tool = bool(agent.force_final_tool)
+            effective_force_final_tool = force_final_tool or agent_default_force_final_tool
+            if (
+                effective_force_final_tool
+                and not force_final_tool
+                and agent_default_force_final_tool
+            ):
+                logger.debug(
+                    "[DYNAMIC_TOOL_FACTORY] Honoring agent.force_final_tool=True "
+                    "for nested swarm agent '%s' (developer-declared default).",
+                    agent_name,
+                )
             try:
                 response = agent.invoke(
                     messages=[HumanMessage(content=nested_prompt)],
-                    force_final_tool=force_final_tool,
+                    force_final_tool=effective_force_final_tool,
                     memory_config=nested_memory_config,
                     memory_assets_config=memory_assets_config,
                     swarm_config=swarm_config,

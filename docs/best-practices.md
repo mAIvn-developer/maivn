@@ -181,6 +181,40 @@ def fetch_products() -> dict: ...
 def generate_report(users: dict, products: dict) -> dict: ...
 ```
 
+## Orchestration Policy
+
+### Choose Single-Shot or Supervised Execution Explicitly
+
+Use `SessionOrchestrationConfig` on both `Agent` and `Swarm` runs when the default
+one-batch behavior is not enough:
+
+```python
+from maivn import SessionOrchestrationConfig
+
+repair_policy = SessionOrchestrationConfig(
+    mode='supervisor_loop',
+    final_output_mode='supervised',
+    allow_followup_actions=True,
+    stop_strategy='objective_satisfied',
+    max_cycles=5,
+)
+```
+
+Good defaults by workflow:
+
+- **Simple Q&A / read-only reports**: keep `single_shot_dag` and terminal final output.
+- **Repair, cleanup, and validation loops**: use `supervisor_loop`, supervised final output, and an objective-based stop strategy.
+- **User-supplied exact DAGs**: use `strict_user_dag` and disable follow-up actions unless recovery is explicitly desired.
+- **Developer-supplied first step with autonomous recovery**: use `hybrid`.
+
+### Treat Final Output as a Role, Not Always a Stop Condition
+
+For swarms, `use_as_final_output=True` identifies the member that can produce the
+user-facing response. It should be terminal only for reporting workflows. For repair or
+verification-heavy workflows, configure `final_output_mode='supervised'` so the
+orchestrator can inspect the report and schedule more actions if the objective is not
+satisfied.
+
 ## Security
 
 ### Private Data for Secrets

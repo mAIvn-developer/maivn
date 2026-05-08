@@ -225,6 +225,10 @@ resource = client.create_memory_resource(
 )
 ```
 
+Resource APIs and SDK-bound `resources=[...]` payloads are content-hash aware. Re-sending the
+same bytes reuses the existing resource. Sending an existing `resource_id` with different
+`content_base64` registers a new version and supersedes the prior active row.
+
 ### Resource Management
 
 #### close()

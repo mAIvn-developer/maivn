@@ -100,6 +100,13 @@ class OrchestratorReporterHooks(OrchestratorReporterHooksHelperMixin):
 
         report_agent_assignment = getattr(reporter, "report_agent_assignment", None)
         if callable(report_agent_assignment):
+            # `action_id_text` is the swarm action's UUID and is the stable
+            # per-invocation identifier — `emit_action_lifecycle_event` always sets
+            # it for swarm_agent updates so the fallback below is defensive only.
+            # We deliberately keep the fallback NAME-stable (no random suffix) so
+            # the executing -> completed status pair for the same invocation
+            # collapses to one card; cross-invocation disambiguation is handled
+            # studio-side using the (always-unique) action_id when present.
             report_agent_assignment(
                 agent_name=agent_name,
                 status=assignment_status,

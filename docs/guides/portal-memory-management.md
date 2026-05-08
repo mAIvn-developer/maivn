@@ -96,6 +96,11 @@ Resource capabilities:
 
 Binding types visible in the portal include `portal`, `agent`, `swarm`, `message`, and `unbound`.
 
+Versioning is content-hash based. Re-uploading or binding identical bytes reuses the existing
+non-deleted resource. Replacing content, or deploying an SDK-bound resource with the same
+`resource_id` but different `content_base64`, creates a new registered version and marks the
+previous active row `superseded`.
+
 ## Recommended Operating Model
 
 1. Set organization memory ceiling first.

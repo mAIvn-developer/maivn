@@ -152,6 +152,10 @@ listed = client.list_memory_resources("project_456", tags=["deploy"])
 detail = client.get_memory_resource("project_456", resource.id)
 ```
 
+Resource creation and binding are content-hash aware. Creating or binding the same bytes reuses
+the existing non-deleted resource. Binding an existing `resource_id` with different
+`content_base64` registers a new version and marks the prior active version as `superseded`.
+
 ### Replace, Bind, and Restore Resources
 
 ```python
@@ -174,6 +178,10 @@ bound = client.bind_memory_resource(
 
 restored = client.restore_memory_resource("project_456", replaced.id)
 ```
+
+Use `replace_memory_resource()` for explicit portal/admin replacement flows. Use an
+agent/swarm `resources=[...]` payload with both `resource_id` and fresh `content_base64` when a
+deployment should update its own bound document as part of normal SDK invocation.
 
 ### Unbound Cleanup Review
 
@@ -209,6 +217,8 @@ This applies to:
 3. Promote or create org-shared resources only when reuse across projects is intentional.
 4. Use tags and descriptions to keep resources discoverable.
 5. Periodically review unbound or superseded resources.
+6. Preserve stable `resource_id` values in deployment configs so changed bundled content creates
+   a clear version chain instead of unrelated resources.
 
 ## Related Guides
 

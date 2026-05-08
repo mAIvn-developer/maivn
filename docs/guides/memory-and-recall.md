@@ -135,6 +135,19 @@ agent = Agent(
 )
 ```
 
+### Bound Resource Versioning
+
+Bound resources are content-hash aware. If a resource payload includes an existing
+`resource_id` plus fresh `content_base64`, the server compares the supplied bytes with the
+stored `content_hash`:
+
+- same hash: the existing resource is reused and rebound to the current agent or swarm scope
+- different hash: a new resource version is registered, the previous active row is marked
+  `superseded`, and resource memory activity is moved to the new version
+
+This lets SDK-deployed agents and swarms update bundled documents without requiring a separate
+portal replacement step.
+
 ## Message Attachments
 
 `HumanMessage` and `RedactedMessage` support attachments.

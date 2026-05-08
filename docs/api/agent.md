@@ -28,6 +28,7 @@ Agent(
     max_results: int | None = None,
     tools: list[Any] = [],
     use_as_final_output: bool = False,
+    force_final_tool: bool = False,
     included_nested_synthesis: bool | Literal['auto'] = 'auto',
     private_data: dict | list[PrivateData] = {},
     allow_private_in_system_tools: bool = False,
@@ -59,6 +60,7 @@ Agent(
 | `max_results`               | `int \| None`                    | `None`     | Max tools returned from semantic search (final/targeted tools and dependencies may add more)                                                                           |
 | `tools`                     | `list[Any]`                      | `[]`       | Initial tools to register on this agent. Accepts callables, Pydantic model classes, and prebuilt SDK tool objects                                                      |
 | `use_as_final_output`       | `bool`                           | `False`    | When in a Swarm, designate this agent's output as final                                                                                                                |
+| `force_final_tool`          | `bool`                           | `False`    | Require this agent's `final_tool=True` tool on every invocation, including nested Swarm invocations. Registering a final tool alone leaves it optional                 |
 | `included_nested_synthesis` | `bool \| Literal['auto']`        | `'auto'`   | Nested synthesis mode for Swarm invocations: `True` always includes synthesized response, `False` returns tool results only, `'auto'` lets orchestrator/runtime decide |
 | `private_data`              | `dict \| list[PrivateData]`      | `{}`       | Server-side secret data for dependency injection                                                                                                                       |
 | `allow_private_in_system_tools` | `bool`                       | `False`    | Permit raw `private_data` values to flow through system tools (web search, repl). Defaults to `False`; opt in only when needed                                         |
@@ -100,6 +102,42 @@ planner = Agent(
     included_nested_synthesis='auto',
 )
 ```
+
+### Agent-Level Final Tool Enforcement
+
+Registering a model tool with `final_tool=True` makes it available as the structured
+final output tool, but it does not force every invocation to use it. The planner can
+still decide that another tool sequence is enough unless you opt in to enforcement.
+
+Use `Agent(..., force_final_tool=True)` when the agent is a typed handoff boundary and
+every deployment must return the final-tool schema:
+
+```python
+from typing import Literal
+from pydantic import BaseModel
+
+class CodingTaskReport(BaseModel):
+    summary: str
+    status: Literal['completed', 'partial', 'blocked']
+
+worker = Agent(
+    name='coding_agent',
+    api_key='...',
+    force_final_tool=True,
+)
+
+worker.add_tool(
+    CodingTaskReport,
+    name='coding_task_report',
+    final_tool=True,
+    always_execute=True,
+)
+```
+
+The invocation argument still wins for a single call: `agent.invoke(..., force_final_tool=True)`
+forces that invocation even if the agent constructor flag is `False`. The constructor
+flag matters most for nested Swarm calls, where the member agent can declare that its
+own final-tool schema is mandatory whenever the swarm deploys it.
 
 ### Memory Configuration
 
@@ -220,7 +258,7 @@ def invoke(
 | Parameter                       | Type                                     | Default  | Description                                                                               |
 | ------------------------------- | ---------------------------------------- | -------- | ----------------------------------------------------------------------------------------- |
 | `messages`                      | `Sequence[BaseMessage]`                  | Required | Messages to send to the agent                                                             |
-| `force_final_tool`              | `bool`                                   | `False`  | Return result from `final_tool=True` tool                                                 |
+| `force_final_tool`              | `bool`                                   | `False`  | Force this invocation to return the `final_tool=True` tool. The agent constructor can also set this as a default |
 | `targeted_tools`                | `list[str] \| None`                      | `None`   | Run only these tools (plus dependencies)                                                  |
 | `structured_output`             | `type[BaseModel] \| None`                | `None`   | Advanced direct structured-output schema. Prefer `agent.structured_output(Model).invoke(...)` for public use. |
 | `model`                         | `Literal`                                | `None`   | LLM selection hint: `'fast'`, `'balanced'`, `'max'`                                       |
@@ -472,7 +510,7 @@ def stream(
 | Parameter                       | Type                                     | Default  | Description                                                                            |
 | ------------------------------- | ---------------------------------------- | -------- | -------------------------------------------------------------------------------------- |
 | `messages`                      | `Sequence[BaseMessage]`                  | Required | Messages to send to the agent                                                          |
-| `force_final_tool`              | `bool`                                   | `False`  | Return result from the `final_tool=True` tool                                           |
+| `force_final_tool`              | `bool`                                   | `False`  | Force this stream invocation to return the `final_tool=True` tool. The agent constructor can also set this as a default |
 | `targeted_tools`                | `list[str] \| None`                      | `None`   | Run only these tools, plus dependencies                                                 |
 | `model`                         | `Literal['fast', 'balanced', 'max'] \| None` | `None` | LLM selection hint                                                                      |
 | `reasoning`                     | `Literal['minimal', 'low', 'medium', 'high'] \| None` | `None` | Reasoning level                                                        |

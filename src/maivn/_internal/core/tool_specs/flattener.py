@@ -167,10 +167,21 @@ class ToolFlattener:
 
         nested_models = self._extract_nested_models_from_class(model)
         for nested_model in nested_models:
+            # Nested Pydantic models are schema definitions referenced by the
+            # parent (e.g. `VerificationFailure` is a list-item type inside
+            # `VerificationReport.failures`); they are NOT independently
+            # schedulable tools. Always force `always_execute=False` and
+            # `final_tool=False` for nested specs so the assignment_agent's
+            # required-coverage validator does not demand them in every plan
+            # and the orchestrator's evaluate node does not list them in
+            # always_execute_tools. Without this override, registering one
+            # tool with always_execute=True silently flags every nested
+            # schema as required, causing phantom "missing always_execute
+            # tool" warnings and unnecessary re-prompt loops.
             nested_tool_specs = self.flatten_model_tool(
                 nested_model,
                 agent_id,
-                always_execute=always_execute,
+                always_execute=False,
                 final_tool=False,
                 tags=tags,
             )
