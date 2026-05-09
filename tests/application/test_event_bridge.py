@@ -133,6 +133,39 @@ def test_event_bridge_emits_comment_frame_keepalive_when_idle() -> None:
     assert "event" not in frame
 
 
+def test_event_bridge_wait_for_subscriber_resolves_when_sse_is_consumed() -> None:
+    async def _run() -> bool:
+        bridge = EventBridge("session-subscriber", heartbeat_interval=0.001)
+        wait_task = asyncio.create_task(bridge.wait_for_subscriber(timeout=0.5))
+        generator = bridge.generate_sse()
+        await anext(generator)
+        result = await wait_task
+        await generator.aclose()
+        return result
+
+    assert asyncio.run(_run()) is True
+
+
+def test_event_bridge_wait_for_subscriber_times_out() -> None:
+    async def _run() -> bool:
+        bridge = EventBridge("session-no-subscriber", heartbeat_interval=0.001)
+        return await bridge.wait_for_subscriber(timeout=0.001)
+
+    assert asyncio.run(_run()) is False
+
+
+def test_event_bridge_wait_for_subscriber_resets_after_disconnect() -> None:
+    async def _run() -> bool:
+        bridge = EventBridge("session-subscriber-reset", heartbeat_interval=0.001)
+        generator = bridge.generate_sse()
+        await anext(generator)
+        await generator.aclose()
+
+        return await bridge.wait_for_subscriber(timeout=0.001)
+
+    assert asyncio.run(_run()) is False
+
+
 def test_bridge_registry_replaces_existing_session_bridge() -> None:
     registry = BridgeRegistry()
 

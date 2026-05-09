@@ -7,6 +7,7 @@ from maivn.events import (
     INTERRUPT_REQUIRED_EVENT_NAME,
     MODEL_TOOL_COMPLETE_EVENT_NAME,
     STATUS_MESSAGE_EVENT_NAME,
+    SYSTEM_TOOL_CHUNK_EVENT_NAME,
     TOOL_EVENT_NAME,
     UPDATE_EVENT_NAME,
 )
@@ -29,18 +30,49 @@ def test_normalize_stream_converts_update_to_assistant_delta() -> None:
         ),
         RawSSEEvent(
             name=UPDATE_EVENT_NAME,
+            payload={"assistant_id": "assistant-1", "streaming_content": "Hello "},
+        ),
+        RawSSEEvent(
+            name=UPDATE_EVENT_NAME,
             payload={"assistant_id": "assistant-1", "streaming_content": "Hello world"},
         ),
     ]
 
     normalized = list(normalize_stream(raw_events))
 
-    assert _names(normalized) == ["assistant_chunk", "assistant_chunk"]
+    assert _names(normalized) == ["assistant_chunk", "assistant_chunk", "assistant_chunk"]
     assert normalized[0].assistant is not None
     assert normalized[0].assistant.id == "assistant-1"
     assert normalized[0].assistant.delta == "Hello"
     assert normalized[1].assistant is not None
-    assert normalized[1].assistant.delta == " world"
+    assert normalized[1].assistant.delta == " "
+    assert normalized[2].assistant is not None
+    assert normalized[2].assistant.delta == "world"
+
+
+def test_normalize_stream_preserves_system_tool_chunk_spacing() -> None:
+    raw_events = [
+        RawSSEEvent(
+            name=SYSTEM_TOOL_CHUNK_EVENT_NAME,
+            payload={"tool_id": "system-tool-1", "text": "\n  indented output"},
+        ),
+        RawSSEEvent(
+            name=SYSTEM_TOOL_CHUNK_EVENT_NAME,
+            payload={"tool_id": "system-tool-1", "text": "   "},
+        ),
+        RawSSEEvent(
+            name=SYSTEM_TOOL_CHUNK_EVENT_NAME,
+            payload={"tool_id": "system-tool-1", "text": ""},
+        ),
+    ]
+
+    normalized = list(normalize_stream(raw_events))
+
+    assert _names(normalized) == ["system_tool_chunk", "system_tool_chunk"]
+    assert normalized[0].chunk is not None
+    assert normalized[0].chunk.text == "\n  indented output"
+    assert normalized[1].chunk is not None
+    assert normalized[1].chunk.text == "   "
 
 
 def test_normalize_stream_converts_tool_and_final_events() -> None:

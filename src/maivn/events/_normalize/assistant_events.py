@@ -11,7 +11,7 @@ from ..._internal.utils.reporting.app_event_payloads import (
 )
 from .._models import NormalizedStreamState
 from .context import NormalizationOptions
-from .helpers import clean_text, compute_delta, map_assignment_status
+from .helpers import clean_stream_text, clean_text, compute_delta, map_assignment_status
 
 # MARK: Assistant Streaming
 
@@ -41,7 +41,7 @@ def handle_update_event(
     options: NormalizationOptions,
 ) -> list[dict[str, Any]]:
     normalized_payloads: list[dict[str, Any]] = []
-    streaming_content = clean_text(payload.get("streaming_content"))
+    streaming_content = clean_stream_text(payload.get("streaming_content"))
     if streaming_content is not None:
         assistant_id = clean_text(payload.get("assistant_id")) or "assistant"
         previous = state.streaming_text_by_id.get(assistant_id, "")
@@ -80,7 +80,7 @@ def handle_progress_update_event(
     _state: NormalizedStreamState,
     options: NormalizationOptions,
 ) -> list[dict[str, Any]]:
-    text = clean_text(payload.get("text"))
+    text = clean_stream_text(payload.get("text"))
     if text is None:
         return []
     return [
