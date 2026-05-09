@@ -11,7 +11,7 @@ from ..._internal.utils.reporting.app_event_payloads import (
 )
 from .._models import NormalizedStreamState
 from .context import NormalizationOptions
-from .helpers import clean_text, coerce_mapping
+from .helpers import clean_stream_text, clean_text, coerce_mapping
 
 # MARK: System Tool Streaming
 
@@ -53,10 +53,13 @@ def handle_system_tool_chunk_event(
         or "system_tool"
     )
     progress = payload.get("progress")
+    text = clean_stream_text(payload.get("text"))
+    if text is None:
+        return []
     return [
         build_system_tool_chunk_payload(
             tool_id=tool_id,
-            text=clean_text(payload.get("text")) or "",
+            text=text,
             progress=progress if isinstance(progress, (int, float)) else None,
         )
     ]

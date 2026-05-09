@@ -147,6 +147,8 @@ async def generate_sse_events(
     if interval <= 0:
         raise ValueError("heartbeat_interval must be > 0")
 
+    bridge._subscriber_count += 1
+    bridge._subscriber_connected.set()
     try:
         replayed_ids: set[str] = set()
         async for event in _replay_history(
@@ -179,6 +181,10 @@ async def generate_sse_events(
         # generator finalized cleanly. CancelledError likewise should not
         # be swallowed silently in newer Python.
         raise
+    finally:
+        bridge._subscriber_count = max(0, bridge._subscriber_count - 1)
+        if bridge._subscriber_count == 0:
+            bridge._subscriber_connected.clear()
 
 
 # MARK: Lifecycle
@@ -186,6 +192,8 @@ async def generate_sse_events(
 
 def reopen_bridge(bridge: EventBridge) -> None:
     bridge._closed = False
+    bridge._subscriber_connected.clear()
+    bridge._subscriber_count = 0
     bridge._event_history.clear()
     while not bridge._queue.empty():
         try:

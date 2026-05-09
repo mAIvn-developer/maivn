@@ -16,6 +16,12 @@ def clean_text(value: Any) -> str | None:
     return cleaned or None
 
 
+def clean_stream_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return value if value else None
+
+
 def coerce_mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return dict(value)

@@ -80,6 +80,8 @@ class EventBridge:
         self._backpressure: BackpressurePolicy = backpressure
         self._schema_validation: ValidationMode = schema_validation
         self._queue: asyncio.Queue[UIEvent] = asyncio.Queue(maxsize=queue_maxsize)
+        self._subscriber_connected = asyncio.Event()
+        self._subscriber_count = 0
         self._closed = False
         self._event_history: list[UIEvent] = []
         # Total events ever appended to history; lets us detect when older
@@ -430,12 +432,32 @@ class EventBridge:
         only — useful when a specific client lives behind a proxy with an
         aggressive idle timeout.
         """
-        async for event in generate_sse_events(
+        stream = generate_sse_events(
             self,
             last_event_id=last_event_id,
             heartbeat_interval=heartbeat_interval,
-        ):
-            yield event
+        )
+        try:
+            async for event in stream:
+                yield event
+        finally:
+            await stream.aclose()
+
+    async def wait_for_subscriber(self, timeout: float | None = None) -> bool:
+        """Return when at least one SSE subscriber starts consuming this bridge.
+
+        Studio creates sessions with a POST request and can only open the
+        EventSource after that response returns. A short execution-side wait
+        lets the first UI subscriber attach before low-latency demo streams
+        start emitting chunks.
+        """
+        if self._subscriber_connected.is_set():
+            return True
+        try:
+            await asyncio.wait_for(self._subscriber_connected.wait(), timeout=timeout)
+        except TimeoutError:
+            return False
+        return True
 
     def get_history(self) -> list[dict[str, Any]]:
         """Get event history as list of dicts."""
