@@ -132,7 +132,7 @@ For those event families, the bridge rebuilds packets through the shared mAIvn p
 The bridge also canonicalizes instance identity for the event families that drive long-lived UI state:
 
 - `tool_event` and `system_tool_*` reuse a stable tool instance ID across start, progress, completion, and error packets when they describe the same logical runtime instance
-- `agent_assignment` reuses a stable assignment ID for the same logical agent assignment timeline
+- `agent_assignment` reuses a stable assignment ID across the full lifecycle of a logical assignment, even when the platform emits more than one event for it. Frontends keying UI state off `assignment_id` see one logical card, not multiple.
 - `enrichment` reuses a stable scope ID for the same logical scope
 
 This makes it safer for frontends to key cards, timelines, and activity chips off nested descriptor IDs instead of trying to reconcile multiple transport-level IDs themselves.

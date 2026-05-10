@@ -16,12 +16,12 @@ Both approaches support tool execution. The key difference is whether the orches
 ## Quick Comparison
 
 ```python
-# Approach 1: .structured_output() builder - bypasses orchestrator
+# Approach 1: .structured_output() builder - direct schema extraction
 response = agent.structured_output(SentimentAnalysis).invoke(
     [HumanMessage(content='Analyze this text')]
 )
 
-# Approach 2: final_tool pattern - full orchestration
+# Approach 2: final_tool pattern - full multi-turn orchestration
 response = agent.invoke(
     [HumanMessage(content='Fetch data and create report')],
     force_final_tool=True,
@@ -32,14 +32,14 @@ response = agent.invoke(
 
 ## Approach 1: `.structured_output()` Builder (Fast Path)
 
-Use this when you want faster responses by skipping the orchestration layer.
+Use this when you want faster responses for one-shot schema-driven calls.
 
 ### How It Works
 
 The `.structured_output()` builder:
-1. **Bypasses the orchestrator** - routes directly to the assignment agent
+1. **Skips multi-turn planning** - the request goes straight to schema-driven extraction
 2. **Tools still execute** - registered tools are available and will run as needed
-3. **Faster responses** - reduced latency by skipping orchestrator overhead
+3. **Faster responses** - lower latency for one-shot structured calls
 
 ### Basic Usage
 
@@ -56,7 +56,7 @@ class SentimentAnalysis(BaseModel):
 
 agent = Agent(name='analyzer', api_key='...')
 
-# Fast structured output - bypasses orchestrator
+# Fast structured output - direct schema extraction
 response = agent.structured_output(SentimentAnalysis).invoke(
     [HumanMessage(content='Analyze: "I absolutely love this product!"')]
 )
@@ -452,8 +452,8 @@ Do you need full orchestration (multi-step planning, Swarm coordination)?
 
 | Feature | `.structured_output()` | `final_tool` + `force_final_tool` |
 |---------|------------------------|-----------------------------------|
-| **Orchestration** | Bypassed (direct assignment) | Full orchestration |
-| **Response time** | Faster (skips orchestrator) | Standard |
+| **Orchestration** | Skipped (direct schema extraction) | Full orchestration |
+| **Response time** | Faster (one-shot) | Standard (multi-step) |
 | **Tool execution** | Tools execute as needed | Tools execute as needed |
 | **Swarm support** | **Not supported** | Fully supported |
 | **Use case** | Simple workflows, performance-sensitive | Complex multi-step workflows |
