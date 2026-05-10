@@ -413,7 +413,6 @@ uv run pyright
 - `CI` runs on pull requests and pushes to the default branch (`master` today).
 - `Publish PyPI` runs on version tags that match `v*`.
 - Configure PyPI Trusted Publishing for this repository before the first release.
-- See [`DEPLOYMENT.md`](DEPLOYMENT.md) for the full GitHub and PyPI release procedure.
 
 For standalone repo verification before `maivn-shared` is published, use a local checkout of
 `maivn-shared`. The GitHub Actions workflow injects that temporary `uv` source override
