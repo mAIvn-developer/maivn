@@ -163,6 +163,12 @@ different raw IDs, merge that lifecycle into one card; if the prior card is alre
 completed and a new `executing` event arrives for the same agent name, render a new
 card.
 
+`agent_assignment` events for the same logical assignment may arrive in
+multiple bursts as the platform progresses through planning and execution.
+The bridge keeps `assignment_id` stable across those bursts, so frontends that
+key UI state off `assignment_id` (rather than off arrival order) don't need
+to reconcile early and late events themselves.
+
 ### Custom event types
 
 You can emit any custom event name via `bridge.emit("my_event", payload)`. Frontend dispatch keys off the type, so unknown types pass through unchanged. For end-user-facing bridges (`audience="frontend_safe"`), unknown types still get a generic injected-fields scrub — see [Audiences](#audiences).

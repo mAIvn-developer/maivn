@@ -152,8 +152,7 @@ Recommended policy choices:
 | Developer-provided first step with autonomous recovery | `mode="hybrid"`, `final_output_mode="supervised"`                                                 |
 
 `max_cycles` defaults to the server's configured orchestration cycle limit when unset.
-The server environment variable `MAIVN_AGENTS_MAX_ORCHESTRATION_CYCLES` controls that
-default, and invocation-level `max_cycles` can only downscope the server limit.
+Invocation-level `max_cycles` can only downscope the server limit, never raise it.
 
 Policy fields are projected into request metadata for the server runtime:
 

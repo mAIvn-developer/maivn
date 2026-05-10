@@ -815,11 +815,11 @@ All parameters after `messages` are keyword-only.
 
 The `.structured_output()` builder:
 
-- **Bypasses orchestration**: Routes directly to the assignment agent, skipping higher-level planning
-- **Faster responses**: Reduced latency by skipping orchestrator overhead
-- **Tools still execute**: Registered tools are available and will execute as needed
+- **Skips multi-turn planning**: Routes the request straight to schema-driven extraction instead of running the full agentic loop.
+- **Faster responses**: Lower latency for one-shot structured calls.
+- **Tools still execute**: Registered tools are available and will run as needed.
 
-Use this when you need structured output with faster response times by skipping the orchestration layer.
+Use this when you need structured output and don't need multi-turn agentic reasoning.
 
 #### Example
 
@@ -885,9 +885,9 @@ Hooks allow custom logic before/after tool execution.
     'tool_id': str | None,
     'tool': BaseTool | None,
     'args': dict | None,
-    'context': ExecutionContext,
-    'result': Any | None,  # Only in 'after' stage
-    'error': Exception | None,  # Only if error occurred
+    'context': dict,                  # Runtime context for this tool call (read-only)
+    'result': Any | None,             # Only in 'after' stage
+    'error': Exception | None,        # Only if error occurred
 }
 ```
 
