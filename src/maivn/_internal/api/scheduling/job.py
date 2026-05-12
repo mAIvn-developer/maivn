@@ -222,6 +222,7 @@ class ScheduledJob:
     async def _run_loop(self) -> None:
         assert self._stop_event is not None
         assert self._pause_event is not None
+        last_fired_at: datetime | None = None
         try:
             while self._is_running:
                 if self._max_runs_reached():
@@ -246,10 +247,22 @@ class ScheduledJob:
                 if not self._is_running:
                     break
 
+                # Defensive: if the cursor advanced past `next_at` so quickly
+                # that the schedule still resolves to the same tick (clock
+                # skew, pathological wait_for(timeout=0) tight-loops), wait
+                # the remainder of a second instead of double-firing the same
+                # scheduled instant. This protects ``fire_count`` from
+                # spuriously climbing on systems with NTP corrections or
+                # under heavy event-loop load.
+                if last_fired_at is not None and next_at <= last_fired_at:
+                    await asyncio.sleep(1.0)
+                    continue
+
                 record = RunRecord(
                     scheduled_at=next_at,
                     fire_id=str(uuid.uuid4()),
                 )
+                last_fired_at = next_at
                 self._fire_count += 1
                 await self._launch_run(record, manual=False)
         finally:

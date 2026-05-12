@@ -370,3 +370,12 @@ mAIvn Studio surfaces the same configuration on every app's
 misfire/overlap policy, retry, and a live runs table. Configurations
 made in Studio call directly into the SDK; the underlying
 `ScheduledJob` is the same handle you'd get in code.
+
+The runs table is driven by the SDK's lifecycle callbacks
+(`on_fire`, `on_success`, `on_error`, `on_skip`), pushed straight
+to the browser over SSE. A new run's card appears the moment
+`on_fire` runs server-side — no polling delay between the countdown
+hitting zero and the card showing the live message, tool cards, and
+enrichment chips. The status pill flips from running to
+succeeded / failed / skipped as soon as the matching terminal
+callback fires.

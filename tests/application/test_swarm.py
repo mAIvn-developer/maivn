@@ -272,9 +272,43 @@ def test_swarm_validate_force_final_tool_request() -> None:
     final_tool = FunctionTool(name="final", description="f", tool_id="final", func=lambda: "ok")
     final_tool.final_tool = True
     swarm._tool_repo.add_tool(final_tool)
-    agent.use_as_final_output = True
 
     swarm._validate_force_final_tool_request(True)
+
+
+def test_swarm_force_final_tool_rejects_swarm_final_tool_with_use_as_final_output() -> None:
+    """Swarm-scope ``final_tool`` + sub-agent ``use_as_final_output`` is a
+    conflict only when ``force_final_tool=True`` is invoked. The bare
+    ``final_tool`` marker is just a positioning hint, so the combination
+    is valid until forcing actually activates it."""
+    agent = Agent(name="agent", client=_make_client())
+    swarm = Swarm(name="swarm", agents=[agent])
+
+    final_tool = FunctionTool(name="final", description="f", tool_id="final", func=lambda: "ok")
+    final_tool.final_tool = True
+    swarm._tool_repo.add_tool(final_tool)
+    agent.use_as_final_output = True
+
+    # Without force_final_tool, the combination is allowed —
+    # final_tool alone does not force the tool to be used.
+    swarm._validate_force_final_tool_request(False)
+
+    # With force_final_tool=True, the conflict materializes.
+    with pytest.raises(ValueError, match="conflicting final-output declarations"):
+        swarm._validate_force_final_tool_request(True)
+
+
+def test_swarm_rejects_multiple_use_as_final_output_agents() -> None:
+    """``validate_tool_configuration`` catches this at swarm invocation time."""
+    agent_a = Agent(name="agent_a", client=_make_client())
+    agent_b = Agent(name="agent_b", client=_make_client())
+    agent_a.use_as_final_output = True
+    agent_b.use_as_final_output = True
+
+    swarm = Swarm(name="swarm", agents=[agent_a, agent_b])
+
+    with pytest.raises(ValueError, match="Multiple swarm agents marked"):
+        swarm.validate_on_invoke()
 
 
 def test_swarm_force_final_tool_rejects_ambiguous_multi_agent_finals() -> None:

@@ -57,7 +57,13 @@ def enrich_state_metadata(
         swarm_system_prompt=_resolve_system_prompt(swarm),
         agent_roster=roster,
         agent_invocation_tool_map=invocation_tool_map,
+        swarm_has_final_tool=_swarm_has_final_tool(swarm),
     )
+
+
+def _swarm_has_final_tool(swarm: Swarm) -> bool:
+    """True when any swarm-scope tool is marked ``final_tool=True``."""
+    return any(bool(getattr(tool, "final_tool", False)) for tool in swarm.list_tools())
 
 
 def _resolve_system_prompt(swarm: Swarm) -> str | None:
