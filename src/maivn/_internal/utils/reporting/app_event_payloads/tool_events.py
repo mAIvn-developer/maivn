@@ -1,3 +1,11 @@
+"""Payload builders for tool-execution and system-tool events.
+
+``build_tool_event_payload`` covers the unified tool lifecycle (start /
+complete / error) for func/agent/model/MCP tools. The ``build_system_tool_*``
+builders carry the separate lifecycle used by streaming system tools where
+``progress`` chunks arrive between ``start`` and ``complete``.
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -22,6 +30,20 @@ def build_tool_event_payload(
     participant_name: str | None = None,
     participant_role: str | None = None,
 ) -> dict[str, Any]:
+    """Build the unified tool-lifecycle payload.
+
+    Args:
+        tool_name: Display name of the tool.
+        tool_id: Stable per-invocation identifier (event correlation key).
+        status: ``"executing"`` / ``"completed"`` / ``"failed"``.
+        args: Input arguments dict (may include ``arg_keys`` for redaction).
+        result: Output value when ``status == "completed"``.
+        error: Error message when ``status == "failed"``.
+        agent_name / swarm_name: Scope context for the reporter.
+        tool_type: ``"func"`` (default), ``"agent"``, ``"model"``,
+            ``"system"``, or ``"mcp"``.
+        participant_*: Optional participant metadata.
+    """
     resolved_tool_type = clean_text(tool_type) or "func"
     resolved_args = dict(args) if isinstance(args, dict) else {}
     scope = build_scope(agent_name=agent_name, swarm_name=swarm_name)
@@ -74,6 +96,13 @@ def build_system_tool_start_payload(
     agent_name: str | None = None,
     swarm_name: str | None = None,
 ) -> dict[str, Any]:
+    """Build the opening event for a streaming system tool.
+
+    System tools (think/search/etc.) emit ``start`` once, zero or more
+    ``chunk`` events, then ``complete`` (or ``error``). ``tool_type`` acts as
+    the tool name in this lifecycle since system tools don't carry a separate
+    display name.
+    """
     resolved_params = dict(params) if isinstance(params, dict) else {}
     scope = build_scope(agent_name=agent_name, swarm_name=swarm_name)
     payload = {
@@ -106,6 +135,10 @@ def build_system_tool_chunk_payload(
     text: str,
     progress: float | None = None,
 ) -> dict[str, Any]:
+    """Build an interim progress chunk for an in-flight system tool.
+
+    ``progress`` is a 0..1 fraction when known; ``None`` for indeterminate.
+    """
     payload = {
         "tool_id": tool_id,
         "text": text,
@@ -129,6 +162,7 @@ def build_system_tool_chunk_payload(
 
 
 def build_system_tool_complete_payload(*, tool_id: str, result: Any) -> dict[str, Any]:
+    """Build the terminal ``complete`` event for a streaming system tool."""
     payload = {
         "tool_id": tool_id,
         "result": result,

@@ -9,10 +9,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # MARK: Constants
 
-_DEFAULT_PROTOCOL_VERSION = "2025-06-18"
-_DEFAULT_CLIENT_NAME = "maivn"
-_DEFAULT_CLIENT_TITLE = "Maivn SDK"
-_DEFAULT_CLIENT_VERSION = "unknown"
+DEFAULT_PROTOCOL_VERSION = "2025-06-18"
+DEFAULT_CLIENT_NAME = "maivn"
+DEFAULT_CLIENT_TITLE = "Maivn SDK"
+DEFAULT_CLIENT_VERSION = "unknown"
 
 
 # MARK: Utility Functions
@@ -52,10 +52,10 @@ class MCPToolDefinition(BaseModel):
 
 
 __all__ = [
+    "DEFAULT_CLIENT_NAME",
+    "DEFAULT_CLIENT_TITLE",
+    "DEFAULT_CLIENT_VERSION",
+    "DEFAULT_PROTOCOL_VERSION",
     "MCPToolDefinition",
     "sanitize_identifier",
-    "_DEFAULT_PROTOCOL_VERSION",
-    "_DEFAULT_CLIENT_NAME",
-    "_DEFAULT_CLIENT_TITLE",
-    "_DEFAULT_CLIENT_VERSION",
 ]

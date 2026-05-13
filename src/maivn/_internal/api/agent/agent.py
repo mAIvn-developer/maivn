@@ -2,27 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 import sys
-from collections.abc import AsyncIterator, Callable, Iterator, Sequence
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
-from maivn_shared import (
-    BaseDependency,
-    BaseMessage,
-    MemoryAssetsConfig,
-    MemoryConfig,
-    SessionOrchestrationConfig,
-    SessionRequest,
-    SessionResponse,
-    SwarmConfig,
-    SystemToolsConfig,
-)
+from maivn_shared import BaseDependency
 from maivn_shared.domain.entities.dependencies import AwaitForDependency, ReevaluateDependency
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field, PrivateAttr, field_validator
 
-from maivn._internal.core.entities.sse_event import SSEEvent
 from maivn._internal.core.entities.tools import BaseTool
 from maivn._internal.core.interfaces import AgentOrchestratorInterface
 from maivn._internal.core.services.team_dependencies import (
@@ -31,29 +19,9 @@ from maivn._internal.core.services.team_dependencies import (
     resolve_team_control_reference,
 )
 
-from ..async_stream import stream_in_worker_thread
 from ..base_scope import BaseScope
 from .client_cache import get_or_create_client
-from .hooks import (
-    build_scope_hook_payload,
-    get_after_scope_hooks,
-    get_before_scope_hooks,
-    run_scope_hooks,
-    scope_hooks_enabled,
-    wrap_stream_with_hooks,
-)
-from .invocation_helpers import (
-    build_memory_assets_config,
-    coerce_memory_assets_config,
-    coerce_swarm_config,
-    collect_all_tools,
-    prepare_invocation_state,
-    prepare_messages,
-    resolve_memory_assets_config,
-    validate_final_tool_exists,
-    validate_invoke_params,
-)
-from .invocation_state import InvocationState as _InvocationState
+from .invocation_methods import AgentInvocationMethodsMixin
 
 if TYPE_CHECKING:
     from ..client import Client
@@ -63,11 +31,14 @@ if TYPE_CHECKING:
 # MARK: Agent
 
 
-class Agent(BaseScope):
+class Agent(AgentInvocationMethodsMixin, BaseScope):
     """Agent with DI-friendly construction.
 
     Holds api_key and SDK Client, delegates invocation to AgentOrchestrator,
     and supports swarm membership.
+
+    Orchestrator-routed methods (``invoke``/``stream``/``ainvoke``/``astream``/
+    batch/compile) are provided by :class:`AgentInvocationMethodsMixin`.
     """
 
     # MARK: - Fields
@@ -239,412 +210,6 @@ class Agent(BaseScope):
             )
         return resolve_team_control_reference(swarm, ref)
 
-    # MARK: - Orchestration
-
-    def _get_orchestrator(self) -> AgentOrchestratorInterface:
-        """Get or create cached orchestrator instance."""
-        if self._orchestrator is None:
-            self._orchestrator = self._build_orchestrator()
-        return self._orchestrator
-
-    def _build_orchestrator(self) -> AgentOrchestratorInterface:
-        """Build a new orchestrator instance for this agent."""
-        from maivn._internal.core.orchestrator.builder import OrchestratorBuilder
-
-        return OrchestratorBuilder().with_agent(self).build()
-
-    def invoke(
-        self,
-        messages: Sequence[BaseMessage],
-        force_final_tool: bool = False,
-        targeted_tools: list[str] | None = None,
-        structured_output: type[PydanticBaseModel] | None = None,
-        model: Literal["fast", "balanced", "max"] | None = None,
-        reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
-        stream_response: bool = True,
-        thread_id: str | None = None,
-        verbose: bool = False,
-        metadata: dict[str, Any] | None = None,
-        memory_config: MemoryConfig | dict[str, Any] | None = None,
-        system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
-        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
-        memory_assets_config: MemoryAssetsConfig | dict[str, Any] | None = None,
-        swarm_config: SwarmConfig | dict[str, Any] | None = None,
-        allow_private_in_system_tools: bool | None = None,
-    ) -> SessionResponse:
-        """Invoke the agent through the AgentOrchestrator."""
-        return self._invoke_with_orchestrator(
-            self._get_orchestrator(),
-            messages,
-            force_final_tool=force_final_tool,
-            targeted_tools=targeted_tools,
-            structured_output=structured_output,
-            model=model,
-            reasoning=reasoning,
-            stream_response=stream_response,
-            thread_id=thread_id,
-            verbose=verbose,
-            metadata=metadata,
-            memory_config=memory_config,
-            system_tools_config=system_tools_config,
-            orchestration_config=orchestration_config,
-            memory_assets_config=memory_assets_config,
-            swarm_config=swarm_config,
-            allow_private_in_system_tools=allow_private_in_system_tools,
-        )
-
-    def _invoke_with_orchestrator(
-        self,
-        orchestrator: AgentOrchestratorInterface,
-        messages: Sequence[BaseMessage],
-        *,
-        force_final_tool: bool = False,
-        targeted_tools: list[str] | None = None,
-        structured_output: type[PydanticBaseModel] | None = None,
-        model: Literal["fast", "balanced", "max"] | None = None,
-        reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
-        stream_response: bool = True,
-        thread_id: str | None = None,
-        verbose: bool = False,
-        metadata: dict[str, Any] | None = None,
-        memory_config: MemoryConfig | dict[str, Any] | None = None,
-        system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
-        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
-        memory_assets_config: MemoryAssetsConfig | dict[str, Any] | None = None,
-        swarm_config: SwarmConfig | dict[str, Any] | None = None,
-        allow_private_in_system_tools: bool | None = None,
-    ) -> SessionResponse:
-        self._validate_invoke_params(force_final_tool, targeted_tools, structured_output)
-        invocation_state = self._prepare_invocation_state(
-            messages,
-            metadata=metadata,
-            memory_config=memory_config,
-            system_tools_config=system_tools_config,
-            orchestration_config=orchestration_config,
-            memory_assets_config=memory_assets_config,
-            swarm_config=swarm_config,
-            allow_private_in_system_tools=allow_private_in_system_tools,
-        )
-
-        orchestrator_kwargs = {
-            "force_final_tool": force_final_tool,
-            "targeted_tools": targeted_tools,
-            "structured_output": structured_output,
-            "model": model,
-            "reasoning": reasoning,
-            "stream_response": stream_response,
-            "metadata": invocation_state.merged_metadata or None,
-            "memory_config": invocation_state.resolved_memory_config,
-            "system_tools_config": invocation_state.resolved_system_tools_config,
-            "orchestration_config": invocation_state.resolved_orchestration_config,
-            "memory_assets_config": invocation_state.resolved_memory_assets_config,
-            "swarm_config": invocation_state.resolved_swarm_config,
-            "thread_id": thread_id,
-            "verbose": verbose,
-        }
-
-        if not scope_hooks_enabled(invocation_state):
-            return orchestrator.invoke(invocation_state.prepared_messages, **orchestrator_kwargs)
-
-        payload = build_scope_hook_payload(self, invocation_state)
-        run_scope_hooks(
-            get_before_scope_hooks(self, invocation_state),
-            payload,
-            stage="before",
-        )
-
-        try:
-            result = orchestrator.invoke(invocation_state.prepared_messages, **orchestrator_kwargs)
-        except Exception as exc:  # noqa: BLE001
-            payload["stage"] = "after"
-            payload["error"] = exc
-            run_scope_hooks(
-                get_after_scope_hooks(self, invocation_state),
-                payload,
-                stage="after",
-            )
-            raise
-
-        payload["stage"] = "after"
-        payload["result"] = result
-        run_scope_hooks(
-            get_after_scope_hooks(self, invocation_state),
-            payload,
-            stage="after",
-        )
-        return result
-
-    def stream(
-        self,
-        messages: Sequence[BaseMessage],
-        force_final_tool: bool = False,
-        targeted_tools: list[str] | None = None,
-        model: Literal["fast", "balanced", "max"] | None = None,
-        reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
-        stream_response: bool = True,
-        status_messages: bool = False,
-        thread_id: str | None = None,
-        verbose: bool = False,
-        metadata: dict[str, Any] | None = None,
-        memory_config: MemoryConfig | dict[str, Any] | None = None,
-        system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
-        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
-        memory_assets_config: MemoryAssetsConfig | dict[str, Any] | None = None,
-        swarm_config: SwarmConfig | dict[str, Any] | None = None,
-        allow_private_in_system_tools: bool | None = None,
-    ) -> Iterator[SSEEvent]:
-        """Stream raw SSE events while executing this agent."""
-        self._validate_invoke_params(force_final_tool, targeted_tools, structured_output=None)
-        invocation_state = self._prepare_invocation_state(
-            messages,
-            metadata=metadata,
-            memory_config=memory_config,
-            system_tools_config=system_tools_config,
-            orchestration_config=orchestration_config,
-            memory_assets_config=memory_assets_config,
-            swarm_config=swarm_config,
-            allow_private_in_system_tools=allow_private_in_system_tools,
-        )
-
-        stream_iter = self._get_orchestrator().stream(
-            invocation_state.prepared_messages,
-            force_final_tool=force_final_tool,
-            targeted_tools=targeted_tools,
-            model=model,
-            reasoning=reasoning,
-            stream_response=stream_response,
-            status_messages=status_messages,
-            metadata=invocation_state.merged_metadata or None,
-            memory_config=invocation_state.resolved_memory_config,
-            system_tools_config=invocation_state.resolved_system_tools_config,
-            orchestration_config=invocation_state.resolved_orchestration_config,
-            memory_assets_config=invocation_state.resolved_memory_assets_config,
-            swarm_config=invocation_state.resolved_swarm_config,
-            thread_id=thread_id,
-            verbose=verbose,
-        )
-
-        if not scope_hooks_enabled(invocation_state):
-            return stream_iter
-
-        payload = build_scope_hook_payload(self, invocation_state)
-        return wrap_stream_with_hooks(stream_iter, self, invocation_state, payload)
-
-    async def ainvoke(
-        self,
-        messages: Sequence[BaseMessage],
-        force_final_tool: bool = False,
-        targeted_tools: list[str] | None = None,
-        structured_output: type[PydanticBaseModel] | None = None,
-        model: Literal["fast", "balanced", "max"] | None = None,
-        reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
-        stream_response: bool = True,
-        thread_id: str | None = None,
-        verbose: bool = False,
-        metadata: dict[str, Any] | None = None,
-        memory_config: MemoryConfig | dict[str, Any] | None = None,
-        system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
-        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
-        memory_assets_config: MemoryAssetsConfig | dict[str, Any] | None = None,
-        swarm_config: SwarmConfig | dict[str, Any] | None = None,
-        allow_private_in_system_tools: bool | None = None,
-    ) -> SessionResponse:
-        """Async wrapper around :meth:`invoke` that runs the synchronous call in a thread."""
-        return await asyncio.to_thread(
-            self.invoke,
-            messages,
-            force_final_tool=force_final_tool,
-            targeted_tools=targeted_tools,
-            structured_output=structured_output,
-            model=model,
-            reasoning=reasoning,
-            stream_response=stream_response,
-            thread_id=thread_id,
-            verbose=verbose,
-            metadata=metadata,
-            memory_config=memory_config,
-            system_tools_config=system_tools_config,
-            orchestration_config=orchestration_config,
-            memory_assets_config=memory_assets_config,
-            swarm_config=swarm_config,
-            allow_private_in_system_tools=allow_private_in_system_tools,
-        )
-
-    async def astream(
-        self,
-        messages: Sequence[BaseMessage],
-        force_final_tool: bool = False,
-        targeted_tools: list[str] | None = None,
-        model: Literal["fast", "balanced", "max"] | None = None,
-        reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
-        stream_response: bool = True,
-        status_messages: bool = False,
-        thread_id: str | None = None,
-        verbose: bool = False,
-        metadata: dict[str, Any] | None = None,
-        memory_config: MemoryConfig | dict[str, Any] | None = None,
-        system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
-        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
-        memory_assets_config: MemoryAssetsConfig | dict[str, Any] | None = None,
-        swarm_config: SwarmConfig | dict[str, Any] | None = None,
-        allow_private_in_system_tools: bool | None = None,
-    ) -> AsyncIterator[SSEEvent]:
-        """Async wrapper around :meth:`stream` that yields events from a worker thread."""
-
-        def _stream() -> Iterator[SSEEvent]:
-            return self.stream(
-                messages,
-                force_final_tool=force_final_tool,
-                targeted_tools=targeted_tools,
-                model=model,
-                reasoning=reasoning,
-                stream_response=stream_response,
-                status_messages=status_messages,
-                thread_id=thread_id,
-                verbose=verbose,
-                metadata=metadata,
-                memory_config=memory_config,
-                system_tools_config=system_tools_config,
-                orchestration_config=orchestration_config,
-                memory_assets_config=memory_assets_config,
-                swarm_config=swarm_config,
-                allow_private_in_system_tools=allow_private_in_system_tools,
-            )
-
-        async for event in stream_in_worker_thread(_stream):
-            yield event
-
-    # MARK: - Invocation Helpers
-
-    def _invoke_batch_item(
-        self,
-        input_item: Any,
-        invoke_kwargs: dict[str, Any],
-    ) -> SessionResponse:
-        orchestrator = self._build_orchestrator()
-        try:
-            return self._invoke_with_orchestrator(
-                orchestrator,
-                input_item,
-                **invoke_kwargs,
-            )
-        finally:
-            close = getattr(orchestrator, "close", None)
-            if callable(close):
-                try:
-                    close()
-                except (RuntimeError, OSError, AttributeError):
-                    pass
-
-    def _prepare_invocation_state(
-        self,
-        messages: Sequence[BaseMessage],
-        *,
-        metadata: dict[str, Any] | None,
-        memory_config: MemoryConfig | dict[str, Any] | None,
-        system_tools_config: SystemToolsConfig | dict[str, Any] | None,
-        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None,
-        memory_assets_config: MemoryAssetsConfig | dict[str, Any] | None,
-        swarm_config: SwarmConfig | dict[str, Any] | None,
-        allow_private_in_system_tools: bool | None,
-    ) -> _InvocationState:
-        return prepare_invocation_state(
-            self,
-            messages,
-            metadata=metadata,
-            memory_config=memory_config,
-            system_tools_config=system_tools_config,
-            orchestration_config=orchestration_config,
-            memory_assets_config=memory_assets_config,
-            swarm_config=swarm_config,
-            allow_private_in_system_tools=allow_private_in_system_tools,
-        )
-
-    def _build_memory_assets_config(
-        self,
-        *,
-        default_agent_id: str | None = None,
-        default_swarm_id: str | None = None,
-    ) -> MemoryAssetsConfig | None:
-        return build_memory_assets_config(
-            self,
-            default_agent_id=default_agent_id,
-            default_swarm_id=default_swarm_id,
-        )
-
-    @staticmethod
-    def _coerce_memory_assets_config(value: Any) -> MemoryAssetsConfig | None:
-        return coerce_memory_assets_config(value)
-
-    @staticmethod
-    def _coerce_swarm_config(value: Any) -> SwarmConfig | None:
-        return coerce_swarm_config(value)
-
-    def _resolve_memory_assets_config(
-        self,
-        override: Any = None,
-        *,
-        default_agent_id: str | None = None,
-        default_swarm_id: str | None = None,
-    ) -> MemoryAssetsConfig | None:
-        return resolve_memory_assets_config(
-            self,
-            override,
-            default_agent_id=default_agent_id,
-            default_swarm_id=default_swarm_id,
-        )
-
-    def _validate_invoke_params(
-        self,
-        force_final_tool: bool,
-        targeted_tools: list[str] | None,
-        structured_output: type[PydanticBaseModel] | None,
-    ) -> None:
-        """Validate invocation parameters for mutual exclusivity."""
-        validate_invoke_params(self, force_final_tool, targeted_tools, structured_output)
-
-    def _validate_final_tool_exists(self) -> None:
-        """Ensure at least one final_tool exists when force_final_tool is True."""
-        validate_final_tool_exists(self)
-
-    def _collect_all_tools(self) -> list[Any]:
-        """Collect all tools from agent and parent swarm."""
-        return collect_all_tools(self)
-
-    def _prepare_messages(
-        self,
-        messages: Sequence[BaseMessage],
-    ) -> list[BaseMessage]:
-        """Prepare messages, injecting system message if needed."""
-        return prepare_messages(self, messages)
-
-    def compile_state(
-        self,
-        messages: Sequence[BaseMessage],
-        targeted_tools: list[str] | None = None,
-        memory_config: MemoryConfig | dict[str, Any] | None = None,
-        system_tools_config: SystemToolsConfig | dict[str, Any] | None = None,
-        orchestration_config: SessionOrchestrationConfig | dict[str, Any] | None = None,
-        memory_assets_config: MemoryAssetsConfig | dict[str, Any] | None = None,
-        swarm_config: SwarmConfig | dict[str, Any] | None = None,
-        stream_response: bool = True,
-    ) -> SessionRequest:
-        """Compile agent state via the AgentOrchestrator."""
-        return self._get_orchestrator().compile_state(
-            messages,
-            targeted_tools=targeted_tools,
-            memory_config=self.resolve_memory_config(memory_config),
-            system_tools_config=self.resolve_system_tools_config(system_tools_config),
-            orchestration_config=self.resolve_orchestration_config(orchestration_config),
-            memory_assets_config=self._resolve_memory_assets_config(
-                memory_assets_config,
-                default_agent_id=self.id,
-                default_swarm_id=getattr(self.get_swarm(), "id", None),
-            ),
-            swarm_config=self._coerce_swarm_config(swarm_config),
-            stream_response=stream_response,
-        )
-
     # MARK: - Cleanup
 
     def close(self) -> None:
@@ -654,7 +219,7 @@ class Agent(BaseScope):
         self._closed = True
         try:
             self.close_mcp_servers()
-        except Exception:
+        except Exception:  # noqa: BLE001 - cleanup must never raise
             pass
         orchestrator = getattr(self, "_orchestrator", None)
         if orchestrator is None:
@@ -672,7 +237,7 @@ class Agent(BaseScope):
             return
         try:
             self.close()
-        except Exception:
+        except Exception:  # noqa: BLE001 - __del__ must never raise
             pass
 
 

@@ -20,8 +20,14 @@ def run_tool(
     args: dict[str, Any],
     private_data_injected: Any,
     interrupt_data_injected: Any,
+    *,
+    tool_event_id: str | None = None,
 ) -> Any:
-    """Execute the tool and return the serialized result."""
+    """Execute the tool and return the serialized result.
+
+    ``tool_event_id`` is forwarded so per-tool hook firings can be routed
+    to the correct tool card by the frontend.
+    """
     metadata: dict[str, Any] | None = None
     if private_data_injected or interrupt_data_injected:
         metadata = {
@@ -39,6 +45,7 @@ def run_tool(
         tool_id,
         args,
         context=context_overrides,
+        tool_event_id=tool_event_id,
     )
     value = dispatcher._tool_execution_service.to_jsonable(result)
 

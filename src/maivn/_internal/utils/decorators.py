@@ -112,6 +112,15 @@ def depends_on_await_for(
     timing: ExecutionTiming = "after",
     instance_control: ExecutionInstanceControl = "each",
 ) -> Callable:
+    """Block the decorated tool until the referenced tool finishes.
+
+    Args:
+        tool_ref: Tool object, tool ID/name, or callable to wait on.
+        timing: ``"before"`` (wait before the dependency runs) or
+            ``"after"`` (wait until the dependency completes; default).
+        instance_control: ``"each"`` (one wait per dependency invocation,
+            default) or ``"once"`` (wait only on the first instance).
+    """
     return _create_execution_control_decorator(
         control_model=AwaitForDependency,
         tool_ref=tool_ref,
@@ -126,6 +135,14 @@ def depends_on_reevaluate(
     timing: ExecutionTiming = "after",
     instance_control: ExecutionInstanceControl = "each",
 ) -> Callable:
+    """Trigger a re-planning cycle relative to the referenced tool.
+
+    Args:
+        tool_ref: Tool object, tool ID/name, or callable to anchor on.
+        timing: ``"before"`` or ``"after"`` (default) the dependency runs.
+        instance_control: ``"each"`` (default) or ``"once"`` — see
+            :func:`depends_on_await_for` for the same semantics.
+    """
     return _create_execution_control_decorator(
         control_model=ReevaluateDependency,
         tool_ref=tool_ref,
@@ -272,8 +289,7 @@ def _detect_input_type_from_annotation(
             return "number", []
 
         return "text", []
-    except Exception:
-        # If annotation inspection fails, default to text
+    except Exception:  # noqa: BLE001 - annotation inspection is best-effort
         return "text", []
 
 
@@ -362,8 +378,7 @@ def _attach_dependency(func: Callable, dependency: BaseDependency) -> None:
     if callable(register_fn):
         try:
             register_fn(dependency)
-        except Exception:
-            # Expected: registration may fail if tool not yet initialized
+        except Exception:  # noqa: BLE001 - registration may fail if tool not yet initialized
             pass
     else:
         # Store as pending for toolify to pick up later
@@ -391,7 +406,7 @@ def _attach_execution_control(
     if callable(register_fn):
         try:
             register_fn(control)
-        except Exception:
+        except Exception:  # noqa: BLE001 - registration may fail if tool not yet initialized
             pass
     else:
         pending = list(getattr(func_with_attrs, "__maivn_pending_execution_controls__", []))
@@ -410,7 +425,7 @@ def _attach_arg_policy(obj: Callable | type[BaseModel], policy: dict[str, str]) 
     if callable(register_fn):
         try:
             register_fn(policy)
-        except Exception:
+        except Exception:  # noqa: BLE001 - registration may fail if tool not yet initialized
             pass
     else:
         pending = list(getattr(obj_with_attrs, "__maivn_pending_arg_policies__", []))

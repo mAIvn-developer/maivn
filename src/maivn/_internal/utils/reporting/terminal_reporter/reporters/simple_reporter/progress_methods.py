@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from ..._formatters import format_elapsed_time
-from ..reporter_base import build_error_details, get_tool_prefix, is_reevaluate_system_tool
+from .._shared_helpers import build_error_details, get_tool_prefix, is_reevaluate_system_tool
 from .display_helpers import get_event_label, print_kv_lines, print_tool_child_lines
 
 # MARK: Event Display

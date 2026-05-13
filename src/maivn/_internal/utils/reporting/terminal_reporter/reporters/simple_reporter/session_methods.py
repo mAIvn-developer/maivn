@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..._formatters import format_session_id
-from ..reporter_base import is_reevaluate_system_tool
+from .._shared_helpers import is_reevaluate_system_tool
 from .display_helpers import (
     build_tool_start_details_simple,
     print_boxed_footer,

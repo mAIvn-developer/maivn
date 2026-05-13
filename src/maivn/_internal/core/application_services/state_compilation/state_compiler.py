@@ -103,7 +103,7 @@ class StateCompiler:
 
         try:
             self._tool_spec_factory.reset_cache()
-        except Exception:
+        except Exception:  # noqa: BLE001 - cache reset is best-effort
             pass
 
         all_tools = self._build_tool_list(tools, scope)

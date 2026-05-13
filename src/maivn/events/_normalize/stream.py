@@ -25,6 +25,33 @@ def normalize_stream_event(
     tool_name_map: dict[str, str] | None = None,
     tool_metadata_map: dict[str, dict[str, Any]] | None = None,
 ) -> list[AppEvent]:
+    """Normalize a single raw SSE event into zero or more AppEvents.
+
+    Inputs that already carry the v1 contract version are validated and
+    returned unchanged. Older / raw shapes are dispatched through
+    :data:`EVENT_HANDLERS` and emit any number of normalized AppEvents
+    (often one, sometimes zero, occasionally a small batch).
+
+    Args:
+        event: Raw SSE event from the server stream.
+        state: Per-stream state carried across calls (assistant text
+            accumulation, tool-context cache, etc.); pass the same instance
+            for every event in a stream. Defaults to a fresh state.
+        default_agent_name / default_swarm_name: Names to attach when the
+            event itself doesn't carry them (single-agent runs commonly
+            omit them).
+        default_participant_*: Participant metadata defaults.
+        assignment_name_map: ``action_id -> agent_name`` lookups for events
+            that reference assignments by id.
+        tool_name_map: ``tool_id -> display_name`` overrides used to surface
+            human-readable names for dynamic invocation tools.
+        tool_metadata_map: ``tool_id -> {tool_type, agent_name, ...}`` to
+            enrich tool events with canonical metadata.
+
+    Returns:
+        Zero or more normalized AppEvents. Empty list means the input event
+        had no normalization handler and is intentionally dropped.
+    """
     active_state = state or NormalizedStreamState()
     payload = coerce_mapping(getattr(event, "payload", {}))
     name = clean_text(getattr(event, "name", "")) or ""
@@ -62,6 +89,17 @@ def normalize_stream(
     tool_name_map: dict[str, str] | None = None,
     tool_metadata_map: dict[str, dict[str, Any]] | None = None,
 ) -> Iterator[AppEvent]:
+    """Normalize an entire raw SSE stream into a flat AppEvent iterator.
+
+    Convenience wrapper over :func:`normalize_stream_event` that allocates
+    one :class:`NormalizedStreamState` for the whole stream so per-call
+    state (accumulated assistant text, tool context) is preserved across
+    events. Yields each normalized AppEvent eagerly so consumers can render
+    incrementally.
+
+    All keyword arguments are forwarded to :func:`normalize_stream_event` —
+    see that function for parameter semantics.
+    """
     state = NormalizedStreamState()
     stream_options: dict[str, Any] = {
         "default_agent_name": default_agent_name,

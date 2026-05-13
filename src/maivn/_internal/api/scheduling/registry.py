@@ -17,11 +17,17 @@ _jobs: weakref.WeakValueDictionary[str, ScheduledJob] = weakref.WeakValueDiction
 
 
 def register_job(job: ScheduledJob) -> None:
+    """Add ``job`` to the process-wide registry."""
     with _lock:
         _jobs[job.id] = job
 
 
 def list_jobs() -> list[ScheduledJob]:
+    """Return every live :class:`ScheduledJob` currently registered.
+
+    The registry holds weak references, so jobs that have been garbage-
+    collected are silently dropped from the returned list.
+    """
     with _lock:
         return [job for job in _jobs.values() if job is not None]
 

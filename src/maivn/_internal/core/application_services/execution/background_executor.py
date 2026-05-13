@@ -125,8 +125,7 @@ class BackgroundExecutor:
             if self._executor is None:
                 raise RuntimeError("BackgroundExecutor is not initialized")
             future = self._executor.submit(ctx.run, fn, *args, **kwargs)
-        except Exception:
-            # If submission fails, decrement the pending count to avoid leak
+        except Exception:  # noqa: BLE001 - decrement pending count then re-raise
             with self._lock:
                 self._pending_count = max(0, self._pending_count - 1)
             raise

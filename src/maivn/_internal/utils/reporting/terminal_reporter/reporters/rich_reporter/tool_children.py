@@ -9,7 +9,7 @@ from rich.text import Text
 
 from ..._formatters import result_to_json
 from ...config import RESULT_LABEL_STYLE, RESULT_VALUE_STYLE
-from ..reporter_base import (
+from .._shared_helpers import (
     collect_injected_data_info,
     extract_response_text,
     extract_result_for_display,

@@ -12,6 +12,7 @@ from ..._internal.utils.reporting.app_event_payloads import (
     build_enrichment_payload,
     build_error_payload,
     build_final_payload,
+    build_hook_fired_payload,
     build_interrupt_required_payload,
     build_status_message_payload,
     build_system_tool_chunk_payload,
@@ -227,3 +228,37 @@ async def emit_error(
     details: dict[str, Any] | None = None,
 ) -> None:
     await emit("error", build_error_payload(error=error, details=details))
+
+
+# MARK: Hook Emitters
+
+
+async def emit_hook_fired(
+    emit: EmitFn,
+    *,
+    name: str,
+    stage: str,
+    status: str,
+    target_type: str,
+    target_id: str | None = None,
+    target_name: str | None = None,
+    error: str | None = None,
+    elapsed_ms: int | None = None,
+) -> None:
+    """Emit a single developer-registered hook callback firing.
+
+    See :func:`build_hook_fired_payload` for argument semantics.
+    """
+    await emit(
+        "hook_fired",
+        build_hook_fired_payload(
+            name=name,
+            stage=stage,
+            status=status,
+            target_type=target_type,
+            target_id=target_id,
+            target_name=target_name,
+            error=error,
+            elapsed_ms=elapsed_ms,
+        ),
+    )

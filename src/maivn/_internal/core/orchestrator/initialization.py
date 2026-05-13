@@ -164,6 +164,7 @@ def init_orchestrator(
     )
     orch._tool_execution = tool_execution_service or ToolExecutionService(
         logger=orch._logger,
+        reporter_supplier=orch._get_reporter,
     )
     _maybe_set_agent_registry(orch)
 

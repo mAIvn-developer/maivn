@@ -41,6 +41,60 @@ class ReporterDefaultEventsMixin:
         """Report a standalone status message."""
         _ = (message, assistant_id)
 
+    # MARK: - Agent Assignment
+
+    def report_agent_assignment(
+        self,
+        *,
+        agent_name: str,
+        status: str,
+        assignment_id: str,
+        swarm_name: str | None = None,
+        error: str | None = None,
+        result: Any | None = None,
+    ) -> None:
+        """Report an agent assignment lifecycle event.
+
+        Default no-op. Implementations that surface per-agent assignment cards
+        (Studio, custom UIs) override this. Terminal reporters intentionally
+        leave it as a no-op.
+        """
+        _ = (agent_name, status, assignment_id, swarm_name, error, result)
+
+    # MARK: - Hook Firing
+
+    def report_hook_fired(
+        self,
+        *,
+        name: str,
+        stage: str,
+        status: str,
+        target_type: str,
+        target_id: str | None = None,
+        target_name: str | None = None,
+        error: str | None = None,
+        elapsed_ms: int | None = None,
+    ) -> None:
+        """Report a single developer-registered hook callback firing.
+
+        Default no-op. Implementations that surface per-hook indicators on
+        the appropriate target card (Studio's persistent header/footer
+        markers, for example) override this. Terminal reporters intentionally
+        leave it as a no-op.
+
+        Args:
+            name: Display name of the hook callable (usually ``__name__``).
+            stage: ``"before"`` or ``"after"``.
+            status: ``"completed"`` or ``"failed"``.
+            target_type: ``"tool"`` / ``"agent"`` / ``"swarm"``.
+            target_id: Per-invocation event id (tool target) or
+                agent_id / swarm_name (scope target).
+            target_name: Display name of the target card.
+            error: Error message when ``status == "failed"``.
+            elapsed_ms: Hook callable runtime in milliseconds.
+        """
+        _ = (name, stage, status, target_type, target_id, target_name, error, elapsed_ms)
+
     # MARK: - System Tools
 
     def report_system_tool_start(

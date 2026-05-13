@@ -103,7 +103,10 @@ class FakeToolExecutionService:
         tool_id: str,
         args: dict[str, Any],
         context: Any = None,
+        *,
+        tool_event_id: str | None = None,
     ) -> Any:
+        _ = tool_event_id
         self.execute_calls.append((tool_id, args, context))
         return {"raw": f"{tool_id}:{args}"}
 

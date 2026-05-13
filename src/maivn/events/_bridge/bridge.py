@@ -13,6 +13,7 @@ from .emitters import (
     emit_enrichment,
     emit_error,
     emit_final,
+    emit_hook_fired,
     emit_interrupt_required,
     emit_status_message,
     emit_system_tool_chunk,
@@ -413,6 +414,31 @@ class EventBridge:
     async def emit_error(self, error: str, details: dict[str, Any] | None = None) -> None:
         """Emit an error event."""
         await emit_error(self._emit_normalized, error=error, details=details)
+
+    async def emit_hook_fired(
+        self,
+        *,
+        name: str,
+        stage: str,
+        status: str,
+        target_type: str,
+        target_id: str | None = None,
+        target_name: str | None = None,
+        error: str | None = None,
+        elapsed_ms: int | None = None,
+    ) -> None:
+        """Emit a single ``hook_fired`` event for a developer-registered hook callback."""
+        await emit_hook_fired(
+            self._emit_normalized,
+            name=name,
+            stage=stage,
+            status=status,
+            target_type=target_type,
+            target_id=target_id,
+            target_name=target_name,
+            error=error,
+            elapsed_ms=elapsed_ms,
+        )
 
     # MARK: Streaming and Lifecycle
 

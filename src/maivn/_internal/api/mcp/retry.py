@@ -8,7 +8,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class _RateLimiter:
+class RateLimiter:
     """Simple sliding-window rate limiter."""
 
     def __init__(self, max_calls: int, window_seconds: float) -> None:
@@ -51,6 +51,15 @@ class _RateLimiter:
 
 
 class MCPSoftErrorHandling(BaseModel):
+    """Configuration for retrying MCP tools that signal failure inside a 200 OK.
+
+    Some MCP servers report failures (rate limits, transient backend errors)
+    as structured fields in the response body rather than HTTP errors. With
+    this enabled, the SDK scans ``structured_content`` for the configured
+    ``keys`` and, if matched, retries with exponential backoff up to
+    ``max_retries`` times before surfacing the error.
+    """
+
     model_config = ConfigDict(populate_by_name=True)
 
     enabled: bool = Field(default=False, description="Enable soft error detection")
@@ -86,18 +95,18 @@ class MCPSoftErrorHandling(BaseModel):
         return value
 
 
-def _find_soft_error_message(payload: Any, keys: set[str]) -> str | None:
+def find_soft_error_message(payload: Any, keys: set[str]) -> str | None:
     if isinstance(payload, dict):
         for key, value in payload.items():
             if key in keys and isinstance(value, str) and value.strip():
                 return value.strip()
-            nested = _find_soft_error_message(value, keys)
+            nested = find_soft_error_message(value, keys)
             if nested:
                 return nested
         return None
     if isinstance(payload, list):
         for item in payload:
-            nested = _find_soft_error_message(item, keys)
+            nested = find_soft_error_message(item, keys)
             if nested:
                 return nested
         return None
