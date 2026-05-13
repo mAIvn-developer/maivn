@@ -69,7 +69,7 @@ def run_export(project_root: Path, project_name: str, *extra_args: str) -> list[
     command = [
         "uv",
         "export",
-        "--locked",
+        "--frozen",
         "--package",
         project_name,
         "--format",
