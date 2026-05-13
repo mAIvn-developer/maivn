@@ -41,10 +41,10 @@ from PyPI.
 To install the public Studio companion and enable `maivn studio` from a normal shell:
 
 ```bash
-pip install "maivn[studio]"
+pip install maivn maivn-studio
 ```
 
-If you prefer to install the companion package directly, `pip install maivn-studio` also works.
+`maivn-studio` pins a compatible `maivn` version, so installing them together always resolves a matching pair.
 
 ## Quick Start
 

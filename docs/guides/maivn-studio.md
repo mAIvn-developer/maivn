@@ -10,11 +10,11 @@ from the current working directory and walks up parent directories until it
 finds one.
 
 ```bash
-pip install "maivn[studio]"
+pip install maivn maivn-studio
 maivn studio
 ```
 
-`maivn[studio]` pulls in the `maivn-studio` package automatically; you can also
+`maivn-studio` registers the `maivn studio` subcommand on the SDK CLI; you can also
 invoke its entry point directly if you prefer:
 
 ```bash
