@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from maivn._internal.api.mcp import MCPServer
-from maivn._internal.api.mcp.clients import _McpStdioClient
+from maivn._internal.api.mcp.clients import McpStdioClient
 
 
 class _DummyProcess:
@@ -16,9 +16,10 @@ class _DummyProcess:
 
 
 def test_stdio_response_timeout_raises_timeout() -> None:
-    client = _McpStdioClient.__new__(_McpStdioClient)
-    client._server = SimpleNamespace(stdio_response_timeout_seconds=0.0)
-    client._process = _DummyProcess()
+    client = McpStdioClient.__new__(McpStdioClient)
+    # Inject duck-typed fakes; bypass the static types since we're testing internals.
+    client._server = SimpleNamespace(stdio_response_timeout_seconds=0.0)  # pyright: ignore[reportAttributeAccessIssue]
+    client._process = _DummyProcess()  # pyright: ignore[reportAttributeAccessIssue]
     client._stdout_queue = queue.Queue()
 
     with pytest.raises(TimeoutError):
@@ -36,7 +37,7 @@ def test_stdio_server_without_timeout_emits_warning() -> None:
 
 
 def test_stdio_client_build_process_env_defaults_to_minimal_runtime_env() -> None:
-    client = _McpStdioClient.__new__(_McpStdioClient)
+    client = McpStdioClient.__new__(McpStdioClient)
     client._server = SimpleNamespace(
         env=None,
         inherit_env=False,
@@ -60,7 +61,7 @@ def test_stdio_client_build_process_env_defaults_to_minimal_runtime_env() -> Non
 
 
 def test_stdio_client_build_process_env_can_explicitly_inherit_parent_env() -> None:
-    client = _McpStdioClient.__new__(_McpStdioClient)
+    client = McpStdioClient.__new__(McpStdioClient)
     client._server = SimpleNamespace(
         env=None,
         inherit_env=True,
@@ -74,7 +75,7 @@ def test_stdio_client_build_process_env_can_explicitly_inherit_parent_env() -> N
 
 
 def test_stdio_client_build_process_env_respects_hardening_controls() -> None:
-    client = _McpStdioClient.__new__(_McpStdioClient)
+    client = McpStdioClient.__new__(McpStdioClient)
     client._server = SimpleNamespace(
         env={"EXPLICIT_TOKEN": "keep"},
         inherit_env=False,

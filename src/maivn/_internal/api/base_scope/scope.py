@@ -254,6 +254,7 @@ class BaseScope(
 
     @staticmethod
     def coerce_system_tools_config(value: Any) -> SystemToolsConfig | None:
+        """Coerce ``None`` / dict / ``SystemToolsConfig`` to a typed config or ``None``."""
         if value is None:
             return None
         if isinstance(value, SystemToolsConfig):
@@ -268,6 +269,12 @@ class BaseScope(
         *,
         allow_private_in_system_tools: bool | None = None,
     ) -> SystemToolsConfig | None:
+        """Merge SDK defaults, scope-level config, and a per-call ``override``.
+
+        Layering (last wins via :meth:`SystemToolsConfig.merge`): SDK defaults
+        → scope ``system_tools_config`` → scope ``allow_private_in_system_tools``
+        → caller ``override`` → caller ``allow_private_in_system_tools``.
+        """
         configs: list[SystemToolsConfig | None] = [
             SystemToolsConfig(allow_private_data_placeholders=True),
             self.system_tools_config,
@@ -283,6 +290,7 @@ class BaseScope(
 
     @staticmethod
     def coerce_orchestration_config(value: Any) -> SessionOrchestrationConfig | None:
+        """Coerce ``None`` / dict / ``SessionOrchestrationConfig`` to a typed config or ``None``."""
         if value is None:
             return None
         if isinstance(value, SessionOrchestrationConfig):
@@ -297,6 +305,7 @@ class BaseScope(
         self,
         override: Any = None,
     ) -> SessionOrchestrationConfig | None:
+        """Merge the scope's orchestration config with a per-call ``override``."""
         return SessionOrchestrationConfig.merge(
             self.orchestration_config,
             self.coerce_orchestration_config(override),

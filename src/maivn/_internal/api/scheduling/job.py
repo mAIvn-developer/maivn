@@ -109,7 +109,7 @@ class ScheduledJob:
         if self._task is not None:
             try:
                 self._task.result(timeout=timeout)  # type: ignore[union-attr]
-            except Exception:
+            except Exception:  # noqa: BLE001 - drain is best-effort; ignore timeouts and task errors
                 pass
 
     def pause(self) -> None:

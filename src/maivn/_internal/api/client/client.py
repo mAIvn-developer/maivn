@@ -92,7 +92,7 @@ class Client(ClientHttpMixin, ClientMemoryMixin):
             value = get_localzone_name()
             if isinstance(value, str) and value.strip():
                 return value
-        except Exception:
+        except Exception:  # noqa: BLE001 - tzlocal raises a variety of OS errors
             return None
         return None
 

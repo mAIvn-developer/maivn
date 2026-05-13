@@ -1,3 +1,12 @@
+"""Payload builders for assistant, status, interrupt, and assignment events.
+
+Each ``build_*_payload`` produces a canonical AppEvent payload dict ready to
+be wrapped in an :class:`~maivn.events.AppEvent` envelope. Builders attach the
+shared ``contract_version`` / ``event_name`` / ``event_kind`` / ``scope`` /
+``participant`` fields via :func:`attach_common_fields` so the resulting dicts
+satisfy the v1 stream schema without callers reimplementing the envelope.
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -15,6 +24,15 @@ def build_assistant_chunk_payload(
     participant_name: str | None = None,
     participant_role: str | None = None,
 ) -> dict[str, Any]:
+    """Build the payload for an incremental assistant response chunk.
+
+    Args:
+        assistant_id: Stable identifier for the streaming assistant.
+        text: Delta text to append; full text is reconstructed downstream
+            by accumulating consecutive deltas keyed by ``assistant_id``.
+        participant_key/name/role: Optional participant metadata for
+            multi-participant streams (e.g. swarm members).
+    """
     participant = build_participant(
         participant_key=participant_key,
         participant_name=participant_name,
@@ -41,6 +59,12 @@ def build_assistant_chunk_payload(
 
 
 def build_status_message_payload(*, assistant_id: str, message: str) -> dict[str, Any]:
+    """Build the payload for a standalone, non-streaming status line.
+
+    Status messages are short user-facing strings (e.g. "Searching tools…")
+    surfaced between deltas; downstream reporters typically render them as a
+    single line rather than appending to streamed text.
+    """
     payload = {
         "assistant_id": assistant_id,
         "message": message,
@@ -74,6 +98,21 @@ def build_interrupt_required_payload(
     choices: list[str] | None = None,
     timestamp: str | None = None,
 ) -> dict[str, Any]:
+    """Build the payload announcing an execution-pause user-input request.
+
+    Args:
+        interrupt_id: Unique id for this interrupt instance.
+        data_key: Identifier the runtime uses to route the answer back into
+            the agent's private data / tool args.
+        prompt: Human-readable prompt to display.
+        tool_name / arg_name: Which tool argument this answer satisfies.
+        checkpoint_id / assignment_id: Surrounding execution context, when
+            available.
+        interrupt_number / total_interrupts: Position in a batched series.
+        input_type: ``"text"`` / ``"choice"`` / ``"boolean"`` / etc.
+        choices: Allowed options when ``input_type == "choice"``.
+        timestamp: ISO-8601 emission time, if the caller wants to override.
+    """
     normalized_choices = [str(choice) for choice in choices or []]
     payload = {
         "interrupt_id": interrupt_id,
@@ -125,6 +164,12 @@ def build_agent_assignment_payload(
     participant_name: str | None = None,
     participant_role: str | None = None,
 ) -> dict[str, Any]:
+    """Build the payload for a per-agent lifecycle update inside a swarm.
+
+    Emitted whenever an agent transitions through ``in_progress`` /
+    ``completed`` / ``failed`` so frontend UIs can render per-agent cards.
+    ``error`` and ``result`` are mutually exclusive but neither is required.
+    """
     scope = build_scope(
         scope_type="swarm" if clean_text(swarm_name) else None,
         scope_name=swarm_name,

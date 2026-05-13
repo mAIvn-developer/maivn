@@ -22,7 +22,7 @@ from ...config import (
     SIMPLE_BOX_HORIZONTAL,
     SIMPLE_BOX_VERTICAL,
 )
-from ..reporter_base import extract_response_text
+from .._shared_helpers import extract_response_text
 
 # MARK: Box Drawing
 

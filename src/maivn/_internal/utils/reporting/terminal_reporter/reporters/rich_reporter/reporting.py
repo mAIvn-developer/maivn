@@ -16,7 +16,7 @@ from ..._formatters import (
     get_event_color,
     get_event_icon,
 )
-from ..reporter_base import (
+from .._shared_helpers import (
     build_error_details,
     build_tool_start_details,
     get_tool_prefix,

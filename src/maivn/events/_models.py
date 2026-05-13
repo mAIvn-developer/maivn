@@ -124,10 +124,49 @@ class ChunkDescriptor(BaseModel):
     progress: float | None = None
 
 
+class HookDescriptor(BaseModel):
+    """Per-fire description of a developer-registered hook callback.
+
+    Emitted when a tool or scope (Agent / Swarm) ``before_execute`` /
+    ``after_execute`` callback runs. ``target_*`` fields identify which
+    on-screen card the firing should attach to.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str | None = None
+    """Display name of the hook callable (its ``__name__``)."""
+    stage: str | None = None
+    """``"before"`` or ``"after"``."""
+    status: str | None = None
+    """``"completed"`` or ``"failed"``."""
+    error: str | None = None
+    """User-facing error message when ``status == "failed"``."""
+    elapsed_ms: int | None = None
+    """How long the hook callable took to run."""
+    target_type: str | None = None
+    """``"tool"``, ``"agent"``, or ``"swarm"``."""
+    target_id: str | None = None
+    """For tools: the per-invocation event ID (correlates to the tool card).
+    For agents/swarms: the agent id or swarm name used by the scope card."""
+    target_name: str | None = None
+    """Display name of the target card."""
+
+
 # MARK: AppEvent
 
 
 class AppEvent(BaseModel):
+    """Canonical normalized event envelope emitted by the SDK event pipeline.
+
+    ``AppEvent`` is the typed shape consumers receive from
+    :func:`~maivn.events.normalize_stream`. ``event_name`` selects which of
+    the optional descriptor fields (``tool``, ``assistant``, ``assignment``,
+    …) are populated; reporters use that name to dispatch to the right
+    handler. ``contract_version`` lets consumers gate on the schema version
+    when the SDK evolves.
+    """
+
     model_config = ConfigDict(extra="allow")
 
     contract_version: str = APP_EVENT_CONTRACT_VERSION
@@ -145,6 +184,7 @@ class AppEvent(BaseModel):
     error_info: ErrorInfoDescriptor | None = None
     session: SessionDescriptor | None = None
     chunk: ChunkDescriptor | None = None
+    hook: HookDescriptor | None = None
 
 
 # MARK: Normalization State
@@ -167,6 +207,7 @@ __all__ = [
     "ChunkDescriptor",
     "EnrichmentDescriptor",
     "ErrorInfoDescriptor",
+    "HookDescriptor",
     "InterruptDescriptor",
     "LifecycleDescriptor",
     "NormalizedStreamState",

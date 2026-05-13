@@ -9,13 +9,13 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from .auto import MCPAutoSetup
-from .clients import _McpClientBase, _McpHttpClient, _McpStdioClient
-from .retry import MCPSoftErrorHandling, _find_soft_error_message, _RateLimiter
+from .clients import McpClientBase, McpHttpClient, McpStdioClient
+from .retry import MCPSoftErrorHandling, RateLimiter, find_soft_error_message
 from .tools import (
-    _DEFAULT_CLIENT_NAME,
-    _DEFAULT_CLIENT_TITLE,
-    _DEFAULT_CLIENT_VERSION,
-    _DEFAULT_PROTOCOL_VERSION,
+    DEFAULT_CLIENT_NAME,
+    DEFAULT_CLIENT_TITLE,
+    DEFAULT_CLIENT_VERSION,
+    DEFAULT_PROTOCOL_VERSION,
     MCPToolDefinition,
     sanitize_identifier,
 )
@@ -64,10 +64,10 @@ class MCPServer(BaseModel):
     )
     working_dir: str | None = Field(default=None, description="Working directory for stdio server")
     headers: dict[str, str] | None = Field(default=None, description="HTTP headers")
-    protocol_version: str = Field(default=_DEFAULT_PROTOCOL_VERSION)
-    client_name: str = Field(default=_DEFAULT_CLIENT_NAME)
-    client_title: str = Field(default=_DEFAULT_CLIENT_TITLE)
-    client_version: str = Field(default=_DEFAULT_CLIENT_VERSION)
+    protocol_version: str = Field(default=DEFAULT_PROTOCOL_VERSION)
+    client_name: str = Field(default=DEFAULT_CLIENT_NAME)
+    client_title: str = Field(default=DEFAULT_CLIENT_TITLE)
+    client_version: str = Field(default=DEFAULT_CLIENT_VERSION)
     tool_name_prefix: str | None = Field(
         default=None, description="Optional prefix for MCP tool names"
     )
@@ -111,8 +111,8 @@ class MCPServer(BaseModel):
         ),
     )
 
-    _client: _McpClientBase | None = PrivateAttr(default=None)
-    _rate_limiters: list[_RateLimiter] = PrivateAttr(default_factory=list)
+    _client: McpClientBase | None = PrivateAttr(default=None)
+    _rate_limiters: list[RateLimiter] = PrivateAttr(default_factory=list)
 
     # MARK: - Validators
 
@@ -189,9 +189,9 @@ class MCPServer(BaseModel):
 
         self._rate_limiters = []
         if self.max_calls_per_minute:
-            self._rate_limiters.append(_RateLimiter(self.max_calls_per_minute, 60.0))
+            self._rate_limiters.append(RateLimiter(self.max_calls_per_minute, 60.0))
         if self.max_calls_per_day:
-            self._rate_limiters.append(_RateLimiter(self.max_calls_per_day, 86400.0))
+            self._rate_limiters.append(RateLimiter(self.max_calls_per_day, 86400.0))
         super().model_post_init(__context)
 
     def _apply_auto_setup(self) -> None:
@@ -265,7 +265,7 @@ class MCPServer(BaseModel):
 
             structured = normalized.get("structured_content")
             soft_error_message = (
-                _find_soft_error_message(structured, soft_error_keys)
+                find_soft_error_message(structured, soft_error_keys)
                 if soft_error_cfg is not None and soft_error_cfg.enabled
                 else None
             )
@@ -311,13 +311,13 @@ class MCPServer(BaseModel):
         for limiter in self._rate_limiters:
             limiter.acquire()
 
-    def _get_client(self) -> _McpClientBase:
+    def _get_client(self) -> McpClientBase:
         if self._client is not None:
             return self._client
         if self.transport == "http":
-            self._client = _McpHttpClient(self)
+            self._client = McpHttpClient(self)
         else:
-            self._client = _McpStdioClient(self)
+            self._client = McpStdioClient(self)
         return self._client
 
     @staticmethod

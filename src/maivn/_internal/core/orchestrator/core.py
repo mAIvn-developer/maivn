@@ -418,7 +418,7 @@ class AgentOrchestrator:
         if not (isinstance(sdk_deployment_timezone, str) and sdk_deployment_timezone.strip()):
             try:
                 sdk_deployment_timezone = get_configuration().server.deployment_timezone
-            except Exception:
+            except Exception:  # noqa: BLE001 - timezone metadata is optional
                 sdk_deployment_timezone = None
         if isinstance(sdk_deployment_timezone, str) and sdk_deployment_timezone.strip():
             tz_metadata["sdk_deployment_timezone"] = sdk_deployment_timezone
@@ -466,11 +466,11 @@ class AgentOrchestrator:
     def close(self) -> None:
         try:
             self._http_client_service.close()
-        except Exception:
+        except Exception:  # noqa: BLE001 - cleanup must never raise
             pass
         try:
             self._background_executor.shutdown(wait=False)
-        except Exception:
+        except Exception:  # noqa: BLE001 - cleanup must never raise
             pass
 
     def __del__(self) -> None:

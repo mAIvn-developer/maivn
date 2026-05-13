@@ -386,6 +386,45 @@ def my_tool() -> dict:
     return {'done': True}
 ```
 
+#### Hook firing events
+
+Whenever a hook callback runs, the SDK emits a normalized ``hook_fired``
+event through the configured reporter (and any attached
+:class:`~maivn.events.EventBridge`). Each firing carries:
+
+- ``name`` — the callable's ``__name__``
+- ``stage`` — ``"before"`` or ``"after"``
+- ``status`` — ``"completed"`` or ``"failed"`` (hooks never abort
+  execution; failures are reported, not raised to the agent)
+- ``target_type`` — ``"tool"`` for tool hooks (this section), or
+  ``"agent"`` / ``"swarm"`` for scope hooks
+- ``target_id`` — per-invocation tool event id (correlates to the tool
+  card the frontend renders), or the agent id / swarm name for scope
+  hooks
+- ``target_name`` — display name
+- ``error`` — message string when ``status == "failed"``
+- ``elapsed_ms`` — how long the hook ran
+
+Maivn Studio listens for these events and renders the hook's name + status
+as a persistent header (``before`` stage) or footer (``after`` stage) on
+the matching tool card or scope card. Custom frontends can subscribe via
+:func:`~maivn.events.normalize_stream` or the
+:class:`~maivn.events.EventBridge` and route on
+``event.event_name == "hook_fired"`` plus the ``hook`` descriptor.
+
+Set ``hook_execution_mode`` on the Agent or Swarm to control which
+hooks fire per-tool vs once per scope invocation:
+
+```python
+agent = Agent(
+    name='auditor',
+    before_execute=audit_log,    # fires per-tool by default
+    hook_execution_mode='scope', # fires once per invoke()/stream() call
+)
+```
+
+See [Scope Hooks](agent.md#scope-hooks) for the full matrix.
+
 ## Return Values
 
 The SDK runs every tool result through `to_jsonable`, which handles dicts, lists,

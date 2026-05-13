@@ -6,7 +6,9 @@ resolution, strategy-based dispatch, and before/after execution hooks.
 
 from __future__ import annotations
 
-from typing import Any
+import time
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from maivn_shared.infrastructure.logging import MetricsLoggerProtocol
 
@@ -21,6 +23,9 @@ from .basic_tool_execution_service import BasicToolExecutionService, ToolType
 from .execution_strategy import StrategyRegistry, create_default_registry
 from .helpers import DependencyResolver
 
+if TYPE_CHECKING:
+    from maivn._internal.utils.reporting.terminal_reporter import BaseReporter
+
 # MARK: Enhanced Execution
 
 
@@ -32,6 +37,8 @@ class ToolExecutionService(BasicToolExecutionService):
     - Resolving dependencies (agent, user, tool)
     - Dispatching execution via the strategy registry
     - Running before/after execution hooks
+    - Emitting ``hook_fired`` events through the reporter so frontends can
+      surface a header/footer marker on the affected tool card.
     """
 
     def __init__(
@@ -43,6 +50,7 @@ class ToolExecutionService(BasicToolExecutionService):
         dependency_resolver: DependencyResolver | None = None,
         strategy_registry: StrategyRegistry | None = None,
         input_validator: type[InputValidator] | None = None,
+        reporter_supplier: Callable[[], BaseReporter | None] | None = None,
     ) -> None:
         super().__init__(logger=logger)
 
@@ -61,6 +69,7 @@ class ToolExecutionService(BasicToolExecutionService):
         )
         self._dependency_service = dependency_service
         self._input_validator = input_validator or InputValidator
+        self._get_reporter: Callable[[], BaseReporter | None] = reporter_supplier or (lambda: None)
 
     # MARK: - Execution
 
@@ -69,19 +78,24 @@ class ToolExecutionService(BasicToolExecutionService):
         tool_id: str,
         args: dict[str, Any],
         context: ExecutionContext | None = None,
+        *,
+        tool_event_id: str | None = None,
     ) -> Any:
         """Execute a tool call with dependency resolution and input validation.
 
         Args:
-            tool_id: Tool identifier to execute
-            args: Arguments for tool execution
-            context: Execution context (scope, messages, etc.)
+            tool_id: Tool identifier to execute.
+            args: Arguments for tool execution.
+            context: Execution context (scope, messages, etc.).
+            tool_event_id: Optional per-invocation event id used to route
+                ``hook_fired`` events to the right tool card. When omitted,
+                hook events fall back to ``tool_id``.
 
         Returns:
-            Tool execution result
+            Tool execution result.
 
         Raises:
-            ValueError: If input validation fails
+            ValueError: If input validation fails.
         """
         context = context or ExecutionContext()
 
@@ -101,6 +115,7 @@ class ToolExecutionService(BasicToolExecutionService):
             context=context,
             result=None,
             error=None,
+            tool_event_id=tool_event_id,
         )
 
         try:
@@ -114,6 +129,7 @@ class ToolExecutionService(BasicToolExecutionService):
                 context=context,
                 result=None,
                 error=exc,
+                tool_event_id=tool_event_id,
             )
             raise
 
@@ -125,6 +141,7 @@ class ToolExecutionService(BasicToolExecutionService):
             context=context,
             result=result,
             error=None,
+            tool_event_id=tool_event_id,
         )
         return result
 
@@ -212,8 +229,14 @@ class ToolExecutionService(BasicToolExecutionService):
         context: ExecutionContext,
         result: Any,
         error: Exception | None,
+        tool_event_id: str | None = None,
     ) -> None:
-        """Run before/after execution hooks from tool, scope, and swarm."""
+        """Run before/after execution hooks from tool, scope, and swarm.
+
+        Each hook firing emits a ``hook_fired`` event via the configured
+        reporter so the UI can render a header (before) or footer (after)
+        marker on the corresponding tool card.
+        """
         hooks = self._collect_hooks(stage, tool, context)
         payload = {
             "stage": stage,
@@ -225,13 +248,62 @@ class ToolExecutionService(BasicToolExecutionService):
             "error": error,
         }
 
+        target_id = tool_event_id or tool_id
+        target_name = getattr(tool, "name", None) or tool_id
+        reporter = self._get_reporter()
+
         for hook in hooks:
             if hook is None:
                 continue
+            hook_name = _resolve_hook_name(hook)
+            started_at = time.monotonic()
+            hook_status = "completed"
+            error_message: str | None = None
             try:
                 hook(payload)
-            except Exception:
+            except Exception as exc:  # noqa: BLE001 - hook failures must never abort execution
+                hook_status = "failed"
+                error_message = str(exc) or exc.__class__.__name__
                 self._logger.exception("[TOOL_EXEC] Execution hook failed")
+            finally:
+                if reporter is not None:
+                    self._emit_tool_hook_fired(
+                        reporter,
+                        name=hook_name,
+                        stage=stage,
+                        status=hook_status,
+                        target_id=target_id,
+                        target_name=target_name,
+                        error=error_message,
+                        elapsed_ms=int((time.monotonic() - started_at) * 1000),
+                    )
+
+    def _emit_tool_hook_fired(
+        self,
+        reporter: BaseReporter,
+        *,
+        name: str,
+        stage: str,
+        status: str,
+        target_id: str,
+        target_name: str,
+        error: str | None,
+        elapsed_ms: int,
+    ) -> None:
+        """Defensive forward to ``reporter.report_hook_fired`` for tool hooks."""
+        try:
+            reporter.report_hook_fired(
+                name=name,
+                stage=stage,
+                status=status,
+                target_type="tool",
+                target_id=target_id,
+                target_name=target_name,
+                error=error,
+                elapsed_ms=elapsed_ms,
+            )
+        except Exception:  # noqa: BLE001 - emission must never disrupt tool execution
+            self._logger.exception("[TOOL_EXEC] Reporter.report_hook_fired raised")
 
     def _collect_hooks(
         self,
@@ -294,6 +366,17 @@ class ToolExecutionService(BasicToolExecutionService):
     def set_interrupt_service(self, service: Any) -> None:
         """Set interrupt service for dependency resolution."""
         self._dependency_service.set_interrupt_service(service)
+
+
+# MARK: - Module Helpers
+
+
+def _resolve_hook_name(hook: Any) -> str:
+    """Best-effort display name for a hook callable."""
+    name = getattr(hook, "__name__", None)
+    if isinstance(name, str) and name:
+        return name
+    return hook.__class__.__name__
 
 
 __all__ = ["ToolExecutionService"]

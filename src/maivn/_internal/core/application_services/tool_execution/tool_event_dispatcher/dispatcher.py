@@ -181,6 +181,7 @@ class ToolEventDispatcher:
                 args,
                 private_data_injected,
                 interrupt_data_injected,
+                tool_event_id=tool_event_id,
             )
             elapsed_ms_value = self._elapsed_ms(start)
             self._report_tool_complete(
@@ -207,6 +208,8 @@ class ToolEventDispatcher:
         args: dict[str, Any],
         private_data_injected: Any,
         interrupt_data_injected: Any,
+        *,
+        tool_event_id: str | None = None,
     ) -> Any:
         return run_tool(
             self,
@@ -214,6 +217,7 @@ class ToolEventDispatcher:
             args,
             private_data_injected,
             interrupt_data_injected,
+            tool_event_id=tool_event_id,
         )
 
     def _post_tool_result(self, tool_event_id: str, value: Any, resume_url: str) -> None:

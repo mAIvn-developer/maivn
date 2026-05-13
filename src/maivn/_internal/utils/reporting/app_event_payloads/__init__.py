@@ -9,6 +9,7 @@ from .assistant_events import (
     build_status_message_payload,
 )
 from .common import APP_EVENT_CONTRACT_VERSION
+from .hook_events import build_hook_fired_payload
 from .lifecycle_events import (
     build_enrichment_payload,
     build_error_payload,
@@ -29,6 +30,7 @@ __all__ = [
     "build_enrichment_payload",
     "build_error_payload",
     "build_final_payload",
+    "build_hook_fired_payload",
     "build_interrupt_required_payload",
     "build_session_start_payload",
     "build_status_message_payload",

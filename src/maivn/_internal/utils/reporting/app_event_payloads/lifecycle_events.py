@@ -1,3 +1,5 @@
+"""Payload builders for enrichment, terminal, and session-lifecycle events."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -20,6 +22,13 @@ def build_enrichment_payload(
     participant_name: str | None = None,
     participant_role: str | None = None,
 ) -> dict[str, Any]:
+    """Build the payload for an enrichment-phase milestone.
+
+    Enrichment events bracket the work the runtime performs around an
+    invocation (memory retrieval, redaction, etc.). ``memory`` and
+    ``redaction`` carry the per-phase metric dicts when emitted by the
+    corresponding subsystems; reporters render these as inline metrics.
+    """
     scope = build_scope(scope_id=scope_id, scope_name=scope_name, scope_type=scope_type)
     participant = build_participant(
         participant_key=participant_key,
@@ -74,6 +83,12 @@ def build_final_payload(
     result: Any = None,
     token_usage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Build the terminal ``final`` payload that closes a successful run.
+
+    Carries the final assistant response text, the structured result (when
+    a final-tool was used), and a token-usage summary for the whole
+    invocation.
+    """
     responses = [response] if isinstance(response, str) and response.strip() else []
     payload = {
         "responses": responses,
@@ -96,6 +111,11 @@ def build_final_payload(
 
 
 def build_error_payload(*, error: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Build the terminal ``error`` payload for a failed invocation.
+
+    ``error`` is the user-facing message; ``details`` may carry structured
+    diagnostic context that frontends choose whether to expose.
+    """
     payload = {
         "error": error,
         "details": details or {},
@@ -114,6 +134,11 @@ def build_error_payload(*, error: str, details: dict[str, Any] | None = None) ->
 
 
 def build_session_start_payload(*, session_id: str, assistant_id: str) -> dict[str, Any]:
+    """Build the ``session_start`` payload that opens a run.
+
+    Reporters / bridges use the ``(session_id, assistant_id)`` pair to anchor
+    all subsequent events to the right UI surface.
+    """
     payload = {
         "session_id": session_id,
         "assistant_id": assistant_id,

@@ -249,9 +249,32 @@ class AppEvent(BaseModel):
     error_info: ErrorInfoDescriptor | None
     session: SessionDescriptor | None
     chunk: ChunkDescriptor | None
+    hook: HookDescriptor | None
 ```
 
 Nested descriptors use `extra="allow"` so the contract can evolve without breaking consumers that validate the normalized payloads.
+
+### `HookDescriptor`
+
+Per-fire description of a developer-registered hook callback. Populated on
+`AppEvent.hook` when `event_name == "hook_fired"`.
+
+```python
+class HookDescriptor(BaseModel):
+    name: str | None            # hook callable's __name__
+    stage: str | None           # "before" | "after"
+    status: str | None          # "completed" | "failed"
+    error: str | None           # message when status == "failed"
+    elapsed_ms: int | None      # callable runtime
+    target_type: str | None     # "tool" | "agent" | "swarm"
+    target_id: str | None       # tool event_id, or agent_id / swarm name
+    target_name: str | None     # display name of the target card
+```
+
+Maivn Studio uses this to render the hook's name and status as a
+persistent header (`stage == "before"`) or footer (`stage == "after"`)
+on the matching scope or tool card. Custom frontends can subscribe and
+route events on `event.event_name == "hook_fired"`.
 
 ## Normalization helpers
 
@@ -361,6 +384,46 @@ Available builders:
 - `build_system_tool_start_payload()`
 - `build_system_tool_chunk_payload()`
 - `build_system_tool_complete_payload()`
+- `build_hook_fired_payload()` — one event per developer-registered hook callback firing (see [Hook Firing Events](#hook-firing-events) below)
+
+## Hook firing events
+
+Each time a developer-registered `before_execute` / `after_execute`
+callback runs (whether the hook is attached to a tool, an Agent, or a
+Swarm), the SDK emits a normalized `hook_fired` event:
+
+| Field          | Description                                                                                    |
+| -------------- | ---------------------------------------------------------------------------------------------- |
+| `name`         | Hook callable's `__name__`.                                                                    |
+| `stage`        | `"before"` / `"after"`.                                                                        |
+| `status`       | `"completed"` / `"failed"` (hooks never abort execution).                                      |
+| `error`        | User-facing error message when `status == "failed"`.                                           |
+| `elapsed_ms`   | Hook callable runtime in milliseconds.                                                         |
+| `target_type`  | `"tool"` / `"agent"` / `"swarm"`.                                                              |
+| `target_id`    | Per-invocation tool event id, or agent id / swarm name.                                        |
+| `target_name`  | Display name of the target (tool name, agent name, swarm name).                                |
+
+Build one yourself when forwarding from a non-SDK source:
+
+```python
+from maivn.events import build_hook_fired_payload
+
+payload = build_hook_fired_payload(
+    name="audit_log",
+    stage="before",
+    status="completed",
+    target_type="tool",
+    target_id="evt-7",
+    target_name="get_weather",
+    elapsed_ms=2,
+)
+```
+
+Frontends consume `hook_fired` events via `normalize_stream()` and route
+them onto the matching scope card (`target_type` is `"agent"` /
+`"swarm"`) or tool card (`target_type == "tool"`). Maivn Studio renders
+the firing as a persistent header (`stage == "before"`) or footer
+(`stage == "after"`).
 
 ## Event names
 
@@ -377,6 +440,7 @@ The module also re-exports commonly used raw event-name constants:
 - `SYSTEM_TOOL_COMPLETE_EVENT_NAME`
 - `SYSTEM_TOOL_ERROR_EVENT_NAME`
 - `MODEL_TOOL_COMPLETE_EVENT_NAME`
+- `HOOK_FIRED_EVENT_NAME`
 - `FINAL_EVENT_NAME`
 - `ERROR_EVENT_NAME`
 

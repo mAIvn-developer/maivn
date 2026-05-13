@@ -77,32 +77,43 @@ def normalize_tools_for_structured_output(
 
 
 def _try_set_final_tool(tool: BaseTool, final_tool: bool) -> BaseTool | None:
-    """Best-effort helper to set a tool's final_tool flag."""
-    try:
-        if hasattr(tool, "model_copy"):
+    """Best-effort helper to set a tool's final_tool flag.
+
+    Tries strategies in order of preference: pydantic model_copy, direct
+    attribute set (fails on frozen models / assignment validators),
+    object.__setattr__ (fails on slotted classes), and full rebuild via
+    model_dump. Returns ``None`` only if every strategy failed.
+    """
+    # Narrow the exception set to the realistic failure modes for each strategy:
+    # AttributeError (slots/frozen), TypeError (wrong shape), ValueError
+    # (Pydantic ValidationError inherits from ValueError).
+    expected = (AttributeError, TypeError, ValueError)
+
+    if hasattr(tool, "model_copy"):
+        try:
             return tool.model_copy(update={"final_tool": final_tool})
-    except Exception:
-        pass
+        except expected:
+            pass
 
     try:
         tool.final_tool = final_tool
         return tool
-    except Exception:
+    except expected:
         pass
 
     try:
         object.__setattr__(tool, "final_tool", final_tool)
         return tool
-    except Exception:
+    except expected:
         pass
 
-    try:
-        if hasattr(tool, "model_dump"):
+    if hasattr(tool, "model_dump"):
+        try:
             data = tool.model_dump()
             data["final_tool"] = final_tool
             return tool.__class__(**data)
-    except Exception:
-        pass
+        except expected:
+            pass
 
     return None
 

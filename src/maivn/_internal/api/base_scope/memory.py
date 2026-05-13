@@ -30,6 +30,7 @@ class BaseScopeMemoryMixin:
 
     @staticmethod
     def coerce_memory_config(value: Any) -> MemoryConfig | None:
+        """Coerce ``None`` / dict / ``MemoryConfig`` to a typed config or ``None``."""
         if value is None:
             return None
         if isinstance(value, MemoryConfig):
@@ -39,6 +40,7 @@ class BaseScopeMemoryMixin:
         raise TypeError("memory_config must be a MemoryConfig, dictionary, or None")
 
     def resolve_memory_config(self, override: Any = None) -> MemoryConfig | None:
+        """Merge the scope's memory config with a per-call ``override``."""
         scope = cast(_BaseScopeMemoryProtocol, self)
         return MemoryConfig.merge(scope.memory_config, self.coerce_memory_config(override))
 

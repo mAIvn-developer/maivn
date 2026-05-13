@@ -7,7 +7,7 @@ from typing import Any
 
 from maivn._internal.utils.reporting.terminal_reporter import BaseReporter
 
-from ..reporter_hooks import OrchestratorReporterHooksHelperMixin
+from ..reporter_hooks_mixin import OrchestratorReporterHooksHelperMixin
 
 # System tools that should NEVER emit events to SDK reporters.
 # These are completely internal system tools that should not be visible to end users.

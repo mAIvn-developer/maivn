@@ -916,6 +916,23 @@ agent = Agent(
 )
 ```
 
+### Hook firing events
+
+Every time a hook callback fires, the SDK emits a `hook_fired`
+[AppEvent](events.md#hook-firing-events) through the configured reporter
+(and any attached [EventBridge](events.md)). The event carries the
+hook's name, `stage`, `status`, and the target it should attach to —
+the per-tool event id when `hook_execution_mode == "tool"`, or the
+agent id / swarm name when `hook_execution_mode == "scope"`. Maivn
+Studio renders each firing as a persistent header (`before`) or footer
+(`after`) on the matching tool card or scope card; custom frontends
+can subscribe via `normalize_stream()` and route on
+`event.event_name == "hook_fired"`.
+
+Hook failures do not abort execution — the exception is captured,
+logged, and surfaced via the same event with `status == "failed"` and
+an `error` message.
+
 ## Resource Cleanup
 
 Call `close()` when you are done with an agent that registered MCP servers or

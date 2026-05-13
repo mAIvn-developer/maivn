@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from .tools import (
-    _DEFAULT_PROTOCOL_VERSION,
+    DEFAULT_PROTOCOL_VERSION,
     MCPToolDefinition,
 )
 
@@ -38,7 +38,7 @@ _ESSENTIAL_PARENT_ENV_KEYS = frozenset(
 )
 
 
-class _McpClientBase:
+class McpClientBase:
     """Base class for MCP client implementations.
 
     Provides shared ``list_tools``, ``call_tool``, and ``_ensure_initialized``
@@ -118,7 +118,7 @@ class _McpClientBase:
         """
 
 
-class _McpHttpClient(_McpClientBase):
+class McpHttpClient(McpClientBase):
     """HTTP-based MCP client implementation."""
 
     def __init__(self, server: MCPServer) -> None:
@@ -129,7 +129,7 @@ class _McpHttpClient(_McpClientBase):
             else httpx.Timeout(30.0)
         )
         self._session_id: str | None = None
-        self._protocol_version: str = server.protocol_version or _DEFAULT_PROTOCOL_VERSION
+        self._protocol_version: str = server.protocol_version or DEFAULT_PROTOCOL_VERSION
         self._request_id = 0
         self._initialized = False
 
@@ -237,7 +237,7 @@ class _McpHttpClient(_McpClientBase):
         return {}
 
 
-class _McpStdioClient(_McpClientBase):
+class McpStdioClient(McpClientBase):
     """Stdio-based MCP client implementation."""
 
     def __init__(self, server: MCPServer) -> None:
@@ -246,7 +246,7 @@ class _McpStdioClient(_McpClientBase):
         self._lock = threading.Lock()
         self._request_id = 0
         self._initialized = False
-        self._protocol_version: str = server.protocol_version or _DEFAULT_PROTOCOL_VERSION
+        self._protocol_version: str = server.protocol_version or DEFAULT_PROTOCOL_VERSION
         self._stdout_queue: queue.Queue[str] = queue.Queue()
         self._stdout_thread = threading.Thread(target=self._drain_stdout, daemon=True)
         self._stdout_thread.start()
@@ -311,26 +311,26 @@ class _McpStdioClient(_McpClientBase):
         try:
             if self._process.stdin:
                 self._process.stdin.close()
-        except Exception:
+        except Exception:  # noqa: BLE001 - cleanup must never raise
             pass
         if not process_exited:
             try:
                 self._process.terminate()
                 self._process.wait(timeout=2)
-            except Exception:
+            except Exception:  # noqa: BLE001 - escalate to SIGKILL on any failure
                 try:
                     self._process.kill()
-                except Exception:
+                except Exception:  # noqa: BLE001 - process may already be gone
                     pass
         try:
             if self._process.stdout:
                 self._process.stdout.close()
-        except Exception:
+        except Exception:  # noqa: BLE001 - cleanup must never raise
             pass
         try:
             if self._process.stderr:
                 self._process.stderr.close()
-        except Exception:
+        except Exception:  # noqa: BLE001 - cleanup must never raise
             pass
 
     def _send_notification(self, method: str) -> None:

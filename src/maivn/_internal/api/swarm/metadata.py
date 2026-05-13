@@ -30,14 +30,14 @@ def enrich_state_metadata(
     memory_config: MemoryConfig | dict[str, Any] | None = None,
 ) -> None:
     """Enrich state with typed swarm and memory asset configuration."""
-    invocation_tool_map = _build_invocation_tool_map(swarm)
+    invocation_tool_map = build_invocation_tool_map(swarm)
     agent_id_to_name = {
         getattr(agent, "id", ""): getattr(agent, "name", "")
         for agent in swarm.agents
         if getattr(agent, "id", None) and getattr(agent, "name", None)
     }
     roster: list[SwarmAgentConfig] = [
-        _build_agent_roster_entry(
+        build_agent_roster_entry(
             swarm, agent, invocation_tool_map, agent_id_to_name=agent_id_to_name
         )
         for agent in swarm.agents
@@ -101,7 +101,7 @@ def _apply_swarm_memory_assets_config(swarm: Swarm, state: SessionRequest) -> No
 # MARK: Agent Roster
 
 
-def _build_invocation_tool_map(swarm: Swarm) -> dict[str, str]:
+def build_invocation_tool_map(swarm: Swarm) -> dict[str, str]:
     """Build mapping of agent IDs to invocation tool IDs."""
     tool_map: dict[str, str] = {}
     for agent in swarm.agents:
@@ -111,7 +111,7 @@ def _build_invocation_tool_map(swarm: Swarm) -> dict[str, str]:
     return tool_map
 
 
-def _build_agent_roster_entry(
+def build_agent_roster_entry(
     swarm: Swarm,
     agent: Agent,
     invocation_tool_map: dict[str, str],
@@ -305,4 +305,8 @@ def _build_included_nested_synthesis_guidance(
     )
 
 
-__all__ = ["enrich_state_metadata"]
+__all__ = [
+    "build_agent_roster_entry",
+    "build_invocation_tool_map",
+    "enrich_state_metadata",
+]
