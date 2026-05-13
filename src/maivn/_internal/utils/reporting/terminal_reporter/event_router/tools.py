@@ -136,6 +136,90 @@ class ToolRouterMixin:
             if event_key:
                 self._tool_category_by_event_id.pop(event_key, None)
 
+    def report_hook_fired(
+        self,
+        *,
+        name: str,
+        stage: str,
+        status: str,
+        target_type: str,
+        target_id: str | None = None,
+        target_name: str | None = None,
+        source: str | None = None,
+        error: str | None = None,
+        elapsed_ms: int | None = None,
+    ) -> None:
+        self._forward(
+            category="lifecycle",
+            event_name="hook_fired",
+            payload={
+                "name": name,
+                "stage": stage,
+                "status": status,
+                "target_type": target_type,
+                "target_id": target_id,
+                "target_name": target_name,
+                "source": source,
+                "error": error,
+                "elapsed_ms": elapsed_ms,
+            },
+            forward=lambda: _forward_hook_fired_to_reporter(
+                self._reporter,
+                name=name,
+                stage=stage,
+                status=status,
+                target_type=target_type,
+                target_id=target_id,
+                target_name=target_name,
+                source=source,
+                error=error,
+                elapsed_ms=elapsed_ms,
+            ),
+        )
+
+
+def _forward_hook_fired_to_reporter(
+    reporter: Any,
+    *,
+    name: str,
+    stage: str,
+    status: str,
+    target_type: str,
+    target_id: str | None,
+    target_name: str | None,
+    source: str | None,
+    error: str | None,
+    elapsed_ms: int | None,
+) -> None:
+    """Forward a ``hook_fired`` event to the wrapped reporter.
+
+    Falls back to the pre-``source`` signature if the wrapped reporter is on
+    the older contract (terminal reporters in third-party packages, etc.).
+    """
+    try:
+        reporter.report_hook_fired(
+            name=name,
+            stage=stage,
+            status=status,
+            target_type=target_type,
+            target_id=target_id,
+            target_name=target_name,
+            source=source,
+            error=error,
+            elapsed_ms=elapsed_ms,
+        )
+    except TypeError:
+        reporter.report_hook_fired(
+            name=name,
+            stage=stage,
+            status=status,
+            target_type=target_type,
+            target_id=target_id,
+            target_name=target_name,
+            error=error,
+            elapsed_ms=elapsed_ms,
+        )
+
 
 # MARK: Assistant Forwarding
 

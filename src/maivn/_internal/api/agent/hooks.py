@@ -144,11 +144,17 @@ def run_scope_hooks(
         finally:
             if reporter is not None:
                 elapsed_ms = int((time.monotonic() - started_at) * 1000)
+                # Scope-level firings define the hook at the same level that
+                # owns the on-screen card, so ``source`` mirrors target_type
+                # (with ``"agent"`` re-spelled ``"scope"`` to match the
+                # tool-execution path's vocabulary).
+                source = "swarm" if target_type == "swarm" else "scope"
                 _emit_hook_fired(
                     reporter,
                     name=hook_name,
                     stage=stage,
                     status=status,
+                    source=source,
                     target_type=target_type,
                     target_id=target_id,
                     target_name=target_name,
@@ -171,6 +177,7 @@ def _emit_hook_fired(
     name: str,
     stage: str,
     status: str,
+    source: str,
     target_type: str,
     target_id: str | None,
     target_name: str | None,
@@ -183,12 +190,28 @@ def _emit_hook_fired(
             name=name,
             stage=stage,
             status=status,
+            source=source,
             target_type=target_type,
             target_id=target_id,
             target_name=target_name,
             error=error,
             elapsed_ms=elapsed_ms,
         )
+    except TypeError:
+        # Older reporters predate the ``source`` kwarg.
+        try:
+            reporter.report_hook_fired(
+                name=name,
+                stage=stage,
+                status=status,
+                target_type=target_type,
+                target_id=target_id,
+                target_name=target_name,
+                error=error,
+                elapsed_ms=elapsed_ms,
+            )
+        except Exception:  # noqa: BLE001 - emission must never disrupt execution
+            logger.exception("[AGENT] Reporter.report_hook_fired raised")
     except Exception:  # noqa: BLE001 - emission must never disrupt execution
         logger.exception("[AGENT] Reporter.report_hook_fired raised")
 

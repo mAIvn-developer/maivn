@@ -72,6 +72,7 @@ class ReporterDefaultEventsMixin:
         target_type: str,
         target_id: str | None = None,
         target_name: str | None = None,
+        source: str | None = None,
         error: str | None = None,
         elapsed_ms: int | None = None,
     ) -> None:
@@ -86,14 +87,29 @@ class ReporterDefaultEventsMixin:
             name: Display name of the hook callable (usually ``__name__``).
             stage: ``"before"`` or ``"after"``.
             status: ``"completed"`` or ``"failed"``.
-            target_type: ``"tool"`` / ``"agent"`` / ``"swarm"``.
+            target_type: ``"tool"`` / ``"agent"`` / ``"swarm"`` — which
+                on-screen card the firing attaches to.
             target_id: Per-invocation event id (tool target) or
                 agent_id / swarm_name (scope target).
             target_name: Display name of the target card.
+            source: ``"tool"`` / ``"scope"`` / ``"swarm"`` — which level
+                *defined* the hook. Lets the UI label pills even when all
+                three sources hook the same tool execution. ``None`` for
+                callers that predate the field.
             error: Error message when ``status == "failed"``.
             elapsed_ms: Hook callable runtime in milliseconds.
         """
-        _ = (name, stage, status, target_type, target_id, target_name, error, elapsed_ms)
+        _ = (
+            name,
+            stage,
+            status,
+            target_type,
+            target_id,
+            target_name,
+            source,
+            error,
+            elapsed_ms,
+        )
 
     # MARK: - System Tools
 

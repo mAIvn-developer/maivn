@@ -145,12 +145,18 @@ class HookDescriptor(BaseModel):
     elapsed_ms: int | None = None
     """How long the hook callable took to run."""
     target_type: str | None = None
-    """``"tool"``, ``"agent"``, or ``"swarm"``."""
+    """``"tool"``, ``"agent"``, or ``"swarm"`` — which card this attaches to."""
     target_id: str | None = None
     """For tools: the per-invocation event ID (correlates to the tool card).
     For agents/swarms: the agent id or swarm name used by the scope card."""
     target_name: str | None = None
     """Display name of the target card."""
+    source: str | None = None
+    """``"tool"`` / ``"scope"`` / ``"swarm"`` — which level *defined* the hook.
+
+    Lets a UI label a pill even when all three sources hook the same tool
+    execution. ``None`` when emitted by callers that predate the field.
+    """
 
 
 # MARK: AppEvent

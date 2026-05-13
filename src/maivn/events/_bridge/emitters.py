@@ -242,6 +242,7 @@ async def emit_hook_fired(
     target_type: str,
     target_id: str | None = None,
     target_name: str | None = None,
+    source: str | None = None,
     error: str | None = None,
     elapsed_ms: int | None = None,
 ) -> None:
@@ -258,6 +259,7 @@ async def emit_hook_fired(
             target_type=target_type,
             target_id=target_id,
             target_name=target_name,
+            source=source,
             error=error,
             elapsed_ms=elapsed_ms,
         ),
