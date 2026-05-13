@@ -22,7 +22,7 @@ uv add maivn
 To install the public Studio companion and enable `maivn studio` from a normal shell:
 
 ```bash
-pip install "maivn[studio]"
+pip install maivn maivn-studio
 ```
 
 ## Step 1: Set Up Your API Key

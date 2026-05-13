@@ -36,7 +36,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-studio = ["maivn-studio>=0.3.0,<0.4.0"]
+# ``[studio]`` extra was removed in 0.3.0 — it created a circular
+# release-time dependency where locking ``maivn`` required ``maivn-studio``
+# on PyPI and vice versa, blocking every coordinated SDK + Studio release.
+# Install the companion directly instead: ``pip install maivn maivn-studio``.
+# The SDK<->Studio version coupling is still enforced inside maivn-studio
+# (which pins ``maivn>=0.3.0,<0.4.0``).
+#
 # Drop-in FastAPI/Starlette adapter for streaming bridge events to a
 # frontend. Both deps are MIT-licensed (fully OSI-approved).
 fastapi = ["fastapi>=0.136.1", "sse-starlette>=2.1.3"]
