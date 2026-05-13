@@ -376,6 +376,21 @@ execution for more deterministic runs.
 - [Scheduled Invocation](docs/guides/scheduled-invocation.md) - Cron, jitter, retry, lifecycle
 - [mAIvn Studio](docs/guides/maivn-studio.md) - Studio UI + API reference
 
+### Examples
+
+A working tour of the SDK organized by what you'd want to build. See the
+[Examples index](docs/examples/README.md) for the full table of contents.
+
+- [Basics](docs/examples/basics.md) - First agent, tools, final tool, private data, structured types
+- [Agents & Tools](docs/examples/agents-and-tools.md) - Tool registration variants, deps, hooks
+- [Swarms](docs/examples/swarms.md) - Multi-agent collaboration patterns
+- [MCP Integration](docs/examples/mcp.md) - stdio + HTTP + auto-setup
+- [Memory](docs/examples/memory.md) - Lifecycle, retrieval, skills, insights, bound resources
+- [Private Data](docs/examples/private-data.md) - Placeholders, `RedactedMessage`
+- [Batch & Scheduling](docs/examples/batch-and-scheduling.md) - `batch`, `cron`, jitter, retry, overlap
+- [Interrupts](docs/examples/interrupts.md) - Human-in-the-loop
+- [Real-World Projects](docs/examples/projects.md) - Automobile spec, data harmonization, HTML email, financial planner
+
 ### Reference
 
 - [Troubleshooting](docs/troubleshooting.md) - Common errors and debugging

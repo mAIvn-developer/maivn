@@ -222,6 +222,7 @@ See [System Tools Guide](system-tools.md) for details.
 
 Now that you have a working agent, explore these topics:
 
+- [Examples](../examples/README.md) - A working tour of the SDK, organized by what you'd want to build
 - [Tools Guide](tools.md) - Learn about different tool types
 - [Dependencies Guide](dependencies.md) - Chain tools together
 - [Structured Output Guide](structured-output.md) - Guaranteed typed responses
