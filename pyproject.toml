@@ -27,7 +27,7 @@ dependencies = [
     # SDK runtime
     "croniter>=2.0.1",
     "docstring-parser>=0.17.0",
-    "maivn-shared>=0.2.0,<0.3.0",
+    "maivn-shared>=0.3.0,<0.4.0",
     "prompt-toolkit>=3.0.52",
     "python-dotenv>=1.2.2",
     "rich>=14.3.4",
@@ -36,7 +36,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-studio = ["maivn-studio>=0.2.0,<0.3.0"]
+studio = ["maivn-studio>=0.3.0,<0.4.0"]
 # Drop-in FastAPI/Starlette adapter for streaming bridge events to a
 # frontend. Both deps are MIT-licensed (fully OSI-approved).
 fastapi = ["fastapi>=0.136.1", "sse-starlette>=2.1.3"]
