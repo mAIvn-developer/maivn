@@ -21,6 +21,7 @@ def build_hook_fired_payload(
     target_type: str,
     target_id: str | None = None,
     target_name: str | None = None,
+    source: str | None = None,
     error: str | None = None,
     elapsed_ms: int | None = None,
 ) -> dict[str, Any]:
@@ -30,12 +31,16 @@ def build_hook_fired_payload(
         name: Display name of the hook (typically ``hook_callable.__name__``).
         stage: ``"before"`` or ``"after"``.
         status: ``"completed"`` or ``"failed"``.
-        target_type: ``"tool"`` / ``"agent"`` / ``"swarm"``.
+        target_type: ``"tool"`` / ``"agent"`` / ``"swarm"`` — which on-screen
+            card the firing should attach to.
         target_id: Per-invocation event ID for tool targets; agent ID or
             swarm name for scope targets.
         target_name: Display name of the target (tool name, agent name,
             swarm name) — used as a fallback when ``target_id`` is missing
             or for UI labels.
+        source: ``"tool"`` / ``"scope"`` / ``"swarm"`` — which level *defined*
+            the hook. Lets the UI label pills even when all three sources
+            hook the same tool execution.
         error: Error message when ``status == "failed"``.
         elapsed_ms: How long the hook callable ran, in milliseconds.
     """
@@ -46,6 +51,7 @@ def build_hook_fired_payload(
         "target_type": target_type,
         "target_id": target_id,
         "target_name": target_name,
+        "source": source,
         "error": error,
         "elapsed_ms": elapsed_ms,
         "hook": {
@@ -55,6 +61,7 @@ def build_hook_fired_payload(
             "target_type": target_type,
             "target_id": target_id,
             "target_name": target_name,
+            "source": source,
             "error": error,
             "elapsed_ms": elapsed_ms,
         },

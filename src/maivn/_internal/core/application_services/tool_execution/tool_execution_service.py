@@ -235,7 +235,10 @@ class ToolExecutionService(BasicToolExecutionService):
 
         Each hook firing emits a ``hook_fired`` event via the configured
         reporter so the UI can render a header (before) or footer (after)
-        marker on the corresponding tool card.
+        marker on the *card representing the hook's owner* — the swarm card
+        for swarm-level hooks, the agent card for scope-level hooks, and the
+        tool card for tool-level hooks. Routing per-firing keeps the UI free
+        of duplicated pills when all three levels are wired.
         """
         hooks = self._collect_hooks(stage, tool, context)
         payload = {
@@ -248,11 +251,9 @@ class ToolExecutionService(BasicToolExecutionService):
             "error": error,
         }
 
-        target_id = tool_event_id or tool_id
-        target_name = getattr(tool, "name", None) or tool_id
         reporter = self._get_reporter()
 
-        for hook in hooks:
+        for hook, owner, source in hooks:
             if hook is None:
                 continue
             hook_name = _resolve_hook_name(hook)
@@ -267,41 +268,75 @@ class ToolExecutionService(BasicToolExecutionService):
                 self._logger.exception("[TOOL_EXEC] Execution hook failed")
             finally:
                 if reporter is not None:
-                    self._emit_tool_hook_fired(
+                    target_type, target_id, target_name = _resolve_hook_target(
+                        source=source,
+                        owner=owner,
+                        tool=tool,
+                        tool_id=tool_id,
+                        tool_event_id=tool_event_id,
+                    )
+                    self._emit_hook_fired(
                         reporter,
                         name=hook_name,
                         stage=stage,
                         status=hook_status,
+                        source=source,
+                        target_type=target_type,
                         target_id=target_id,
                         target_name=target_name,
                         error=error_message,
                         elapsed_ms=int((time.monotonic() - started_at) * 1000),
                     )
 
-    def _emit_tool_hook_fired(
+    def _emit_hook_fired(
         self,
         reporter: BaseReporter,
         *,
         name: str,
         stage: str,
         status: str,
+        source: str,
+        target_type: str,
         target_id: str,
         target_name: str,
         error: str | None,
         elapsed_ms: int,
     ) -> None:
-        """Defensive forward to ``reporter.report_hook_fired`` for tool hooks."""
+        """Defensive forward to ``reporter.report_hook_fired``.
+
+        ``source`` records *where* the hook was defined (``"tool"`` /
+        ``"scope"`` / ``"swarm"``) so the UI can label the pill even when
+        all three sources hook the same tool execution. ``target_type``
+        records *which on-screen card* the firing should attach to.
+        """
         try:
             reporter.report_hook_fired(
                 name=name,
                 stage=stage,
                 status=status,
-                target_type="tool",
+                source=source,
+                target_type=target_type,
                 target_id=target_id,
                 target_name=target_name,
                 error=error,
                 elapsed_ms=elapsed_ms,
             )
+        except TypeError:
+            # Older reporters predate the ``source`` kwarg. Retry without it
+            # so a partially-upgraded environment can still see hook events.
+            try:
+                reporter.report_hook_fired(
+                    name=name,
+                    stage=stage,
+                    status=status,
+                    target_type=target_type,
+                    target_id=target_id,
+                    target_name=target_name,
+                    error=error,
+                    elapsed_ms=elapsed_ms,
+                )
+            except Exception:  # noqa: BLE001 - emission must never disrupt tool execution
+                self._logger.exception("[TOOL_EXEC] Reporter.report_hook_fired raised")
         except Exception:  # noqa: BLE001 - emission must never disrupt tool execution
             self._logger.exception("[TOOL_EXEC] Reporter.report_hook_fired raised")
 
@@ -310,44 +345,42 @@ class ToolExecutionService(BasicToolExecutionService):
         stage: str,
         tool: ToolType,
         context: ExecutionContext,
-    ) -> list[Any]:
-        """Collect hooks to run based on stage and hook execution modes."""
+    ) -> list[tuple[Any, Any, str]]:
+        """Collect hooks to run for ``stage`` based on hook-execution modes.
+
+        Returns a list of ``(hook_callable, owner, source)`` triples where
+        ``source`` is one of ``"swarm"`` / ``"scope"`` / ``"tool"`` —
+        capturing which level defined the hook so the emission can route
+        the firing to the matching on-screen card.
+
+        Order: ``before`` runs outside-in (swarm, scope, tool); ``after`` runs
+        inside-out (tool, scope, swarm). A level is skipped if its hook is
+        ``None`` or its ``hook_execution_mode`` disables it for this tool type.
+        """
         scope = getattr(context, "scope", None)
         swarm = self._get_swarm_from_scope(scope)
-
-        scope_mode = getattr(scope, "hook_execution_mode", "tool")
-        swarm_mode = getattr(swarm, "hook_execution_mode", "tool")
-
         tool_type = getattr(tool, "tool_type", None)
-        include_swarm_hooks = swarm_mode == "tool" or (
-            swarm_mode == "agent" and tool_type == "agent"
-        )
 
-        tool_before = getattr(tool, "before_execute", None)
-        tool_after = getattr(tool, "after_execute", None)
-        scope_before = getattr(scope, "before_execute", None)
-        scope_after = getattr(scope, "after_execute", None)
-        swarm_before = getattr(swarm, "before_execute", None)
-        swarm_after = getattr(swarm, "after_execute", None)
+        scope_active = getattr(scope, "hook_execution_mode", "tool") == "tool"
+        swarm_mode = getattr(swarm, "hook_execution_mode", "tool")
+        swarm_active = swarm_mode == "tool" or (swarm_mode == "agent" and tool_type == "agent")
 
-        if stage == "before":
-            hooks: list[Any] = []
-            if swarm_before is not None and include_swarm_hooks:
-                hooks.append(swarm_before)
-            if scope_before is not None and scope_mode == "tool":
-                hooks.append(scope_before)
-            if tool_before is not None:
-                hooks.append(tool_before)
-            return hooks
+        # Outside-in: swarm wraps scope wraps tool.
+        outside_in: list[tuple[Any, bool, str]] = [
+            (swarm, swarm_active, "swarm"),
+            (scope, scope_active, "scope"),
+            (tool, True, "tool"),
+        ]
+        ordered = outside_in if stage == "before" else list(reversed(outside_in))
+        attr = "before_execute" if stage == "before" else "after_execute"
 
-        # stage == 'after'
-        hooks = []
-        if tool_after is not None:
-            hooks.append(tool_after)
-        if scope_after is not None and scope_mode == "tool":
-            hooks.append(scope_after)
-        if swarm_after is not None and include_swarm_hooks:
-            hooks.append(swarm_after)
+        hooks: list[tuple[Any, Any, str]] = []
+        for owner, active, source in ordered:
+            if not active:
+                continue
+            hook = getattr(owner, attr, None)
+            if hook is not None:
+                hooks.append((hook, owner, source))
         return hooks
 
     def _get_swarm_from_scope(self, scope: Any) -> Any:
@@ -377,6 +410,43 @@ def _resolve_hook_name(hook: Any) -> str:
     if isinstance(name, str) and name:
         return name
     return hook.__class__.__name__
+
+
+def _resolve_hook_target(
+    *,
+    source: str,
+    owner: Any,
+    tool: ToolType,
+    tool_id: str,
+    tool_event_id: str | None,
+) -> tuple[str, str, str]:
+    """Resolve ``(target_type, target_id, target_name)`` for a hook firing.
+
+    Routes hook events to the on-screen card representing the hook's owner:
+
+    - ``source == "tool"`` → ``target_type="tool"``, attached to the per-invocation
+      tool card via ``tool_event_id`` (falling back to ``tool_id``).
+    - ``source == "scope"`` → ``target_type="agent"`` so the firing surfaces on
+      the agent scope card. ``target_id`` is the agent's stable ``id`` if
+      available; ``target_name`` is the agent name.
+    - ``source == "swarm"`` → ``target_type="swarm"`` so the firing surfaces on
+      the swarm scope card.
+
+    Frontends key scope-card firings by either ``target_id`` or ``target_name``
+    (see Studio's ``resolveScopeHookFirings``), so populating both keeps the
+    lookup robust to either side of the contract drifting.
+    """
+    if source == "tool":
+        target_id = tool_event_id or tool_id
+        target_name = getattr(tool, "name", None) or tool_id
+        return "tool", target_id, target_name
+
+    owner_name = getattr(owner, "name", None) or getattr(owner, "__class__", type(owner)).__name__
+    owner_id = getattr(owner, "id", None) or owner_name
+    if source == "swarm":
+        return "swarm", str(owner_id), str(owner_name)
+    # source == "scope" → render on the agent card
+    return "agent", str(owner_id), str(owner_name)
 
 
 __all__ = ["ToolExecutionService"]

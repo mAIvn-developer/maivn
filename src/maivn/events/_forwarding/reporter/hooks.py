@@ -46,6 +46,9 @@ def forward_hook_fired(
     target_name = normalized_text(payload.get("target_name")) or normalized_text(
         mapping_value(payload.get("hook"), "target_name")
     )
+    source = normalized_text(payload.get("source")) or normalized_text(
+        mapping_value(payload.get("hook"), "source")
+    )
     error = normalized_text(payload.get("error")) or normalized_text(
         mapping_value(payload.get("hook"), "error")
     )
@@ -57,16 +60,25 @@ def forward_hook_fired(
     if not name or not stage or not status or not target_type:
         return
 
-    report_hook_fired(
-        name=name,
-        stage=stage,
-        status=status,
-        target_type=target_type,
-        target_id=target_id,
-        target_name=target_name,
-        error=error,
-        elapsed_ms=elapsed_ms,
-    )
+    kwargs: dict[str, Any] = {
+        "name": name,
+        "stage": stage,
+        "status": status,
+        "target_type": target_type,
+        "target_id": target_id,
+        "target_name": target_name,
+        "error": error,
+        "elapsed_ms": elapsed_ms,
+    }
+    if source is not None:
+        kwargs["source"] = source
+
+    try:
+        report_hook_fired(**kwargs)
+    except TypeError:
+        # Older reporters predate ``source`` — retry without it.
+        kwargs.pop("source", None)
+        report_hook_fired(**kwargs)
 
 
 __all__ = ["forward_hook_fired"]

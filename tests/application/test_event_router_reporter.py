@@ -253,3 +253,89 @@ def test_event_router_forwards_extended_get_input_kwargs() -> None:
             "arg_name": "favorite_color",
         }
     ]
+
+
+class _HookReporter:
+    def __init__(self) -> None:
+        self.enabled = True
+        self.calls: list[dict[str, Any]] = []
+
+    def report_hook_fired(self, **kwargs: Any) -> None:
+        self.calls.append(kwargs)
+
+
+def test_event_router_forwards_hook_fired_to_wrapped_reporter() -> None:
+    """``report_hook_fired`` must reach the wrapped reporter and the sink.
+
+    Regression for a bug where Studio's ``EventRouterReporter`` wrapper
+    silently dropped hook events because it inherited the no-op default
+    from ``BaseReporter`` instead of forwarding to the wrapped reporter.
+    """
+    reporter = _HookReporter()
+    sink_payloads: list[dict[str, Any]] = []
+    router = EventRouterReporter(reporter, event_sink=sink_payloads.append)
+
+    router.report_hook_fired(
+        name="audit_log",
+        stage="before",
+        status="completed",
+        target_type="tool",
+        target_id="evt-1",
+        target_name="my_tool",
+        source="tool",
+        error=None,
+        elapsed_ms=4,
+    )
+
+    assert reporter.calls == [
+        {
+            "name": "audit_log",
+            "stage": "before",
+            "status": "completed",
+            "target_type": "tool",
+            "target_id": "evt-1",
+            "target_name": "my_tool",
+            "source": "tool",
+            "error": None,
+            "elapsed_ms": 4,
+        }
+    ]
+    assert sink_payloads == [
+        {
+            "category": "lifecycle",
+            "event": "hook_fired",
+            "payload": {
+                "name": "audit_log",
+                "stage": "before",
+                "status": "completed",
+                "target_type": "tool",
+                "target_id": "evt-1",
+                "target_name": "my_tool",
+                "source": "tool",
+                "error": None,
+                "elapsed_ms": 4,
+            },
+        }
+    ]
+
+
+def test_event_router_skips_hook_fired_when_lifecycle_excluded() -> None:
+    """``exclude={"lifecycle"}`` drops hook firings before they reach the wrapped reporter."""
+    reporter = _HookReporter()
+    sink_payloads: list[dict[str, Any]] = []
+    router = EventRouterReporter(
+        reporter,
+        exclude={"lifecycle"},
+        event_sink=sink_payloads.append,
+    )
+
+    router.report_hook_fired(
+        name="ignored",
+        stage="before",
+        status="completed",
+        target_type="agent",
+        target_id="a-1",
+    )
+
+    assert reporter.calls == []
+    assert sink_payloads == []
