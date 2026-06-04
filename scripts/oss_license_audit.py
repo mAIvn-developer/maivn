@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -61,8 +62,15 @@ def canonicalize_name(name: str) -> str:
 
 
 def read_project_name(project_root: Path) -> str:
-    pyproject = tomllib.loads(project_root.joinpath("pyproject.toml").read_text(encoding="utf-8"))
-    return pyproject["project"]["name"]
+    pyproject = cast(
+        Mapping[str, object],
+        tomllib.loads(project_root.joinpath("pyproject.toml").read_text(encoding="utf-8")),
+    )
+    project = cast(Mapping[str, object], pyproject["project"])
+    name = project["name"]
+    if not isinstance(name, str):
+        raise TypeError("pyproject.toml project.name must be a string")
+    return name
 
 
 def run_export(project_root: Path, project_name: str, *extra_args: str) -> list[str]:
@@ -116,7 +124,7 @@ def parse_requirement_names(lines: list[str]) -> dict[str, str]:
 
 
 def canonical_audit_environment() -> dict[str, str]:
-    environment = cast(dict[str, str], default_environment())
+    environment = {key: str(value) for key, value in default_environment().items()}
     environment.update(
         {
             "os_name": "posix",
@@ -280,10 +288,14 @@ def render_table(records: list[PackageRecord]) -> str:
     ]
     for record in records:
         notes = record.notes or " "
-        lines.append(
-            f"| {record.name} | {record.version} | {record.license_name} | "
-            f"{record.category} | {notes} |"
-        )
+        row = [
+            record.name,
+            record.version,
+            record.license_name,
+            record.category,
+            notes,
+        ]
+        lines.append("| " + " | ".join(row) + " |")
     return "\n".join(lines)
 
 
@@ -459,18 +471,20 @@ def ensure_report(path: Path, content: str, check_only: bool) -> bool:
         normalized_existing = normalize_report_content(existing)
         normalized_content = normalize_report_content(content)
         return normalized_existing == normalized_content
-    path.write_text(content, encoding="utf-8")
+    _ = path.write_text(content, encoding="utf-8")
     return True
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate and validate OSS license reports.")
-    parser.add_argument(
+    _ = parser.add_argument(
         "--check",
         action="store_true",
         help="Verify the committed reports match the generated output.",
     )
     args = parser.parse_args()
+    check_obj = cast(object, getattr(args, "check", False))
+    check = bool(check_obj)
 
     project_root = Path(__file__).resolve().parents[1]
     project_name = read_project_name(project_root)
@@ -493,7 +507,7 @@ def main() -> int:
     report_ok = ensure_report(
         project_root / REPORT_FILENAME,
         build_report(project_name, runtime_records, dev_only_records),
-        args.check,
+        check,
     )
 
     elections_content = build_elections_report(
@@ -505,7 +519,7 @@ def main() -> int:
     if elections_content is None:
         elections_ok = True
     else:
-        elections_ok = ensure_report(elections_path, elections_content, args.check)
+        elections_ok = ensure_report(elections_path, elections_content, check)
 
     runtime_counts = count_categories(runtime_records)
     blocked_runtime = (
@@ -514,7 +528,7 @@ def main() -> int:
         or runtime_counts["Unknown"] > 0
     )
 
-    if args.check:
+    if check:
         if not report_ok:
             print(f"{REPORT_FILENAME} is out of date.", file=sys.stderr)
         if not elections_ok:

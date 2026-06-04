@@ -1,9 +1,9 @@
 """Tool child result rendering for RichReporter."""
 
+# pyright: strict
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Mapping
 
 from rich.text import Text
 
@@ -14,6 +14,8 @@ from .._shared_helpers import (
     extract_response_text,
     extract_result_for_display,
 )
+
+ToolInfo = Mapping[str, object]
 
 # MARK: - Constants
 
@@ -31,9 +33,9 @@ class ToolChildRenderer:
     """Renders tool execution child items (agent, injected data, response, result)."""
 
     def __init__(self, *, print_to_console: Callable[[str | Text], None]) -> None:
-        self._print_to_console = print_to_console
+        self._print_to_console: Callable[[str | Text], None] = print_to_console
 
-    def print_tool_children(self, tool_info: dict[str, Any], result: Any | None) -> None:
+    def print_tool_children(self, tool_info: ToolInfo, result: object | None) -> None:
         """Print all child items for a tool completion."""
         child_items = self._collect_child_items(tool_info, result)
 
@@ -44,7 +46,7 @@ class ToolChildRenderer:
     # MARK: - Child Collection
 
     def _collect_child_items(
-        self, tool_info: dict[str, Any], result: Any | None
+        self, tool_info: ToolInfo, result: object | None
     ) -> list[Callable[[str], None]]:
         """Collect all child items to render."""
         child_items: list[Callable[[str], None]] = []
@@ -71,7 +73,7 @@ class ToolChildRenderer:
 
         return child_items
 
-    def _get_injected_data_printers(self, result: Any) -> list[Callable[[str], None]]:
+    def _get_injected_data_printers(self, result: object | None) -> list[Callable[[str], None]]:
         """Get printers for injected data items."""
         items = collect_injected_data_info(result)
         printers: list[Callable[[str], None]] = []
@@ -82,7 +84,7 @@ class ToolChildRenderer:
 
         return printers
 
-    def _get_response_printer(self, result: Any) -> Callable[[str], None] | None:
+    def _get_response_printer(self, result: object | None) -> Callable[[str], None] | None:
         """Get printer for response text if present."""
         response_text = extract_response_text(result)
         if not response_text:
@@ -94,10 +96,10 @@ class ToolChildRenderer:
         )
 
     def _get_result_printer(
-        self, tool_info: dict[str, Any], result: Any
+        self, tool_info: ToolInfo, result: object | None
     ) -> Callable[[str], None] | None:
         """Get printer for result value if present."""
-        result_to_display = extract_result_for_display(result, tool_info)
+        result_to_display = extract_result_for_display(result, dict(tool_info))
         if result_to_display is None:
             return None
 
@@ -129,36 +131,37 @@ class ToolChildRenderer:
         first = lines[0] if lines else ""
 
         text = Text()
-        text.append(prefix, style="dim")
-        text.append(f"{label}: ", style=label_style_dim)
-        text.append(first, style=value_style_dim)
+        _ = text.append(prefix, style="dim")
+        _ = text.append(f"{label}: ", style=label_style_dim)
+        _ = text.append(first, style=value_style_dim)
         self._print_to_console(text)
 
         if len(lines) > 1:
             continuation_prefix = " " * len(prefix) + " " * (len(label) + 2)
             for line in lines[1:]:
                 cont = Text()
-                cont.append(continuation_prefix, style="dim")
-                cont.append(line, style=value_style_dim)
+                _ = cont.append(continuation_prefix, style="dim")
+                _ = cont.append(line, style=value_style_dim)
                 self._print_to_console(cont)
 
 
 # MARK: - Formatting Helper
 
 
-def _format_value(value: Any, *, max_lines: int, max_chars: int) -> str:
+def _format_value(value: object, *, max_lines: int, max_chars: int) -> str:
     """Format a value for display with line and character limits."""
     if value is None:
         return ""
 
     # Convert to string
+    serializable_value: object = value
     if isinstance(value, (dict, list, tuple)):
         try:
-            formatted = result_to_json(value)
+            formatted = result_to_json(serializable_value)
         except (TypeError, ValueError, RecursionError):
-            formatted = str(value)
+            formatted = str(serializable_value)
     else:
-        formatted = str(value)
+        formatted = str(serializable_value)
 
     if not formatted:
         return formatted

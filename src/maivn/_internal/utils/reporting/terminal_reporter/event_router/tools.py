@@ -1,18 +1,36 @@
+# pyright: strict
 """Tool and assistant forwarding mixin for EventRouterReporter."""
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import cast
 
+from ..base import BaseReporter
 from ..event_categories import resolve_tool_category, resolve_tool_category_from_event_id
+
+# MARK: Types
+
+RouterPayload = dict[str, object]
+
 
 # MARK: Tool Forwarding
 
 
 class ToolRouterMixin:
-    _tool_category_by_event_id: dict[str, str]
-    _forward: Any
-    _reporter: Any
+    _reporter: BaseReporter = cast(BaseReporter, cast(object, None))
+    _tool_category_by_event_id: dict[str, str] = cast(dict[str, str], cast(object, None))
+
+    def _forward(
+        self,
+        *,
+        category: str,
+        event_name: str,
+        payload: RouterPayload,
+        forward: Callable[[], None],
+    ) -> None:
+        _ = (category, event_name, payload, forward)
+        raise NotImplementedError
 
     def report_tool_start(
         self,
@@ -20,7 +38,7 @@ class ToolRouterMixin:
         event_id: str,
         tool_type: str | None = None,
         agent_name: str | None = None,
-        tool_args: dict[str, Any] | None = None,
+        tool_args: dict[str, object] | None = None,
         swarm_name: str | None = None,
     ) -> None:
         category = resolve_tool_category(tool_type)
@@ -50,14 +68,14 @@ class ToolRouterMixin:
         self,
         event_id: str,
         elapsed_ms: int | None = None,
-        result: Any | None = None,
+        result: object | None = None,
     ) -> None:
         event_key = str(event_id)
         category = resolve_tool_category_from_event_id(
             event_key,
             self._tool_category_by_event_id,
         )
-        self._tool_category_by_event_id.pop(event_key, None)
+        _ = self._tool_category_by_event_id.pop(event_key, None)
         self._forward(
             category=category,
             event_name="tool_complete",
@@ -84,7 +102,7 @@ class ToolRouterMixin:
         if not event_key:
             category = resolve_tool_category(None)
         if event_key:
-            self._tool_category_by_event_id.pop(event_key, None)
+            _ = self._tool_category_by_event_id.pop(event_key, None)
         self._forward(
             category=category,
             event_name="tool_error",
@@ -108,7 +126,7 @@ class ToolRouterMixin:
         event_id: str | None = None,
         agent_name: str | None = None,
         swarm_name: str | None = None,
-        result: Any | None = None,
+        result: object | None = None,
     ) -> None:
         event_key = str(event_id).strip() if event_id is not None else ""
         if event_key:
@@ -134,7 +152,7 @@ class ToolRouterMixin:
             )
         finally:
             if event_key:
-                self._tool_category_by_event_id.pop(event_key, None)
+                _ = self._tool_category_by_event_id.pop(event_key, None)
 
     def report_hook_fired(
         self,
@@ -179,7 +197,7 @@ class ToolRouterMixin:
 
 
 def _forward_hook_fired_to_reporter(
-    reporter: Any,
+    reporter: BaseReporter,
     *,
     name: str,
     stage: str,
@@ -225,8 +243,18 @@ def _forward_hook_fired_to_reporter(
 
 
 class AssistantRouterMixin:
-    _forward: Any
-    _reporter: Any
+    _reporter: BaseReporter = cast(BaseReporter, cast(object, None))
+
+    def _forward(
+        self,
+        *,
+        category: str,
+        event_name: str,
+        payload: RouterPayload,
+        forward: Callable[[], None],
+    ) -> None:
+        _ = (category, event_name, payload, forward)
+        raise NotImplementedError
 
     def report_response_chunk(
         self,
@@ -234,6 +262,7 @@ class AssistantRouterMixin:
         *,
         assistant_id: str | None = None,
         full_text: str | None = None,
+        replace_content: bool = False,
     ) -> None:
         self._forward(
             category="response",
@@ -242,11 +271,13 @@ class AssistantRouterMixin:
                 "text": text,
                 "assistant_id": assistant_id,
                 "full_text": full_text,
+                "replace_content": replace_content,
             },
             forward=lambda: self._reporter.report_response_chunk(
                 text,
                 assistant_id=assistant_id,
                 full_text=full_text,
+                replace_content=replace_content,
             ),
         )
 

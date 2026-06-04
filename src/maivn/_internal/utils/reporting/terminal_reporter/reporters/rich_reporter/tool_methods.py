@@ -1,30 +1,63 @@
 """Tool and system-tool methods for ``RichReporter``."""
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import Any
+from abc import ABC
+from contextlib import AbstractContextManager
+from typing import TYPE_CHECKING
+
+from typing_extensions import override
+
+from ...base.defaults import ReporterDefaultEventsMixin
+from ...base.interface import BaseReporterInterface
+from .progress import ProgressManager
+from .reporting import ToolReporter
+
+ToolArgs = dict[str, object]
+
 
 # MARK: Tool Methods
 
 
-class RichReporterToolMixin:
-    enabled: bool
-    _terminal_lock: Any
-    _progress_manager: Any
-    _tool_reporter: Any
-    _active_system_tool_event_ids: set[str]
-    _system_tool_stream_group_event_ids: set[str]
-    _handle_system_tool_start: Any
-    _handle_system_tool_complete: Any
-    _finalize_system_tool_event: Any
+class RichReporterToolMixin(ReporterDefaultEventsMixin, BaseReporterInterface, ABC):
+    if TYPE_CHECKING:
+        enabled: bool
+        _terminal_lock: AbstractContextManager[bool]
+        _progress_manager: ProgressManager
+        _tool_reporter: ToolReporter
+        _active_system_tool_event_ids: set[str]
+        _system_tool_stream_group_event_ids: set[str]
 
+        def _handle_system_tool_start(
+            self,
+            tool_name: str,
+            event_id: str,
+            tool_type: str | None,
+            agent_name: str | None,
+            tool_args: ToolArgs | None,
+        ) -> None:
+            _ = (tool_name, event_id, tool_type, agent_name, tool_args)
+
+        def _handle_system_tool_complete(
+            self,
+            event_id: str,
+            elapsed_ms: int | None,
+            result: object | None,
+        ) -> None:
+            _ = (event_id, elapsed_ms, result)
+
+        def _finalize_system_tool_event(self, event_id: str) -> None:
+            _ = event_id
+
+    @override
     def report_tool_start(
         self,
         tool_name: str,
         event_id: str,
         tool_type: str | None = None,
         agent_name: str | None = None,
-        tool_args: dict[str, Any] | None = None,
+        tool_args: ToolArgs | None = None,
         swarm_name: str | None = None,
     ) -> None:
         """Report tool execution start."""
@@ -53,11 +86,12 @@ class RichReporterToolMixin:
                     tool_args,
                 )
 
+    @override
     def report_tool_complete(
         self,
         event_id: str,
         elapsed_ms: int | None = None,
-        result: Any | None = None,
+        result: object | None = None,
     ) -> None:
         """Report tool execution completion."""
         if not self.enabled:
@@ -71,6 +105,7 @@ class RichReporterToolMixin:
             with self._progress_manager.prepare_for_user_input():
                 self._tool_reporter.report_tool_complete(event_id, elapsed_ms, result)
 
+    @override
     def report_tool_error(
         self,
         tool_name: str,
@@ -101,13 +136,14 @@ class RichReporterToolMixin:
                     elapsed_ms=elapsed_ms,
                 )
 
+    @override
     def report_model_tool_complete(
         self,
         tool_name: str,
         event_id: str | None = None,
         agent_name: str | None = None,
         swarm_name: str | None = None,
-        result: Any | None = None,
+        result: object | None = None,
     ) -> None:
         """Report MODEL tool execution completion."""
         if not self.enabled:
@@ -123,6 +159,7 @@ class RichReporterToolMixin:
                     result=result,
                 )
 
+    @override
     def report_system_tool_progress(
         self,
         event_id: str,
@@ -160,11 +197,12 @@ class RichReporterToolMixin:
 # MARK: System Tool Helpers
 
 
-class RichReporterSystemToolMixin:
-    _active_system_tool_event_ids: set[str]
-    _system_tool_stream_group_event_ids: set[str]
-    _tool_reporter: Any
-    _progress_manager: Any
+class RichReporterSystemToolMixin(BaseReporterInterface, ABC):
+    if TYPE_CHECKING:
+        _active_system_tool_event_ids: set[str]
+        _system_tool_stream_group_event_ids: set[str]
+        _tool_reporter: ToolReporter
+        _progress_manager: ProgressManager
 
     def _handle_system_tool_start(
         self,
@@ -172,7 +210,7 @@ class RichReporterSystemToolMixin:
         event_id: str,
         tool_type: str | None,
         agent_name: str | None,
-        tool_args: dict[str, Any] | None,
+        tool_args: ToolArgs | None,
     ) -> None:
         """Handle system tool start with Live suspension."""
         should_suspend = not self._active_system_tool_event_ids
@@ -195,7 +233,7 @@ class RichReporterSystemToolMixin:
         self,
         event_id: str,
         elapsed_ms: int | None,
-        result: Any | None,
+        result: object | None,
     ) -> None:
         """Handle system tool completion with Live resumption."""
         self._tool_reporter.report_tool_complete(event_id, elapsed_ms, result)

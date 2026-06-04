@@ -1,9 +1,13 @@
 # Interrupts (Human-in-the-Loop)
 
-When a tool needs information that only the user can supply at runtime —
-a name, a confirmation, a preference — declare it with
-`@depends_on_interrupt`. The runtime pauses execution, collects the input
-via your input handler, and resumes with the value.
+These examples pause a tool to collect input from the user mid-run — a name,
+a confirmation, a preference — then resume with the value.
+
+Declare the dependency with `@depends_on_interrupt`: the runtime pauses
+execution, collects the input via your input handler, and resumes.
+`@depends_on_interrupt` takes `arg_name` and an `input_handler` (the callable
+that actually collects the value); `prompt` is optional. The SDK ships
+`default_terminal_interrupt` for stdin-based collection.
 
 ## Terminal interrupt — the simplest case
 
@@ -40,20 +44,20 @@ A common pattern: collect several inputs in order, then combine them in a
 final tool. Use tool dependencies so each step has a clear handoff:
 
 ```python
-from maivn import depends_on_interrupt, depends_on_tool
+from maivn import default_terminal_interrupt, depends_on_interrupt, depends_on_tool
 
 @agent.toolify(name='greet_user')
-@depends_on_interrupt(arg_name='user_name', prompt='Your name: ')
+@depends_on_interrupt(arg_name='user_name', input_handler=default_terminal_interrupt, prompt='Your name: ')
 def greet_user(user_name: str) -> dict:
     return {'user_name': user_name, 'greeting': f'Hey {user_name}!'}
 
 @agent.toolify(name='personalize_profile')
-@depends_on_interrupt(arg_name='favorite_color', prompt='Favorite color: ')
+@depends_on_interrupt(arg_name='favorite_color', input_handler=default_terminal_interrupt, prompt='Favorite color: ')
 def personalize_profile(favorite_color: str) -> dict:
     return {'profile': {'favorite_color': favorite_color}}
 
 @agent.toolify(name='confirm_action')
-@depends_on_interrupt(arg_name='confirmation_input', prompt='Proceed? (yes/no): ')
+@depends_on_interrupt(arg_name='confirmation_input', input_handler=default_terminal_interrupt, prompt='Proceed? (yes/no): ')
 def confirm_action(confirmation_input: str, action_name: str) -> dict:
     confirmed = confirmation_input.lower().strip() in ('yes', 'y')
     return {'action_name': action_name, 'confirmed': confirmed}
@@ -89,28 +93,32 @@ agent.system_prompt = (
 ## Custom input handlers
 
 `default_terminal_interrupt` reads from stdin. In a web app, you'll want a
-custom handler that pushes the prompt to the UI and waits for a response:
+custom handler that pushes the prompt to the UI and waits for a response. An
+input handler receives a single positional argument — the prompt string — and
+returns the collected value, so wire any per-session state in via a closure:
 
 ```python
-import asyncio
+def make_web_input_handler(session_id: str):
+    """Build a handler bound to a specific session via closure."""
 
-async def web_input_handler(prompt: str, *, session_id: str) -> str:
-    """Push the prompt over a websocket and await the user's reply."""
-    await send_to_browser({'type': 'prompt', 'session_id': session_id, 'text': prompt})
-    return await wait_for_user_reply(session_id)
+    def web_input_handler(prompt: str) -> str:
+        send_to_browser({'type': 'prompt', 'session_id': session_id, 'text': prompt})
+        return wait_for_user_reply(session_id)
+
+    return web_input_handler
 
 @depends_on_interrupt(
     arg_name='confirmation',
+    input_handler=make_web_input_handler(session_id='sess-123'),
     prompt='Approve the destructive action?',
-    input_handler=web_input_handler,
 )
 @agent.toolify(name='request_approval')
 def request_approval(confirmation: str) -> dict:
     return {'approved': confirmation.lower() in ('yes', 'y', 'approve')}
 ```
 
-The handler can be sync or async. Sync handlers block the worker thread
-until they return; async handlers integrate cleanly with web frameworks.
+The handler blocks the worker thread until it returns, so any waiting (e.g.
+polling for the user's reply) happens inside the handler.
 
 ## Combining interrupts with structured output
 
@@ -121,8 +129,8 @@ style flows where the user fills in missing fields:
 from pydantic import BaseModel
 
 @agent.toolify(name='submit_order', final_tool=True)
-@depends_on_interrupt(arg_name='shipping_address', prompt='Shipping address: ')
-@depends_on_interrupt(arg_name='delivery_instructions', prompt='Delivery instructions (optional): ')
+@depends_on_interrupt(arg_name='shipping_address', input_handler=default_terminal_interrupt, prompt='Shipping address: ')
+@depends_on_interrupt(arg_name='delivery_instructions', input_handler=default_terminal_interrupt, prompt='Delivery instructions (optional): ')
 class OrderSubmission(BaseModel):
     item_id: str
     quantity: int
@@ -145,15 +153,22 @@ sees the failure in its next turn:
 class InterruptCancelled(Exception):
     pass
 
-async def cancellable_handler(prompt: str, *, session_id: str) -> str:
-    try:
-        return await wait_for_user_reply_with_timeout(session_id, seconds=120)
-    except TimeoutError:
-        raise InterruptCancelled('user did not respond')
+def make_cancellable_handler(session_id: str):
+    def cancellable_handler(prompt: str) -> str:
+        try:
+            return wait_for_user_reply_with_timeout(session_id, seconds=120)
+        except TimeoutError:
+            raise InterruptCancelled('user did not respond')
+
+    return cancellable_handler
 ```
 
 ## What's next
 
+- **[Interrupts guide](../guides/interrupts.md)** — the conceptual reference:
+  how interrupts pause and resume a turn, detecting an interrupted turn from
+  `SessionResponse.status` or the event stream, typed prompts, cancellation, and
+  keeping a sensitive answer redacted across the pause.
 - **[Agents & Tools](./agents-and-tools.md)** — combining interrupts with
   `before_execute` / `after_execute` hooks for fine-grained progress
   signaling.

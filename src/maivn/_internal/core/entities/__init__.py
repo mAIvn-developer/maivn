@@ -3,6 +3,7 @@ Includes session/SSE models, tool representations, registries, and execution con
 Used by state compilation and orchestration.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 # MARK: - Configuration
@@ -21,11 +22,8 @@ from .tool_events import (
     UpdateEventPayload,
 )
 
-# MARK: - Tool Registry
-from .tool_spec_registry import ToolSpecRegistry
-
 # MARK: - Tools
-from .tools import AgentTool, BaseTool, FunctionTool, McpTool, ModelTool
+from .tools import AgentTool, BaseTool, FunctionTool, McpTool, MethodTool, ModelTool
 
 # MARK: - Exports
 
@@ -41,12 +39,11 @@ __all__ = [
     "ToolEventPayload",
     "ToolEventValue",
     "UpdateEventPayload",
-    # Tool Registry
-    "ToolSpecRegistry",
     # Tools
     "AgentTool",
     "BaseTool",
     "FunctionTool",
     "McpTool",
+    "MethodTool",
     "ModelTool",
 ]

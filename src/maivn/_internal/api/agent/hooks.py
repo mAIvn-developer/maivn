@@ -1,11 +1,12 @@
 """Scope-level execution hooks for Agent invocations."""
 
+# pyright: strict
 from __future__ import annotations
 
 import logging
 import time
 from collections.abc import Callable, Iterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Protocol, TypeAlias, cast
 
 from maivn_shared import FINAL_EVENT_NAME, SessionResponse
 
@@ -22,6 +23,16 @@ logger = logging.getLogger(__name__)
 
 # MARK: Hook State
 
+HookPayload: TypeAlias = dict[str, object]
+ScopeHook: TypeAlias = Callable[[HookPayload], object]
+
+
+class _ScopeHookTarget(Protocol):
+    id: str
+    name: str | None
+    before_execute: ScopeHook | None
+    after_execute: ScopeHook | None
+
 
 def scope_hooks_enabled(invocation_state: InvocationState) -> bool:
     """Check if scope-level hooks should be fired."""
@@ -29,9 +40,9 @@ def scope_hooks_enabled(invocation_state: InvocationState) -> bool:
 
 
 def build_scope_hook_payload(
-    agent: Any,
+    agent: object,
     invocation_state: InvocationState,
-) -> dict[str, Any]:
+) -> HookPayload:
     """Build the initial payload dict for scope hooks."""
     context = ExecutionContext(
         scope=agent,
@@ -58,25 +69,33 @@ def build_scope_hook_payload(
 
 # Each entry is ``(callable, target_type, target_id, target_name)`` so the
 # emitted ``hook_fired`` event can be routed to the right scope card.
-ScopeHookEntry = tuple[Callable[..., Any] | None, str, str | None, str | None]
+ScopeHookEntry: TypeAlias = tuple[ScopeHook | None, str, str | None, str | None]
 
 
-def _scope_target(swarm: Any) -> tuple[str | None, str | None]:
+def _scope_target(swarm: object) -> tuple[str | None, str | None]:
     """Resolve ``(target_id, target_name)`` for a swarm scope hook."""
     swarm_name = getattr(swarm, "name", None) or (
         swarm.__class__.__name__ if swarm is not None else None
     )
     swarm_id = getattr(swarm, "id", None)
-    return (swarm_id, swarm_name)
+    return (
+        swarm_id if isinstance(swarm_id, str) else None,
+        swarm_name if isinstance(swarm_name, str) else None,
+    )
 
 
-def _agent_target(agent: Any) -> tuple[str | None, str | None]:
+def _agent_target(agent: object) -> tuple[str | None, str | None]:
     """Resolve ``(target_id, target_name)`` for an agent scope hook."""
-    return (getattr(agent, "id", None), getattr(agent, "name", None))
+    agent_id = getattr(agent, "id", None)
+    agent_name = getattr(agent, "name", None)
+    return (
+        agent_id if isinstance(agent_id, str) else None,
+        agent_name if isinstance(agent_name, str) else None,
+    )
 
 
 def get_before_scope_hooks(
-    agent: Any,
+    agent: object,
     invocation_state: InvocationState,
 ) -> list[ScopeHookEntry]:
     """Collect before-execute hooks from swarm and agent.
@@ -89,26 +108,30 @@ def get_before_scope_hooks(
     swarm = invocation_state.swarm
     if invocation_state.swarm_mode == "scope" and swarm is not None:
         swarm_id, swarm_name = _scope_target(swarm)
-        entries.append((getattr(swarm, "before_execute", None), "swarm", swarm_id, swarm_name))
+        swarm_target = cast(_ScopeHookTarget, swarm)
+        entries.append((swarm_target.before_execute, "swarm", swarm_id, swarm_name))
     if invocation_state.agent_mode == "scope":
         agent_id, agent_name = _agent_target(agent)
-        entries.append((getattr(agent, "before_execute", None), "agent", agent_id, agent_name))
+        agent_target = cast(_ScopeHookTarget, agent)
+        entries.append((agent_target.before_execute, "agent", agent_id, agent_name))
     return entries
 
 
 def get_after_scope_hooks(
-    agent: Any,
+    agent: object,
     invocation_state: InvocationState,
 ) -> list[ScopeHookEntry]:
     """Collect after-execute hooks from agent and swarm."""
     entries: list[ScopeHookEntry] = []
     if invocation_state.agent_mode == "scope":
         agent_id, agent_name = _agent_target(agent)
-        entries.append((getattr(agent, "after_execute", None), "agent", agent_id, agent_name))
+        agent_target = cast(_ScopeHookTarget, agent)
+        entries.append((agent_target.after_execute, "agent", agent_id, agent_name))
     swarm = invocation_state.swarm
     if invocation_state.swarm_mode == "scope" and swarm is not None:
         swarm_id, swarm_name = _scope_target(swarm)
-        entries.append((getattr(swarm, "after_execute", None), "swarm", swarm_id, swarm_name))
+        swarm_target = cast(_ScopeHookTarget, swarm)
+        entries.append((swarm_target.after_execute, "swarm", swarm_id, swarm_name))
     return entries
 
 
@@ -117,7 +140,7 @@ def get_after_scope_hooks(
 
 def run_scope_hooks(
     hooks: list[ScopeHookEntry],
-    payload: dict[str, Any],
+    payload: HookPayload,
     *,
     stage: str,
     reporter: BaseReporter | None = None,
@@ -136,7 +159,7 @@ def run_scope_hooks(
         status = "completed"
         error_message: str | None = None
         try:
-            hook(payload)
+            _ = hook(payload)
         except Exception as exc:  # noqa: BLE001 - hook failures must never abort execution
             status = "failed"
             error_message = str(exc) or exc.__class__.__name__
@@ -163,7 +186,7 @@ def run_scope_hooks(
                 )
 
 
-def _hook_name(hook: Callable[..., Any]) -> str:
+def _hook_name(hook: ScopeHook) -> str:
     """Best-effort display name for a hook callable."""
     name = getattr(hook, "__name__", None)
     if isinstance(name, str) and name:
@@ -221,9 +244,9 @@ def _emit_hook_fired(
 
 def wrap_stream_with_hooks(
     stream_iter: Iterator[SSEEvent],
-    agent: Any,
+    agent: object,
     invocation_state: InvocationState,
-    payload: dict[str, Any],
+    payload: HookPayload,
     *,
     reporter: BaseReporter | None = None,
 ) -> Iterator[SSEEvent]:
@@ -243,10 +266,10 @@ def wrap_stream_with_hooks(
                 if event.name == FINAL_EVENT_NAME and isinstance(event.payload, dict):
                     try:
                         final_response = SessionResponse.model_validate(event.payload)
-                    except Exception:  # noqa: BLE001
+                    except Exception:  # noqa: BLE001 - malformed final event falls back to None
                         final_response = None
                 yield event
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 - stream errors must still fire after hooks
             stream_error = exc
             raise
         finally:

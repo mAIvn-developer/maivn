@@ -1,7 +1,8 @@
 # Private Data
 
-The SDK has several layers for keeping sensitive values out of the LLM
-context: dependency injection, placeholder replacement on the way back, and
+Runnable examples for keeping sensitive values out of the LLM context. The SDK
+offers several layers: dependency injection, referencing private values by name
+and letting the runtime substitute the real value at execution time, and
 automatic detection of PII that slips out of upstream tools.
 
 ## `@depends_on_private_data` — inject without disclosure
@@ -38,21 +39,21 @@ agent.invoke([HumanMessage(content='Pull the account briefing.')])
 Multiple keys can be injected into the same tool. The values are never
 serialized into the model's view of the conversation.
 
-## Placeholder replacement in responses
+## Referencing private values by name in responses
 
 Sometimes you want the agent's user-facing response to reference private
-values *symbolically* and have the SDK rehydrate them on the way back.
-
-The model is told it can write `{_{key}_}` and the runtime will fill them
-in after the response leaves the orchestrator:
+values *symbolically* and have the runtime substitute the real value on the
+way back. You declare a private value under a key, instruct the model to
+reference that key by name, and the runtime fills in the real value after the
+response leaves the model — the model itself never sees it.
 
 ```python
 agent = Agent(
     name='Customer Success Assistant',
     system_prompt=(
         'You are a customer success assistant. Use tools to fetch account context, '
-        'then write a short, friendly response. Reference customer details using '
-        'placeholders like {_{customer_name}_} and {_{account_id}_}.'
+        'then write a short, friendly response. Reference customer details by their '
+        'private-data keys (customer_name, account_id) rather than literal values.'
     ),
     api_key='...',
 )
@@ -64,7 +65,7 @@ agent.private_data = {
 
 response = agent.invoke([HumanMessage(content=(
     'Run the account_briefing tool, then write a 2-3 sentence welcome note '
-    'using {_{customer_name}_} and {_{account_id}_} exactly.'
+    'that references the customer_name and account_id private-data keys.'
 ))])
 
 # The response text now contains "Hi Acme Co — your account ACCT-77342 is …"
@@ -72,7 +73,10 @@ print(response)
 ```
 
 The LLM never sees the real customer name or account ID during reasoning;
-they're substituted in only after the response is produced.
+they're substituted in only after the response is produced. For the inverse
+direction — getting a private value *into* a tool argument — prefer the
+`@depends_on_private_data` injection path shown above, which needs no special
+referencing convention.
 
 ## `RedactedMessage` — redact incoming messages
 
@@ -93,10 +97,12 @@ response = agent.invoke(
 ```
 
 PII detection covers email, phone, SSN, credit cards, IP addresses, and
-several other patterns out of the box. Detected values are stored
-server-side keyed to the session and substituted back only where it's safe
-to do so (e.g. inside the final tool's structured output, not in the
-free-form LLM trace).
+several other categories out of the box, each paired with a structural check
+to reduce false positives. Detected values are held within the runtime and
+substituted back only where it's safe to do so (e.g. inside the final tool's
+structured output, not in the free-form LLM trace). Detection is a safety net,
+not a guarantee — pair it with `@depends_on_private_data` and `known_pii_values`
+for values you already know are sensitive.
 
 ## Tool-result PII protection
 
@@ -128,33 +134,40 @@ response = agent.invoke([RedactedMessage(content=(
 ))])
 ```
 
-The email and phone returned by `fetch_customer_profile` are detected by
-the server, masked when the next LLM turn sees them, but **rehydrated in
-the final tool's arguments and the user-facing response** — so the round
-trip works end-to-end without leaking raw PII into the model's
-intermediate reasoning.
+The email and phone returned by `fetch_customer_profile` are detected by the
+runtime, masked when the next LLM turn sees them, but **substituted back into
+the final tool's arguments and the user-facing response** — so the round trip
+works end-to-end without leaking raw PII into the model's intermediate
+reasoning.
 
 ## Known PII values — explicit list
 
 If you have values you know are sensitive (and might not match the
-auto-detector's patterns), declare them up front:
+auto-detector's categories), declare them up front on the `RedactedMessage`
+via `known_pii_values`:
 
 ```python
-response = agent.invoke(
-    messages,
-    known_pii_values=[
-        'INTERNAL-CASE-7782',
-        'project-coastal-shield-rev2',
-    ],
-)
+from maivn.messages import RedactedMessage
+
+response = agent.invoke([
+    RedactedMessage(
+        content='Acknowledge receipt and reference the internal case.',
+        known_pii_values=[
+            'INTERNAL-CASE-7782',
+            'project-coastal-shield-rev2',
+        ],
+    ),
+])
 ```
 
+`known_pii_values` accepts raw strings as well as `PrivateData` descriptors.
 These get the same treatment as auto-detected PII — masked in the LLM
-context, rehydrated only in safe spots.
+context, substituted back only in safe spots.
 
 ## What's next
 
 - **[Private Data guide](../guides/private-data.md)** — the deeper
-  treatment, including custom PII patterns and audit log behavior.
+  treatment, including the whitelist model and how access to private values is
+  tracked.
 - **[Memory](./memory.md)** — combining memory retrieval with private-data
   workflows.

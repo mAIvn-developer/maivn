@@ -1,17 +1,39 @@
+# pyright: strict
 """System, enrichment, and assignment forwarding mixin for EventRouterReporter."""
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import Protocol, cast
 
+from ..base import BaseReporter
 from ..event_categories import forward_enrichment_with_fallback
+
+# MARK: Types
+
+RouterPayload = dict[str, object]
+
+
+class AssignmentCallback(Protocol):
+    def __call__(self, **kwargs: object) -> None: ...
+
 
 # MARK: System Forwarding
 
 
 class SystemRouterMixin:
-    _forward: Any
-    _reporter: Any
+    _reporter: BaseReporter = cast(BaseReporter, cast(object, None))
+
+    def _forward(
+        self,
+        *,
+        category: str,
+        event_name: str,
+        payload: RouterPayload,
+        forward: Callable[[], None],
+    ) -> None:
+        _ = (category, event_name, payload, forward)
+        raise NotImplementedError
 
     def report_system_tool_start(
         self,
@@ -81,10 +103,32 @@ class SystemRouterMixin:
 
 
 class EnrichmentRouterMixin:
-    _forward: Any
-    _reporter: Any
-    _is_enabled: Any
-    _emit_to_sink: Any
+    _reporter: BaseReporter = cast(BaseReporter, cast(object, None))
+
+    def _forward(
+        self,
+        *,
+        category: str,
+        event_name: str,
+        payload: RouterPayload,
+        forward: Callable[[], None],
+    ) -> None:
+        _ = (category, event_name, payload, forward)
+        raise NotImplementedError
+
+    def _is_enabled(self, category: str) -> bool:
+        _ = category
+        raise NotImplementedError
+
+    def _emit_to_sink(
+        self,
+        *,
+        category: str,
+        event_name: str,
+        payload: RouterPayload,
+    ) -> None:
+        _ = (category, event_name, payload)
+        raise NotImplementedError
 
     def report_enrichment(
         self,
@@ -94,8 +138,13 @@ class EnrichmentRouterMixin:
         scope_id: str | None = None,
         scope_name: str | None = None,
         scope_type: str | None = None,
-        memory: dict[str, Any] | None = None,
-        redaction: dict[str, Any] | None = None,
+        memory: dict[str, object] | None = None,
+        redaction: dict[str, object] | None = None,
+        source: str | None = None,
+        trigger_tool: str | None = None,
+        target_tool: str | None = None,
+        reevaluate_count: int | None = None,
+        collected_count: int | None = None,
     ) -> None:
         self._forward(
             category="enrichment",
@@ -108,6 +157,11 @@ class EnrichmentRouterMixin:
                 "scope_type": scope_type,
                 "memory": memory,
                 "redaction": redaction,
+                "source": source,
+                "trigger_tool": trigger_tool,
+                "target_tool": target_tool,
+                "reevaluate_count": reevaluate_count,
+                "collected_count": collected_count,
             },
             forward=lambda: forward_enrichment_with_fallback(
                 self._reporter,
@@ -118,15 +172,20 @@ class EnrichmentRouterMixin:
                 scope_type=scope_type,
                 memory=memory,
                 redaction=redaction,
+                source=source,
+                trigger_tool=trigger_tool,
+                target_tool=target_tool,
+                reevaluate_count=reevaluate_count,
+                collected_count=collected_count,
             ),
         )
 
-    def report_agent_assignment(self, **kwargs: Any) -> None:
+    def report_agent_assignment(self, **kwargs: object) -> None:
         if not self._is_enabled("assignment"):
             return
         callback = getattr(self._reporter, "report_agent_assignment", None)
         if callable(callback):
-            callback(**kwargs)
+            cast(AssignmentCallback, callback)(**kwargs)
         self._emit_to_sink(
             category="assignment",
             event_name="agent_assignment",

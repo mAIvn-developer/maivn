@@ -16,7 +16,7 @@ path to a working agent, a tool, and a structured final answer.
 | [Swarms](./swarms.md) | Multi-agent collaboration with `Swarm`. Designated final-output agents. Member-style registration. Per-agent `final_tool` ownership. |
 | [MCP Integration](./mcp.md) | Registering MCP servers over stdio and HTTP. Auto-setup for third-party servers. |
 | [Memory](./memory.md) | Memory configuration, retrieval policies, skill/insight extraction, attaching resources. |
-| [Private Data](./private-data.md) | `@depends_on_private_data`, placeholder replacement, `RedactedMessage`. |
+| [Private Data](./private-data.md) | `@depends_on_private_data`, referencing private values by key, `RedactedMessage`. |
 | [Batch & Scheduling](./batch-and-scheduling.md) | `agent.batch(...)` / `agent.cron(...)` / `swarm.every(...)`. Retry, jitter, overlap policies. |
 | [Interrupts](./interrupts.md) | Human-in-the-loop input collection with `@depends_on_interrupt`. |
 | [Real-World Projects](./projects.md) | Larger end-to-end examples — automobile spec, data harmonization, HTML email builder, financial planner with MCP. |

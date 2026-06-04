@@ -1,10 +1,12 @@
 # System Tools Guide
 
-The mAIvn runtime provides built-in system tools for common capabilities like web search, code execution, artifact synthesis, and reasoning.
+Some capabilities are useful to almost every agent — searching the web, running a quick calculation, drafting a long document, thinking through a hard problem. Rather than make you build and maintain those yourself, mAIvn ships them as built-in system tools your agent can reach for automatically, with privacy protections applied for free.
+
+This guide explains what each system tool does, how the runtime keeps private data safe while they run, and how to control which ones are available.
 
 ## Overview
 
-System tools are server-side tools that extend agent capabilities:
+System tools are runtime-provided tools that extend agent capabilities:
 
 | Tool               | Description                                                          |
 | ------------------ | -------------------------------------------------------------------- |
@@ -20,7 +22,7 @@ These tools are **not** defined in your SDK code - they're made available by the
 
 ### Datetime Awareness
 
-The maivn system has built-in datetime awareness. Agents automatically know the current date and time without needing a custom tool. You do **not** need to create a `get_current_time()` tool - the system handles this natively.
+The mAIvn runtime has built-in datetime awareness. Agents automatically know the current date and time without needing a custom tool. You do **not** need to create a `get_current_time()` tool - the system handles this natively.
 
 ```python
 # No need for this - the system already knows the time:
@@ -107,7 +109,7 @@ agent.private_data = {
     'api_key': 'sk-xxx-secret'
 }
 
-# When agent searches, private data stays server-side
+# When agent searches, private data stays within the runtime
 response = agent.invoke([
     HumanMessage(content='Search for information about this account')
 ])
@@ -116,12 +118,12 @@ response = agent.invoke([
 # "information about account"  # Private data excluded
 ```
 
-**Privacy guarantees:**
+**How the boundary behaves here:**
 
-- Private data never included in search queries
-- Search results filtered for PII before returning
-- No credentials or sensitive data sent to search providers
-- Audit trail records what was searched (not what was excluded)
+- Private data is kept out of outbound search queries
+- Search results are scanned and known private values redacted before returning
+- Credentials and other secrets are not forwarded to search providers
+- The activity is tracked so you have a record of what was searched
 
 ### REPL Code Execution Privacy
 
@@ -137,12 +139,12 @@ def query_database(query: str, db_url: str) -> dict:
 # Actual database URL never appears in output
 ```
 
-**Privacy guarantees:**
+**How the boundary behaves here:**
 
-- Private data injected into sandbox only during execution
-- Output automatically scanned and redacted
-- No code or data persistence between executions
-- Isolated execution environment prevents data leakage
+- Private data is injected into the sandbox only during execution
+- Output is scanned and known private values redacted
+- Code and data are not persisted between executions
+- The execution environment is isolated from your host
 
 ### Think Tool Privacy
 
@@ -248,7 +250,7 @@ Use `compose_artifact` when the agent needs to synthesize a substantial artifact
 
 1. A downstream tool declares whether a specific argument may use `compose_artifact`
 2. The planner sees that policy in tool metadata and arg schema
-3. The server checks the policy again when `compose_artifact` is invoked
+3. The runtime checks the policy again when `compose_artifact` is invoked
 4. The downstream tool execution also validates whether the argument actually did or did not come from `compose_artifact`
 
 ### Declaring Arg Policy in the SDK
@@ -453,36 +455,29 @@ Output might show:
 
 ### Audit Trail
 
-All system tools maintain comprehensive audit logs:
-
-```python
-# Audit events automatically recorded
-{
-    'timestamp': '2024-01-15T10:30:00Z',
-    'tool': 'web_search',
-    'action': 'search_query_filtered',
-    'private_data_excluded': ['user_email', 'api_key'],
-    'query_sent': 'latest AI developments',
-    'compliance': true
-}
-```
+System-tool activity that touches private data is tracked, so you have a
+record that a value was used or excluded without that record itself exposing
+the protected values. Treat the audit surface as a record that access
+happened, not as a place to read sensitive data back out.
 
 ### Final Privacy Boundary
 
-Every system-tool invocation still passes through the final protected-data boundary:
+Every system-tool invocation still passes through a final protected-data boundary
+before anything leaves the runtime:
 
-- Raw outbound `private_data` is cleared by default
-- Known private values are placeholderized case-insensitively across payloads
-- User-typed literals that match known `private_data` are scrubbed before they reach a model-visible runtime
-- The call is blocked if a known private value still appears in the outbound payload
-- Raw private data may leave the protected boundary only when the user has explicitly authorized a supported system-tool flow
+- Raw outbound `private_data` is withheld by default
+- Known private values are substituted with safe references rather than being sent verbatim
+- User-typed text that matches a known private value is scrubbed before it reaches a model-visible context
+- Raw private data may leave the protected boundary only when you have explicitly authorized a supported system-tool flow
 
-### Compliance Features
+This boundary is a safety net layered on top of your own careful handling, not a
+substitute for it.
 
-- **PII detection**: Automatic identification of sensitive information
-- **Data minimization**: Only necessary data exposed to tools
-- **Retention controls**: Automatic cleanup of temporary data
-- **Access logging**: Immutable record of all private data access
+### Compliance-oriented Behavior
+
+- **PII detection**: NLP-based identification of sensitive information (a safety net, not a guarantee of complete coverage)
+- **Data minimization**: Only the data a tool actually needs is exposed to it
+- **Access tracking**: Private-data access is recorded
 
 ## Configuration
 
@@ -577,7 +572,7 @@ def execute_query(query: str) -> dict:
 
 This keeps artifact synthesis intentional, reviewable, and enforceable at runtime.
 
-## See Also
+## Next steps
 
 - [Agent API](../api/agent.md) - Agent configuration
 - [Decorators API](../api/decorators.md) - Dependency and arg policy decorators

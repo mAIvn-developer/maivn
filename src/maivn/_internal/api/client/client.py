@@ -1,3 +1,4 @@
+# pyright: strict
 """HTTP client helpers for the maivn SDK.
 Defines the reusable ``Client`` and ``ClientBuilder`` used by agents and swarms.
 """
@@ -6,29 +7,32 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from typing import Any
+from types import TracebackType
+from typing import cast
 
 try:
-    from tzlocal import get_localzone_name
-except Exception:  # pragma: no cover
-    get_localzone_name = None  # type: ignore[assignment]
+    from tzlocal import get_localzone_name as _tz_get_localzone_name
+except Exception:  # pragma: no cover  # noqa: BLE001 - tzlocal import can fail on minimal systems
+    get_localzone_name: Callable[[], str] | None = None
+else:
+    get_localzone_name = _tz_get_localzone_name
 
-from maivn_shared import RedactionPreviewRequest, RedactionPreviewResponse
+from maivn_shared import RedactionPreviewRequest, RedactionPreviewResponse, ServerEndpoints
 
 from maivn._internal.utils.configuration import (
     ConfigurationBuilder,
     MaivnConfiguration,
     get_configuration,
 )
-from maivn.constants import ServerEndpoints
 
-from .http import ClientHttpMixin
+from .billing import ClientBillingMixin
+from .http import ClientHttpMixin, HttpClientProtocol, JsonObject
 from .memory import ClientMemoryMixin
 
 # MARK: Client
 
 
-class Client(ClientHttpMixin, ClientMemoryMixin):
+class Client(ClientHttpMixin, ClientMemoryMixin, ClientBillingMixin):
     """Reusable SDK client for connecting multiple agents to maivn-server.
 
     The client acts as a lightweight connection helper that SDK consumers can create
@@ -64,20 +68,23 @@ class Client(ClientHttpMixin, ClientMemoryMixin):
             dependency_wait_timeout: Dependency resolution timeout in seconds.
             total_execution_timeout: Total execution timeout in seconds.
         """
-        self._api_key = api_key
-        self._client_timezone = client_timezone
+        self._api_key: str | None = api_key
+        self._client_timezone: str | None = client_timezone
         if self._client_timezone is None and auto_detect_timezone:
             self._client_timezone = self._detect_system_timezone()
-        self._timeout = timeout
+        self._timeout: float | int | None = timeout
         self._thread_id: str | None = None
         self._configuration: MaivnConfiguration | None = None
-        self._configuration_provider: Callable[[], MaivnConfiguration] = get_configuration
-        self._http_client = None
-        self._owns_http_client = True
+        self._configuration_provider: Callable[[], object] = get_configuration
+        self._http_client: HttpClientProtocol | None = None
+        self._owns_http_client: bool = True
+        self._base_url: str = ""
+        self._mock_base_url: str = ""
+        self._deployment_timezone: str = "UTC"
 
-        self._tool_execution_timeout = tool_execution_timeout
-        self._dependency_wait_timeout = dependency_wait_timeout
-        self._total_execution_timeout = total_execution_timeout
+        self._tool_execution_timeout: float | None = tool_execution_timeout
+        self._dependency_wait_timeout: float | None = dependency_wait_timeout
+        self._total_execution_timeout: float | None = total_execution_timeout
 
         self._initialize_from_configuration()
 
@@ -90,7 +97,7 @@ class Client(ClientHttpMixin, ClientMemoryMixin):
             return None
         try:
             value = get_localzone_name()
-            if isinstance(value, str) and value.strip():
+            if value.strip():
                 return value
         except Exception:  # noqa: BLE001 - tzlocal raises a variety of OS errors
             return None
@@ -101,7 +108,7 @@ class Client(ClientHttpMixin, ClientMemoryMixin):
         config = self._resolve_configuration()
         self._base_url = config.server.base_url
         self._mock_base_url = config.server.mock_base_url
-        self._deployment_timezone = getattr(config.server, "deployment_timezone", "UTC")
+        self._deployment_timezone = config.server.deployment_timezone
         if self._timeout is None:
             self._timeout = config.server.timeout_seconds
 
@@ -114,7 +121,7 @@ class Client(ClientHttpMixin, ClientMemoryMixin):
         api_key: str | None,
         configuration: MaivnConfiguration,
         configuration_provider: Callable[[], MaivnConfiguration] | None = None,
-        http_client: Any = None,
+        http_client: HttpClientProtocol | None = None,
         timeout: int | float | None = None,
         thread_id: str | None = None,
         tool_execution_timeout: float | None = None,
@@ -162,7 +169,7 @@ class Client(ClientHttpMixin, ClientMemoryMixin):
 
     @property
     def deployment_timezone(self) -> str:
-        return str(getattr(self, "_deployment_timezone", "UTC"))
+        return self._deployment_timezone
 
     @property
     def thread_id(self) -> str | None:
@@ -182,7 +189,7 @@ class Client(ClientHttpMixin, ClientMemoryMixin):
 
     def set_thread_id(self, thread_id: str) -> None:
         """Set the thread id."""
-        if not isinstance(thread_id, str) or not thread_id.strip():
+        if not thread_id.strip():
             raise ValueError("thread_id must be a non-empty string")
         self._thread_id = thread_id
 
@@ -222,21 +229,22 @@ class Client(ClientHttpMixin, ClientMemoryMixin):
 
     # MARK: - Session Operations
 
-    def start_session(self, *, payload: dict) -> dict:
+    def start_session(self, *, payload: JsonObject) -> JsonObject:
         """Start a session via maivn-server and return response JSON."""
-        return self._request("POST", ServerEndpoints.START_SESSION, json=payload)
+        return self._request_object("POST", ServerEndpoints.START_SESSION, json=payload)
 
     def preview_redaction(
         self,
         *,
-        payload: RedactionPreviewRequest | dict[str, Any],
+        payload: RedactionPreviewRequest | JsonObject,
     ) -> RedactionPreviewResponse:
-        request_payload = (
+        request_payload = cast(
+            JsonObject,
             payload.model_dump(mode="json", exclude_none=True)
             if isinstance(payload, RedactionPreviewRequest)
-            else dict(payload)
+            else dict(payload),
         )
-        response_payload = self._request(
+        response_payload = self._request_object(
             "POST",
             ServerEndpoints.PREVIEW_REDACTION,
             json=request_payload,
@@ -254,13 +262,19 @@ class Client(ClientHttpMixin, ClientMemoryMixin):
     def __enter__(self) -> Client:
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        _ = (exc_type, exc_val, exc_tb)
         self.close()
 
     # MARK: - Utilities
 
     @staticmethod
-    def sanitize_pubsub(pubsub: dict | None) -> dict | None:
+    def sanitize_pubsub(pubsub: JsonObject | None) -> JsonObject | None:
         """Redact sensitive fields from pubsub configuration for logging."""
         if not isinstance(pubsub, dict):
             return pubsub

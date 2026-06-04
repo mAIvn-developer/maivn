@@ -3,6 +3,8 @@ Provides rich or simple console output with progress and live updates.
 Automatically selects the appropriate implementation based on rich availability.
 """
 
+# pyright: strict
+
 from __future__ import annotations
 
 # MARK: - Imports

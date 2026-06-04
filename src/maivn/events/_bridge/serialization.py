@@ -1,20 +1,45 @@
 """Serialization helpers for bridge SSE payloads."""
 
+# pyright: strict
 from __future__ import annotations
 
-import dataclasses
 import json
 import logging
+from dataclasses import Field, asdict
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import ClassVar, Protocol, TypeGuard, cast, runtime_checkable
 from uuid import UUID
 
-logger = logging.getLogger("maivn.events._bridge")
+from maivn_shared.infrastructure.logging import LoggerProtocol
+from typing_extensions import override
+
+logger: LoggerProtocol = cast(
+    LoggerProtocol,
+    cast(object, logging.getLogger("maivn.events._bridge")),
+)
 
 
 # MARK: JSON Helpers
+
+
+@runtime_checkable
+class _SupportsModelDump(Protocol):
+    def model_dump(self) -> object: ...
+
+
+@runtime_checkable
+class _SupportsDictMethod(Protocol):
+    def dict(self) -> object: ...
+
+
+class _DataclassInstance(Protocol):
+    __dataclass_fields__: ClassVar[dict[str, Field[object]]]
+
+
+def _is_dataclass_instance(value: object) -> TypeGuard[_DataclassInstance]:
+    return not isinstance(value, type) and hasattr(type(value), "__dataclass_fields__")
 
 
 class _BridgeJSONEncoder(json.JSONEncoder):
@@ -26,7 +51,8 @@ class _BridgeJSONEncoder(json.JSONEncoder):
     (with ``replace`` errors) so binary payloads don't crash the stream.
     """
 
-    def default(self, o: Any) -> Any:
+    @override
+    def default(self, o: object) -> object:
         if isinstance(o, datetime | date):
             return o.isoformat()
         if isinstance(o, UUID):
@@ -34,30 +60,29 @@ class _BridgeJSONEncoder(json.JSONEncoder):
         if isinstance(o, Decimal):
             return str(o)
         if isinstance(o, set | frozenset):
-            return sorted(o, key=repr)
+            values = cast(set[object] | frozenset[object], o)
+            return sorted(values, key=repr)
         if isinstance(o, bytes | bytearray):
             return o.decode("utf-8", errors="replace")
         if isinstance(o, Enum):
-            return o.value
-        if dataclasses.is_dataclass(o) and not isinstance(o, type):
-            return dataclasses.asdict(o)
-        # Pydantic v2 / v1 — try without importing the dependency.
-        model_dump = getattr(o, "model_dump", None)
-        if callable(model_dump):
+            return cast(object, o.value)
+        if _is_dataclass_instance(o):
+            return cast(object, asdict(o))
+        # Pydantic v2 / v1 - try without importing the dependency.
+        if isinstance(o, _SupportsModelDump):
             try:
-                return model_dump()
-            except Exception:  # noqa: BLE001
+                return o.model_dump()
+            except Exception:  # noqa: BLE001 - model dumps are best-effort fallbacks.
                 pass
-        dict_method = getattr(o, "dict", None)
-        if callable(dict_method) and not isinstance(o, type):
+        if isinstance(o, _SupportsDictMethod) and not isinstance(o, type):
             try:
-                return dict_method()
-            except Exception:  # noqa: BLE001
+                return o.dict()
+            except Exception:  # noqa: BLE001 - legacy dict() dumps are best-effort fallbacks.
                 pass
         return str(o)
 
 
-def safe_json_dumps(payload: dict[str, Any]) -> str:
+def safe_json_dumps(payload: dict[str, object]) -> str:
     """Serialize payloads without breaking the SSE stream.
 
     Best-effort. If the payload itself is fundamentally unserializable
@@ -68,13 +93,13 @@ def safe_json_dumps(payload: dict[str, Any]) -> str:
     """
     try:
         return json.dumps(payload, cls=_BridgeJSONEncoder)
-    except Exception:
+    except Exception:  # noqa: BLE001 - serialization must degrade to a stable error envelope.
         logger.exception("Failed to serialize SSE payload")
         return json.dumps({"event": "error", "message": "Failed to serialize event payload"})
 
 
 def build_safe_event_payload(
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
     event_id: str,
     event_type: str,
@@ -93,8 +118,8 @@ def build_safe_event_payload(
     """
     try:
         return json.dumps(payload, cls=_BridgeJSONEncoder)
-    except Exception as exc:
-        logger.exception("Failed to serialize SSE payload for event %s (%s)", event_id, event_type)
+    except Exception as exc:  # noqa: BLE001 - never let one bad event break the SSE stream.
+        logger.exception(f"Failed to serialize SSE payload for event {event_id} ({event_type})")
         fallback = {
             "id": event_id,
             "type": event_type,
@@ -107,7 +132,7 @@ def build_safe_event_payload(
         }
         try:
             return json.dumps(fallback)
-        except Exception:
+        except Exception:  # noqa: BLE001 - the minimal fallback should be impossible to reject.
             # Should be impossible, but never break the SSE stream.
             return json.dumps(
                 {

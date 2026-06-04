@@ -2,9 +2,12 @@
 Exposed via ``maivn.__version__`` for tooling and client diagnostics.
 """
 
-# MARK: Version
+# pyright: strict
 from __future__ import annotations
 
 __all__ = ["__version__"]
+
+
+# MARK: Version
 
 __version__ = "0.3.0"

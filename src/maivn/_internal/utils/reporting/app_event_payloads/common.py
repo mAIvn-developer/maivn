@@ -1,6 +1,9 @@
+# pyright: strict
 from __future__ import annotations
 
-from typing import Any
+from typing import cast
+
+from pydantic import JsonValue
 
 # MARK: Configuration
 
@@ -8,14 +11,25 @@ from typing import Any
 APP_EVENT_CONTRACT_VERSION = "v1"
 
 
+# MARK: Types
+
+JsonObject = dict[str, JsonValue]
+
+
 # MARK: Shared Helpers
 
 
-def clean_text(value: Any) -> str | None:
+def clean_text(value: object) -> str | None:
     if not isinstance(value, str):
         return None
     cleaned = value.strip()
     return cleaned or None
+
+
+def copy_json_object(value: object) -> JsonObject:
+    if not isinstance(value, dict):
+        return {}
+    return cast(JsonObject, value).copy()
 
 
 def build_scope(
@@ -25,7 +39,7 @@ def build_scope(
     scope_type: str | None = None,
     agent_name: str | None = None,
     swarm_name: str | None = None,
-) -> dict[str, Any] | None:
+) -> JsonObject | None:
     normalized_type = clean_text(scope_type)
     if normalized_type is not None:
         normalized_type = normalized_type.lower()
@@ -45,7 +59,7 @@ def build_scope(
             normalized_type = "agent"
             normalized_name = normalized_name or agent_candidate
 
-    scope: dict[str, Any] = {}
+    scope: JsonObject = {}
     if normalized_type is not None:
         scope["type"] = normalized_type
     if normalized_id is not None:
@@ -60,8 +74,8 @@ def build_participant(
     participant_key: str | None = None,
     participant_name: str | None = None,
     participant_role: str | None = None,
-) -> dict[str, Any] | None:
-    participant: dict[str, Any] = {}
+) -> JsonObject | None:
+    participant: JsonObject = {}
     normalized_key = clean_text(participant_key)
     normalized_name = clean_text(participant_name)
     normalized_role = clean_text(participant_role)
@@ -75,13 +89,13 @@ def build_participant(
 
 
 def attach_common_fields(
-    payload: dict[str, Any],
+    payload: JsonObject,
     *,
     event_name: str,
     event_kind: str,
-    scope: dict[str, Any] | None,
-    participant: dict[str, Any] | None,
-) -> dict[str, Any]:
+    scope: JsonObject | None,
+    participant: JsonObject | None,
+) -> JsonObject:
     payload["contract_version"] = APP_EVENT_CONTRACT_VERSION
     payload["event_name"] = event_name
     payload["event_kind"] = event_kind

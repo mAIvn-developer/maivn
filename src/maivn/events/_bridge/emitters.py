@@ -1,10 +1,13 @@
 """Typed bridge emitters backed by canonical payload builders."""
 
+# pyright: strict
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
-from typing import Any
+from typing import cast
+
+from pydantic import JsonValue
 
 from ..._internal.utils.reporting.app_event_payloads import (
     build_agent_assignment_payload,
@@ -21,7 +24,9 @@ from ..._internal.utils.reporting.app_event_payloads import (
     build_tool_event_payload,
 )
 
-EmitFn = Callable[[str, dict[str, Any]], Awaitable[None]]
+EventPayload = dict[str, object]
+JsonObject = dict[str, JsonValue]
+EmitFn = Callable[[str, EventPayload], Awaitable[None]]
 
 
 # MARK: Tool Emitters
@@ -33,8 +38,8 @@ async def emit_tool_event(
     tool_name: str,
     tool_id: str,
     status: str,
-    args: dict[str, Any] | None = None,
-    result: Any = None,
+    args: EventPayload | None = None,
+    result: object = None,
     error: str | None = None,
     agent_name: str | None = None,
     swarm_name: str | None = None,
@@ -42,16 +47,19 @@ async def emit_tool_event(
 ) -> None:
     await emit(
         "tool_event",
-        build_tool_event_payload(
-            tool_name=tool_name,
-            tool_id=tool_id,
-            status=status,
-            args=args,
-            result=result,
-            error=error,
-            agent_name=agent_name,
-            swarm_name=swarm_name,
-            tool_type=tool_type,
+        cast(
+            EventPayload,
+            build_tool_event_payload(
+                tool_name=tool_name,
+                tool_id=tool_id,
+                status=status,
+                args=args,
+                result=cast(JsonValue, result),
+                error=error,
+                agent_name=agent_name,
+                swarm_name=swarm_name,
+                tool_type=tool_type,
+            ),
         ),
     )
 
@@ -61,18 +69,21 @@ async def emit_system_tool_start(
     *,
     tool_type: str,
     tool_id: str,
-    params: dict[str, Any] | None = None,
+    params: EventPayload | None = None,
     agent_name: str | None = None,
     swarm_name: str | None = None,
 ) -> None:
     await emit(
         "system_tool_start",
-        build_system_tool_start_payload(
-            tool_type=tool_type,
-            tool_id=tool_id,
-            params=params,
-            agent_name=agent_name,
-            swarm_name=swarm_name,
+        cast(
+            EventPayload,
+            build_system_tool_start_payload(
+                tool_type=tool_type,
+                tool_id=tool_id,
+                params=params,
+                agent_name=agent_name,
+                swarm_name=swarm_name,
+            ),
         ),
     )
 
@@ -86,10 +97,13 @@ async def emit_system_tool_chunk(
 ) -> None:
     await emit(
         "system_tool_chunk",
-        build_system_tool_chunk_payload(
-            tool_id=tool_id,
-            text=text,
-            progress=progress,
+        cast(
+            EventPayload,
+            build_system_tool_chunk_payload(
+                tool_id=tool_id,
+                text=text,
+                progress=progress,
+            ),
         ),
     )
 
@@ -98,11 +112,14 @@ async def emit_system_tool_complete(
     emit: EmitFn,
     *,
     tool_id: str,
-    result: Any,
+    result: object,
 ) -> None:
     await emit(
         "system_tool_complete",
-        build_system_tool_complete_payload(tool_id=tool_id, result=result),
+        cast(
+            EventPayload,
+            build_system_tool_complete_payload(tool_id=tool_id, result=cast(JsonValue, result)),
+        ),
     )
 
 
@@ -114,10 +131,18 @@ async def emit_assistant_chunk(
     *,
     assistant_id: str,
     text: str,
+    replace_content: bool = False,
 ) -> None:
     await emit(
         "assistant_chunk",
-        build_assistant_chunk_payload(assistant_id=assistant_id, text=text),
+        cast(
+            EventPayload,
+            build_assistant_chunk_payload(
+                assistant_id=assistant_id,
+                text=text,
+                replace_content=replace_content,
+            ),
+        ),
     )
 
 
@@ -129,7 +154,10 @@ async def emit_status_message(
 ) -> None:
     await emit(
         "status_message",
-        build_status_message_payload(assistant_id=assistant_id, message=message),
+        cast(
+            EventPayload,
+            build_status_message_payload(assistant_id=assistant_id, message=message),
+        ),
     )
 
 
@@ -150,19 +178,22 @@ async def emit_interrupt_required(
 ) -> None:
     await emit(
         "interrupt_required",
-        build_interrupt_required_payload(
-            interrupt_id=interrupt_id,
-            checkpoint_id=checkpoint_id,
-            data_key=data_key,
-            prompt=prompt,
-            tool_name=tool_name,
-            arg_name=arg_name or data_key,
-            assignment_id=assignment_id,
-            interrupt_number=interrupt_number,
-            total_interrupts=total_interrupts,
-            input_type=input_type,
-            choices=choices,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+        cast(
+            EventPayload,
+            build_interrupt_required_payload(
+                interrupt_id=interrupt_id,
+                checkpoint_id=checkpoint_id,
+                data_key=data_key,
+                prompt=prompt,
+                tool_name=tool_name,
+                arg_name=arg_name or data_key,
+                assignment_id=assignment_id,
+                interrupt_number=interrupt_number,
+                total_interrupts=total_interrupts,
+                input_type=input_type,
+                choices=choices,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            ),
         ),
     )
 
@@ -176,18 +207,21 @@ async def emit_agent_assignment(
     swarm_name: str | None = None,
     task: str | None = None,
     error: str | None = None,
-    result: Any | None = None,
+    result: object | None = None,
 ) -> None:
     await emit(
         "agent_assignment",
-        build_agent_assignment_payload(
-            assignment_id=assignment_id,
-            agent_name=agent_name,
-            status=status,
-            task=task,
-            swarm_name=swarm_name,
-            error=error,
-            result=result,
+        cast(
+            EventPayload,
+            build_agent_assignment_payload(
+                assignment_id=assignment_id,
+                agent_name=agent_name,
+                status=status,
+                task=task,
+                swarm_name=swarm_name,
+                error=error,
+                result=cast(JsonValue, result),
+            ),
         ),
     )
 
@@ -200,34 +234,51 @@ async def emit_enrichment(
     scope_id: str | None = None,
     scope_name: str | None = None,
     scope_type: str | None = None,
-    memory: dict[str, Any] | None = None,
-    redaction: dict[str, Any] | None = None,
+    memory: EventPayload | None = None,
+    redaction: EventPayload | None = None,
+    reevaluate: EventPayload | None = None,
 ) -> None:
     await emit(
         "enrichment",
-        build_enrichment_payload(
-            phase=phase,
-            message=message,
-            scope_id=scope_id,
-            scope_name=scope_name,
-            scope_type=scope_type,
-            memory=memory,
-            redaction=redaction,
+        cast(
+            EventPayload,
+            build_enrichment_payload(
+                phase=phase,
+                message=message,
+                scope_id=scope_id,
+                scope_name=scope_name,
+                scope_type=scope_type,
+                memory=cast(JsonObject | None, memory),
+                redaction=cast(JsonObject | None, redaction),
+                reevaluate=cast(JsonObject | None, reevaluate),
+            ),
         ),
     )
 
 
-async def emit_final(emit: EmitFn, *, response: str, result: Any = None) -> None:
-    await emit("final", build_final_payload(response=response, result=result))
+async def emit_final(emit: EmitFn, *, response: str, result: object = None) -> None:
+    await emit(
+        "final",
+        cast(
+            EventPayload,
+            build_final_payload(response=response, result=cast(JsonValue, result)),
+        ),
+    )
 
 
 async def emit_error(
     emit: EmitFn,
     *,
     error: str,
-    details: dict[str, Any] | None = None,
+    details: EventPayload | None = None,
 ) -> None:
-    await emit("error", build_error_payload(error=error, details=details))
+    await emit(
+        "error",
+        cast(
+            EventPayload,
+            build_error_payload(error=error, details=cast(JsonObject | None, details)),
+        ),
+    )
 
 
 # MARK: Hook Emitters
@@ -252,15 +303,18 @@ async def emit_hook_fired(
     """
     await emit(
         "hook_fired",
-        build_hook_fired_payload(
-            name=name,
-            stage=stage,
-            status=status,
-            target_type=target_type,
-            target_id=target_id,
-            target_name=target_name,
-            source=source,
-            error=error,
-            elapsed_ms=elapsed_ms,
+        cast(
+            EventPayload,
+            build_hook_fired_payload(
+                name=name,
+                stage=stage,
+                status=status,
+                target_type=target_type,
+                target_id=target_id,
+                target_name=target_name,
+                source=source,
+                error=error,
+                elapsed_ms=elapsed_ms,
+            ),
         ),
     )

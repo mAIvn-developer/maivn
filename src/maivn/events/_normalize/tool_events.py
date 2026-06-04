@@ -1,12 +1,13 @@
+# pyright: strict
 """Tool event normalization handlers."""
 
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import cast
 
 from ..._internal.utils.reporting.app_event_payloads import build_tool_event_payload
-from .._models import NormalizedStreamState
+from .._models import JsonObject, NormalizedStreamState
 from .context import NormalizationOptions
 from .helpers import clean_text, coerce_mapping, model_result_as_mapping
 from .tooling import (
@@ -21,8 +22,8 @@ from .tooling import (
 
 
 def _resolve_tool_event_id(
-    payload: dict[str, Any],
-    tool_call: dict[str, Any],
+    payload: JsonObject,
+    tool_call: JsonObject,
     tool_index: int,
 ) -> str:
     for key in ("tool_id", "id"):
@@ -39,24 +40,31 @@ def _resolve_tool_event_id(
     return tool_id
 
 
-def handle_tool_event(
-    payload: dict[str, Any],
-    state: NormalizedStreamState,
-    options: NormalizationOptions,
-) -> list[dict[str, Any]]:
-    value = coerce_mapping(payload.get("value"))
+def _extract_tool_calls(value: JsonObject) -> list[JsonObject]:
     raw_tool_calls = value.get("tool_calls")
     tool_calls = (
-        [tool_call for tool_call in raw_tool_calls if isinstance(tool_call, dict)]
+        [cast(JsonObject, tool_call) for tool_call in raw_tool_calls if isinstance(tool_call, dict)]
         if isinstance(raw_tool_calls, list)
         else []
     )
-    if not tool_calls:
-        single = value.get("tool_call")
-        if isinstance(single, dict):
-            tool_calls = [single]
+    if tool_calls:
+        return tool_calls
 
-    normalized_payloads: list[dict[str, Any]] = []
+    single = value.get("tool_call")
+    if isinstance(single, dict):
+        return [cast(JsonObject, single)]
+    return []
+
+
+def handle_tool_event(
+    payload: JsonObject,
+    state: NormalizedStreamState,
+    options: NormalizationOptions,
+) -> list[JsonObject]:
+    value = coerce_mapping(payload.get("value"))
+    tool_calls = _extract_tool_calls(value)
+
+    normalized_payloads: list[JsonObject] = []
     for tool_index, tool_call in enumerate(tool_calls):
         tool_id = _resolve_tool_event_id(payload, tool_call, tool_index)
         if not tool_id or tool_id in state.reported_tool_ids:
@@ -92,10 +100,10 @@ def handle_tool_event(
 
 
 def handle_model_tool_complete_event(
-    payload: dict[str, Any],
+    payload: JsonObject,
     state: NormalizedStreamState,
     options: NormalizationOptions,
-) -> list[dict[str, Any]]:
+) -> list[JsonObject]:
     tool_name = clean_text(payload.get("tool_name")) or "model_tool"
     tool_id = clean_text(payload.get("event_id")) or str(uuid.uuid4())
     state.pending_model_tools.append({"tool_name": tool_name, "tool_id": tool_id})

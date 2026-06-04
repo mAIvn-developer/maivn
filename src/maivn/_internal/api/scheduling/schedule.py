@@ -1,29 +1,39 @@
 """Schedule iterators for cron, interval, and one-shot triggers."""
 
+# pyright: strict
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from datetime import datetime, timedelta, timezone, tzinfo
+from typing import Protocol, cast
+from zoneinfo import ZoneInfo
 
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    pass
+from typing_extensions import override
 
-try:
-    from zoneinfo import ZoneInfo as _ZoneInfo
-except ImportError:  # pragma: no cover - py<3.9 fallback (unsupported)
-    _ZoneInfo = None  # type: ignore[assignment]
+# MARK: Types
 
 
-def resolve_timezone(tz: str | timezone | None) -> timezone:
+class _CronIterator(Protocol):
+    def get_next(self, ret_type: type[datetime]) -> datetime: ...
+
+
+class _CroniterClass(Protocol):
+    is_valid: Callable[[str], bool]
+
+    def __call__(self, expression: str, start_time: datetime) -> _CronIterator: ...
+
+
+# MARK: Timezones
+
+
+def resolve_timezone(tz: str | timezone | None) -> tzinfo:
     """Resolve ``tz`` shorthand into a tzinfo-compatible value."""
     if tz is None:
         return timezone.utc
     if isinstance(tz, timezone):
         return tz
-    if _ZoneInfo is None:
-        raise RuntimeError("zoneinfo is unavailable; pass a datetime.timezone instance")
-    return _ZoneInfo(tz)  # type: ignore[return-value]
+    return ZoneInfo(tz)
 
 
 # MARK: - Schedule protocol
@@ -32,7 +42,7 @@ def resolve_timezone(tz: str | timezone | None) -> timezone:
 class Schedule(ABC):
     """Iterates the sequence of scheduled fire times."""
 
-    tz: timezone
+    tz: tzinfo
 
     @abstractmethod
     def next_after(self, after: datetime) -> datetime | None:
@@ -60,12 +70,14 @@ class CronSchedule(Schedule):
     def __init__(self, expression: str, tz: str | timezone | None = None) -> None:
         from croniter import croniter
 
-        self._croniter_cls = croniter
-        if not croniter.is_valid(expression):
+        croniter_cls = cast(_CroniterClass, cast(object, croniter))
+        self._croniter_cls: _CroniterClass = croniter_cls
+        if not croniter_cls.is_valid(expression):
             raise ValueError(f"Invalid cron expression: {expression!r}")
-        self.expression = expression
-        self.tz = resolve_timezone(tz)
+        self.expression: str = expression
+        self.tz: tzinfo = resolve_timezone(tz)
 
+    @override
     def next_after(self, after: datetime) -> datetime | None:
         if after.tzinfo is None:
             after = after.replace(tzinfo=self.tz)
@@ -90,16 +102,17 @@ class IntervalSchedule(Schedule):
     ) -> None:
         if interval <= timedelta(0):
             raise ValueError("IntervalSchedule.interval must be positive")
-        self.interval = interval
-        self.tz = resolve_timezone(tz)
+        self.interval: timedelta = interval
+        self.tz: tzinfo = resolve_timezone(tz)
         if start is None:
             start = datetime.now(tz=self.tz)
         elif start.tzinfo is None:
             start = start.replace(tzinfo=self.tz)
         else:
             start = start.astimezone(self.tz)
-        self.start = start
+        self.start: datetime = start
 
+    @override
     def next_after(self, after: datetime) -> datetime | None:
         if after.tzinfo is None:
             after = after.replace(tzinfo=self.tz)
@@ -119,13 +132,14 @@ class AtSchedule(Schedule):
     """Single scheduled fire time."""
 
     def __init__(self, when: datetime, *, tz: str | timezone | None = None) -> None:
-        self.tz = resolve_timezone(tz)
+        self.tz: tzinfo = resolve_timezone(tz)
         if when.tzinfo is None:
             when = when.replace(tzinfo=self.tz)
         else:
             when = when.astimezone(self.tz)
-        self.when = when
+        self.when: datetime = when
 
+    @override
     def next_after(self, after: datetime) -> datetime | None:
         if after.tzinfo is None:
             after = after.replace(tzinfo=self.tz)
@@ -135,6 +149,8 @@ class AtSchedule(Schedule):
             return None
         return self.when
 
+
+# MARK: Exports
 
 __all__ = [
     "AtSchedule",

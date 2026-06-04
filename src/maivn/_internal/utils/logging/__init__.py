@@ -1,5 +1,6 @@
 """Maivn SDK logging infrastructure."""
 
+# pyright: strict
 from __future__ import annotations
 
 # MARK: - Exports

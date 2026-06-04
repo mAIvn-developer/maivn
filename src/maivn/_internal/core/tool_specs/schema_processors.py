@@ -4,11 +4,19 @@ Handles processing of $ref, array, tuple, object, and anyOf schema types,
 converting nested Pydantic model references into tool dependency schemas.
 """
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import TypeAlias, cast
+
+from pydantic import JsonValue
 
 from .dependency_detector import DependencyDetector
+
+# MARK: Types
+
+JsonObject: TypeAlias = dict[str, JsonValue]
 
 # MARK: Schema Type Processor
 
@@ -23,7 +31,7 @@ class SchemaTypeProcessor:
     def __init__(
         self,
         dependency_detector: DependencyDetector,
-        resolve_tool_id: Any,
+        resolve_tool_id: Callable[[str], str],
     ) -> None:
         """Initialize the schema type processor.
 
@@ -31,12 +39,12 @@ class SchemaTypeProcessor:
             dependency_detector: Detector for building dependency schemas.
             resolve_tool_id: Callable that resolves a model name to a tool ID.
         """
-        self._dependency_detector = dependency_detector
-        self._resolve_tool_id = resolve_tool_id
+        self._dependency_detector: DependencyDetector = dependency_detector
+        self._resolve_tool_id: Callable[[str], str] = resolve_tool_id
 
     # MARK: - Dispatch
 
-    def process_schema_by_type(self, prop_schema: dict[str, Any]) -> dict[str, Any]:
+    def process_schema_by_type(self, prop_schema: JsonObject) -> JsonObject:
         """Process schema based on its type."""
         if "$ref" in prop_schema:
             return self._process_ref(prop_schema)
@@ -57,9 +65,9 @@ class SchemaTypeProcessor:
 
     # MARK: - Ref Processing
 
-    def _process_ref(self, prop_schema: dict[str, Any]) -> dict[str, Any]:
+    def _process_ref(self, prop_schema: JsonObject) -> JsonObject:
         """Process a $ref property (nested model reference)."""
-        ref_path = prop_schema["$ref"]
+        ref_path = cast(str, prop_schema["$ref"])
         if not ref_path.startswith("#/$defs/"):
             return prop_schema
 
@@ -74,7 +82,7 @@ class SchemaTypeProcessor:
 
     # MARK: - Array Processing
 
-    def _process_array(self, prop_schema: dict[str, Any]) -> dict[str, Any]:
+    def _process_array(self, prop_schema: JsonObject) -> JsonObject:
         """Process an array property that may contain model items."""
         if "prefixItems" in prop_schema:
             return self._process_tuple(prop_schema)
@@ -87,19 +95,19 @@ class SchemaTypeProcessor:
             return prop_schema
 
         result = prop_schema.copy()
-        result["items"] = self.process_schema_by_type(items_schema)
+        result["items"] = self.process_schema_by_type(cast(JsonObject, items_schema))
         return result
 
-    def _process_tuple(self, prop_schema: dict[str, Any]) -> dict[str, Any]:
+    def _process_tuple(self, prop_schema: JsonObject) -> JsonObject:
         """Process a tuple property with prefixItems."""
-        prefix_items = prop_schema.get("prefixItems", [])
-        processed_items = []
+        prefix_items = cast(list[JsonValue], prop_schema.get("prefixItems", []))
+        processed_items: list[JsonValue] = []
 
         for item_schema in prefix_items:
             if not isinstance(item_schema, dict):
                 processed_items.append(item_schema)
                 continue
-            processed_items.append(self.process_schema_by_type(item_schema))
+            processed_items.append(self.process_schema_by_type(cast(JsonObject, item_schema)))
 
         result = prop_schema.copy()
         result["prefixItems"] = processed_items
@@ -107,7 +115,7 @@ class SchemaTypeProcessor:
 
     # MARK: - Object Processing
 
-    def _process_object(self, prop_schema: dict[str, Any]) -> dict[str, Any]:
+    def _process_object(self, prop_schema: JsonObject) -> JsonObject:
         """Process an object property with additionalProperties."""
         additional_schema = prop_schema["additionalProperties"]
 
@@ -115,17 +123,22 @@ class SchemaTypeProcessor:
             return prop_schema
 
         result = prop_schema.copy()
-        result["additionalProperties"] = self.process_schema_by_type(additional_schema)
+        result["additionalProperties"] = self.process_schema_by_type(
+            cast(JsonObject, additional_schema)
+        )
         return result
 
     # MARK: - Union Processing
 
-    def _process_union(self, prop_schema: dict[str, Any], union_key: str) -> dict[str, Any]:
+    def _process_union(self, prop_schema: JsonObject, union_key: str) -> JsonObject:
         """Process anyOf/oneOf variants recursively, preserving non-model branches."""
         result = prop_schema.copy()
+        variants = cast(list[JsonValue], prop_schema.get(union_key, []))
         result[union_key] = [
-            self.process_schema_by_type(variant) if isinstance(variant, dict) else variant
-            for variant in prop_schema.get(union_key, [])
+            self.process_schema_by_type(cast(JsonObject, variant))
+            if isinstance(variant, dict)
+            else variant
+            for variant in variants
         ]
         return result
 

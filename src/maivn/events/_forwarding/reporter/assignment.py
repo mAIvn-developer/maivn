@@ -1,43 +1,74 @@
 """Forwarders for agent assignment and enrichment events."""
 
+# pyright: strict
 from __future__ import annotations
 
 import inspect
-from typing import Any
+from typing import Protocol, cast
 
 from ..._models import AppEvent
-from ..payload import coerce_mapping, normalized_text
+from ..payload import EventPayload, coerce_mapping, normalized_text
 from ..state import NormalizedEventForwardingState
+
+# MARK: Callback Protocols
+
+
+class AgentAssignmentCallback(Protocol):
+    def __call__(
+        self,
+        *,
+        agent_name: str,
+        status: str,
+        assignment_id: str,
+        swarm_name: str | None = None,
+        error: str | None = None,
+        result: object | None = None,
+    ) -> None: ...
+
+
+class EnrichmentCallback(Protocol):
+    def __call__(self, **kwargs: object) -> None: ...
+
+
+class PhaseChangeCallback(Protocol):
+    def __call__(self, phase: str) -> None: ...
+
+
+# MARK: Assignment Forwarding
 
 
 def forward_agent_assignment(
     event: AppEvent,
     *,
-    payload: dict[str, Any],
-    reporter: Any,
+    payload: EventPayload,
+    reporter: object,
     state: NormalizedEventForwardingState,
 ) -> None:
     _ = state
-    report_agent_assignment = getattr(reporter, "report_agent_assignment", None)
-    if not callable(report_agent_assignment):
+    callback = getattr(reporter, "report_agent_assignment", None)
+    if not callable(callback):
         return
+    report_agent_assignment = cast(AgentAssignmentCallback, callback)
 
     assignment_id = normalized_text(payload.get("assignment_id")) or normalized_text(
-        getattr(event.assignment, "id", None)
+        event.assignment.id if event.assignment is not None else None
     )
     agent_name = normalized_text(payload.get("agent_name")) or normalized_text(
-        getattr(event.assignment, "agent_name", None)
+        event.assignment.agent_name if event.assignment is not None else None
     )
     status = normalized_text(payload.get("status")) or normalized_text(
-        getattr(event.assignment, "status", None)
+        event.assignment.status if event.assignment is not None else None
     )
     swarm_name = normalized_text(payload.get("swarm_name")) or normalized_text(
-        getattr(event.assignment, "swarm_name", None)
+        event.assignment.swarm_name if event.assignment is not None else None
     )
     error = normalized_text(payload.get("error")) or normalized_text(
-        getattr(event.assignment, "error", None)
+        event.assignment.error if event.assignment is not None else None
     )
-    result = payload.get("result", getattr(event.assignment, "result", None))
+    result = payload.get(
+        "result",
+        cast(object, event.assignment.result) if event.assignment is not None else None,
+    )
 
     if not agent_name or not status:
         return
@@ -52,49 +83,55 @@ def forward_agent_assignment(
     )
 
 
+# MARK: Enrichment Forwarding
+
+
 def forward_enrichment(
     event: AppEvent,
     *,
-    payload: dict[str, Any],
-    reporter: Any,
+    payload: EventPayload,
+    reporter: object,
     state: NormalizedEventForwardingState,
 ) -> None:
+    enrichment = event.enrichment
+    scope = event.scope
     phase = normalized_text(payload.get("phase")) or normalized_text(
-        getattr(event.enrichment, "phase", None)
+        enrichment.phase if enrichment is not None else None
     )
     message = normalized_text(payload.get("message")) or normalized_text(
-        getattr(event.enrichment, "message", None)
+        enrichment.message if enrichment is not None else None
     )
     if not phase:
         return
 
-    report_enrichment = getattr(reporter, "report_enrichment", None)
-    if not callable(report_enrichment):
-        report_phase_change = getattr(reporter, "report_phase_change", None)
-        if callable(report_phase_change):
-            report_phase_change(phase)
+    enrichment_callback = getattr(reporter, "report_enrichment", None)
+    if not callable(enrichment_callback):
+        phase_change_callback = getattr(reporter, "report_phase_change", None)
+        if callable(phase_change_callback):
+            cast(PhaseChangeCallback, phase_change_callback)(phase)
         return
+    report_enrichment = cast(EnrichmentCallback, enrichment_callback)
 
     scope_id = normalized_text(payload.get("scope_id")) or normalized_text(
-        getattr(event.scope, "id", None)
+        scope.id if scope is not None else None
     )
     scope_name = normalized_text(payload.get("scope_name")) or normalized_text(
-        getattr(event.scope, "name", None)
+        scope.name if scope is not None else None
     )
     scope_type = normalized_text(payload.get("scope_type")) or normalized_text(
-        getattr(event.scope, "type", None)
+        scope.type if scope is not None else None
     )
     memory = coerce_mapping(payload.get("memory")) or coerce_mapping(
-        getattr(event.enrichment, "memory", None)
+        cast(object, enrichment.memory) if enrichment is not None else None
     )
     redaction = coerce_mapping(payload.get("redaction")) or coerce_mapping(
-        getattr(event.enrichment, "redaction", None)
+        cast(object, enrichment.redaction) if enrichment is not None else None
     )
     supports_scope, supports_memory, supports_redaction = _enrichment_support(
         reporter,
         state=state,
     )
-    kwargs: dict[str, Any] = {
+    kwargs: dict[str, object] = {
         "phase": phase,
         "message": message or phase,
     }
@@ -110,7 +147,7 @@ def forward_enrichment(
 
 
 def _enrichment_support(
-    reporter: Any,
+    reporter: object,
     *,
     state: NormalizedEventForwardingState,
 ) -> tuple[bool, bool, bool]:
@@ -124,9 +161,15 @@ def _enrichment_support(
     if cached is not None:
         return cached
 
+    report_enrichment = getattr(reporter, "report_enrichment", None)
+    if not callable(report_enrichment):
+        cached = (False, False, False)
+        state.enrichment_support_by_reporter_type[reporter_type] = cached
+        return cached
+
     try:
-        params = inspect.signature(reporter.report_enrichment).parameters
-    except (AttributeError, TypeError, ValueError):
+        params = inspect.signature(report_enrichment).parameters
+    except (TypeError, ValueError):
         cached = (False, False, False)
     else:
         accepts_var_kwargs = any(

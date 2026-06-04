@@ -4,10 +4,19 @@ This module provides security-focused validation to prevent injection attacks
 and ensure data integrity.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 import re
-from typing import Any, ClassVar
+from collections.abc import Mapping
+from typing import ClassVar, cast
+
+from pydantic import JsonValue
+
+# MARK: Types
+
+JsonObject = dict[str, JsonValue]
+JsonArray = list[JsonValue]
 
 
 class InputValidator:
@@ -21,19 +30,19 @@ class InputValidator:
 
     # More specific SQL injection patterns to avoid false positives on natural language.
     # Targets actual injection attempts rather than just SQL keywords in prose.
-    SQL_INJECTION_PATTERN: ClassVar[re.Pattern[str]] = re.compile(
-        r"("
-        r"'\s*(OR|AND)\s+['\d]|"  # ' OR '1 / ' AND 1
+    SQL_INJECTION_PATTERNS: ClassVar[tuple[str, ...]] = (
+        r"'\s*(OR|AND)\s+['\d]",  # ' OR '1 / ' AND 1
         # DDL injection
-        r";\s*(DROP|DELETE|INSERT|UPDATE|CREATE|ALTER|TRUNCATE)\s+"  # DDL injection
-        r"(TABLE|DATABASE|INDEX|VIEW)\b|"  # DDL injection
-        r"UNION\s+(ALL\s+)?SELECT\s|"  # UNION SELECT injection
-        r"--\s*$|"  # SQL comment at end of string
-        r"\/\*.*?\*\/|"  # Block comments /* */
-        r"\bxp_\w+|"  # Extended stored procedures
-        r"\bsp_\w+|"  # System stored procedures
-        r"EXEC\s*\(|EXECUTE\s*\("  # EXEC() calls
-        r")",
+        r";\s*(DROP|DELETE|INSERT|UPDATE|CREATE|ALTER|TRUNCATE)\s+(TABLE|DATABASE|INDEX|VIEW)\b",
+        r"UNION\s+(ALL\s+)?SELECT\s",  # UNION SELECT injection
+        r"--\s*$",  # SQL comment at end of string
+        r"\/\*.*?\*\/",  # Block comments /* */
+        r"\bxp_\w+",  # Extended stored procedures
+        r"\bsp_\w+",  # System stored procedures
+        r"EXEC\s*\(|EXECUTE\s*\(",  # EXEC() calls
+    )
+    SQL_INJECTION_PATTERN: ClassVar[re.Pattern[str]] = re.compile(
+        "|".join(SQL_INJECTION_PATTERNS),
         re.IGNORECASE,
     )
 
@@ -52,7 +61,7 @@ class InputValidator:
     # MARK: - Public API
 
     @classmethod
-    def validate_tool_arguments(cls, args: dict[str, Any]) -> dict[str, Any]:
+    def validate_tool_arguments(cls, args: JsonObject) -> JsonObject:
         """Validate tool arguments for safety.
 
         Args:
@@ -64,7 +73,7 @@ class InputValidator:
         Raises:
             ValueError: If validation fails
         """
-        return cls.validate_dict(args, "tool_arguments")
+        return cls.validate_dict(cast(Mapping[object, JsonValue], args), "tool_arguments")
 
     @classmethod
     def set_security_checks(cls, enabled: bool) -> None:
@@ -98,10 +107,10 @@ class InputValidator:
     @classmethod
     def validate_dict(
         cls,
-        value: dict[str, Any],
+        value: Mapping[object, JsonValue],
         field_name: str = "dict",
         depth: int = 0,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         """Validate a dictionary recursively.
 
         Args:
@@ -124,10 +133,10 @@ class InputValidator:
     @classmethod
     def validate_list(
         cls,
-        value: list[Any],
+        value: JsonArray,
         field_name: str = "list",
         depth: int = 0,
-    ) -> list[Any]:
+    ) -> JsonArray:
         """Validate a list recursively.
 
         Args:
@@ -150,7 +159,7 @@ class InputValidator:
     # MARK: - Validation Checks
 
     @classmethod
-    def _check_type(cls, value: Any, expected_type: type, field_name: str) -> None:
+    def _check_type(cls, value: object, expected_type: type[object], field_name: str) -> None:
         """Check that value is of expected type."""
         if not isinstance(value, expected_type):
             raise ValueError(
@@ -174,13 +183,13 @@ class InputValidator:
             )
 
     @classmethod
-    def _check_dict_size(cls, value: dict[str, Any], field_name: str) -> None:
+    def _check_dict_size(cls, value: Mapping[object, JsonValue], field_name: str) -> None:
         """Check dictionary size constraint."""
         if len(value) > cls.MAX_DICT_KEYS:
             raise ValueError(f"{field_name} exceeds maximum of {cls.MAX_DICT_KEYS} keys")
 
     @classmethod
-    def _check_list_size(cls, value: list[Any], field_name: str) -> None:
+    def _check_list_size(cls, value: JsonArray, field_name: str) -> None:
         """Check list size constraint."""
         if len(value) > cls.MAX_LIST_ITEMS:
             raise ValueError(f"{field_name} exceeds maximum of {cls.MAX_LIST_ITEMS} items")
@@ -199,12 +208,12 @@ class InputValidator:
     @classmethod
     def _validate_dict_contents(
         cls,
-        value: dict[str, Any],
+        value: Mapping[object, JsonValue],
         field_name: str,
         depth: int,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         """Validate dictionary keys and values recursively."""
-        validated: dict[str, Any] = {}
+        validated: JsonObject = {}
 
         for key, val in value.items():
             if not isinstance(key, str):
@@ -218,24 +227,24 @@ class InputValidator:
     @classmethod
     def _validate_list_contents(
         cls,
-        value: list[Any],
+        value: JsonArray,
         field_name: str,
         depth: int,
-    ) -> list[Any]:
+    ) -> JsonArray:
         """Validate list items recursively."""
         return [
             cls._validate_value(item, f"{field_name}[{i}]", depth) for i, item in enumerate(value)
         ]
 
     @classmethod
-    def _validate_value(cls, value: Any, field_name: str, depth: int) -> Any:
+    def _validate_value(cls, value: JsonValue, field_name: str, depth: int) -> JsonValue:
         """Validate a value based on its type."""
         if isinstance(value, str):
             return cls.validate_string(value, field_name)
         if isinstance(value, dict):
-            return cls.validate_dict(value, field_name, depth + 1)
+            return cls.validate_dict(cast(Mapping[object, JsonValue], value), field_name, depth + 1)
         if isinstance(value, list):
-            return cls.validate_list(value, field_name, depth + 1)
+            return cls.validate_list(cast(JsonArray, value), field_name, depth + 1)
         return value
 
 

@@ -13,6 +13,17 @@ from maivn import (
     depends_on_interrupt,
     depends_on_await_for,
     depends_on_reevaluate,
+    # Toolset class pattern
+    toolify,
+    toolset,
+    # Permission helpers used with @toolify(permissions=...)
+    PermissionFlag,
+    PermissionSet,
+    require_permissions,
+    # Provider metadata for toolset classes
+    AuthMode,
+    ProviderCapability,
+    ProviderMetadata,
 )
 ```
 
@@ -118,7 +129,7 @@ When a tool depends on an agent:
 
 ## depends_on_private_data
 
-Inject server-side secret data into a tool.
+Inject a private value into a tool at execution time.
 
 ```python
 def depends_on_private_data(
@@ -156,9 +167,31 @@ agent.private_data = {'api_secret': 'sk-xxx-secret-key'}
 Private data follows strict security boundaries:
 
 1. **Schema-only planning**: LLM sees only field names/types, never values
-2. **Server-side injection**: Values injected at execution time
+2. **Runtime injection**: Values injected at execution time, held within the runtime
 3. **Automatic redaction**: Results containing private data are redacted
 4. **Never logged**: Private data values never appear in logs
+
+### Pydantic Class Targets
+
+`@depends_on_private_data` works on `@agent.toolify`'d Pydantic model classes the same way it works on function tools. The `arg_name` is validated against the model's `model_fields` instead of a callable signature, and the field is automatically marked as a data dependency in the generated tool schema so the LLM never sees it as a required argument:
+
+```python
+from maivn import Agent, depends_on_private_data
+from pydantic import BaseModel
+
+agent = Agent(name='audit_agent', api_key='...')
+
+@depends_on_private_data(data_key='customer_ssn', arg_name='ssn')
+@agent.toolify(name='audit_record', description='Record an audit entry', final_tool=True)
+class AuditRecord(BaseModel):
+    ssn: str        # injected at execution time from private_data['customer_ssn']
+    note: str       # supplied by the LLM
+
+    def __call__(self) -> dict:
+        return {'ssn_last4': self.ssn[-4:], 'note': self.note}
+```
+
+If `arg_name` does not match any model field, the decorator raises `ValueError` at import time (it used to silently no-op on classes — that is now a hard error so misconfigured dependencies fail loudly).
 
 ## compose_artifact_policy
 
@@ -382,7 +415,11 @@ def summarize_source() -> dict:
     return {'summary': '...'}
 ```
 
-`@depends_on_reevaluate` is also metadata-only. It does not inject data, but it tells the planner/runtime where reevaluation must occur.
+`@depends_on_reevaluate` is metadata-only on the SDK side, but the runtime enforces it: when the dependent tool is registered, the runtime ensures a `reevaluate` cycle runs at the declared boundary unless the model already planned a satisfying one, and the dependent tool is gated so it cannot run before that reevaluate completes. You are **not** required to make the model plan `reevaluate` itself for declared boundaries — the runtime guarantees the boundary either way, and a model-planned reevaluate at the same point is reconciled to avoid duplication.
+
+When a dependency-driven reevaluate fires, an enrichment event (`phase="reevaluate_accrued"`) is emitted with `source="dependency"`, plus `trigger_tool` and `target_tool` attribution. Model-planned reevaluates emit the same event with `source="llm"`. See [Enrichment Events](../../../../docs/features/ENRICHMENT_EVENTS.md#reevaluate-accrued) for the payload shape.
+
+A boundary that was already satisfied earlier in the same session is tracked by the runtime so future re-plans of the same chain don't cascade additional reevaluate cycles.
 
 ## Decorator Order
 
@@ -480,8 +517,180 @@ def combine(a: dict, b: dict) -> dict:
     return {'combined': [a, b]}
 ```
 
+## Toolset decorators
+
+The dependency decorators above declare data flow between *individual* tools. The
+toolset decorators below promote a configured class to a collection of related tools
+that share an instance (a database handle, an HTTP client, an OAuth token, etc.).
+
+### `@toolset`
+
+Marks a class as a toolset. Two forms:
+
+```python
+from maivn import toolset
+
+
+@toolset
+class Plain:
+    ...
+
+
+@toolset(prefix='github', tags=['developer'], require_marker=True)
+class Configured:
+    ...
+```
+
+| Argument | Default | Effect |
+| --- | --- | --- |
+| `prefix` | snake_case class name | Prepended to each method-tool name. The prefix is uppercased and joined with `_` (e.g. `prefix='gmail'` + method `get_message` → `GMAIL_get_message`). The uppercase form keeps tool names compliant with the OpenAI/Anthropic tool-name regex `^[a-zA-Z0-9_-]{1,64}$` and makes the namespace boundary readable in logs. |
+| `tags` | `()` | Tags applied to every method-tool produced. |
+| `require_marker` | `True` | When True, only `@toolify`-marked methods are tools. Setting `False` exposes every public method — discouraged for new code. |
+| `metadata` | `{}` | Free-form metadata merged into every method-tool. |
+
+### `@toolify` (method form)
+
+When applied inside a `@toolset` class, `@toolify` marks an individual method as a tool
+and declares its metadata. The same `@toolify` symbol that decorates free functions is
+used here; the registration path is selected automatically by the SDK.
+
+```python
+from maivn import PermissionFlag, PermissionSet, toolify
+
+
+class Example:
+    @toolify
+    def simple(self) -> None:
+        """Bare form. No permission tags, no destructive marker."""
+
+    @toolify(
+        name='renamed',                            # override the exposed tool name
+        description='...',                         # override the docstring
+        permissions=PermissionSet(PermissionFlag.WRITE),
+        destructive=False,
+        always_execute=False,
+        final_tool=False,
+        tags=['payments'],
+        metadata={'audit_zone': 'high'},
+        before_execute=...,
+        after_execute=...,
+    )
+    def write_payment(self, ...): ...
+```
+
+`@toolify` coexists with the dependency decorators above (`@depends_on_tool`,
+`@depends_on_agent`, `@compose_artifact_policy`, etc.). Order does not matter — each
+decorator attaches its own attribute and the SDK's dependency collector reads them all
+at registration time.
+
+### Permission helpers
+
+`PermissionFlag` is a `Flag` enum; `PermissionSet` is an immutable bitfield wrapper.
+The SDK auto-derives tag names from the declared permissions (`READ` → `"read"`,
+`DELETE` → `"delete"` + `"destructive"`, etc.) so filters like
+`include_tags=["read"]` and `exclude_tags=["destructive"]` work without you having to
+add those strings to each method's `tags=` list.
+
+| Flag | Auto-tags added |
+| --- | --- |
+| `READ` | `"read"` |
+| `WRITE` | `"write"` |
+| `DELETE` | `"delete"`, `"destructive"` |
+| `EXPORT` | `"export"` |
+| `IMPORT` | `"import"`, `"destructive"` |
+| `ADMIN` | `"admin"`, `"destructive"` |
+| `IMPERSONATE` | `"impersonate"`, `"destructive"` |
+
+Setting `destructive=True` on `@toolify(...)` also adds `"destructive"` regardless of
+the permission flags.
+
+Hosts can validate a caller's grant against a tool's declared set with
+`require_permissions(granted, required)`, which raises `PermissionError` if any flag in
+`required` is missing.
+
+### `ProviderMetadata`
+
+Attach a `ProviderMetadata` instance as a class attribute named `metadata` to advertise
+provider identity, supported auth modes, scopes, and capabilities. The runtime treats
+the attribute as descriptive only — it never inspects it for behavior — but hosts can
+surface it in catalogs or audit logs.
+
+```python
+from maivn import AuthMode, ProviderCapability, ProviderMetadata, toolset
+
+
+@toolset(prefix='reports')
+class WeeklyReportsToolSet:
+    metadata = ProviderMetadata(
+        name='weekly_reports',
+        display_name='Weekly KPI Reports',
+        version='1.0.0',
+        description='Pull weekly KPI reports from an internal warehouse.',
+        auth_modes=(AuthMode.NONE,),
+        capabilities=frozenset({ProviderCapability.READ}),
+        tags=('analytics',),
+    )
+    ...
+```
+
+### Registration
+
+```python
+agent.add_toolset(instance)
+agent.add_toolset(other_instance)   # multiple toolsets accumulate
+```
+
+`add_toolset` walks the class, finds every `@toolify`-marked method, and creates one
+`MethodTool` per method bound to the instance. Tools are appended to `agent.tools` so
+anything that inspects the agent's tool list sees them the same way it sees free
+callables.
+
+#### Filter kwargs
+
+```python
+agent.add_toolset(instance, *,
+    include=None,        # list[str]: only these method names register
+    exclude=None,        # list[str]: skip these method names
+    include_tags=None,   # list[str]: only methods with any matching tag
+    exclude_tags=None,   # list[str]: skip methods with any matching tag
+    overrides=None,      # dict[str, ToolOverride]: per-method registration overrides
+)
+```
+
+Filters compose: a method must pass every active filter. `include` / `exclude` match
+the **unprefixed** method name (or the `name=` override on `@toolify`). Tag matching
+uses the union of user-declared tags and auto-derived permission tags described above.
+
+If filters drop every method and the toolset has `require_marker=True` (the default),
+`add_toolset` raises `ValueError`.
+
+#### Overrides
+
+`overrides` uses the same `ToolOverride` type accepted by `agent.add_tool(...)`
+and `MCPServer(tool_overrides=...)`. Use it to retarget a generic toolset for
+one app without changing the provider class:
+
+```python
+from maivn import ToolOverride
+
+agent.add_toolset(
+    instance,
+    overrides={
+        'search': ToolOverride(
+            description='Search only the current customer account.',
+            default_args={'limit': 10},
+            tags=['customer-support'],
+        ),
+    },
+)
+```
+
+Override keys match the unprefixed Python method name, or the `name=` alias on
+`@toolify(...)`. Unknown keys raise `ValueError`.
+
 ## See Also
 
 - [Agent](agent.md) - `@agent.toolify()` decorator
+- [Tools Guide](../guides/tools.md) - Registration styles including the toolset class pattern
 - [Dependencies Guide](../guides/dependencies.md) - Detailed patterns
 - [Private Data Guide](../guides/private-data.md) - Security model

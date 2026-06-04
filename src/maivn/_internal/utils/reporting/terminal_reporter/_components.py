@@ -2,17 +2,43 @@
 Provides the EventTracker for execution metrics and a FileWriter for large outputs.
 Used by terminal reporter implementations."""
 
+# pyright: strict
+
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 from .config import (
     LOGS_DIRECTORY,
     RESULT_FILENAME_PREFIX,
     TIMESTAMP_FORMAT,
 )
+
+# MARK: Types
+
+ToolArgs = Mapping[str, object]
+
+
+class ToolInfo(TypedDict):
+    name: str
+    start_time: float
+    tool_type: str
+    agent_name: str | None
+    tool_args: ToolArgs | None
+
+
+class SummaryMetrics(TypedDict):
+    tools_executed: int
+    elapsed_seconds: float
+
+
+class ContentStats(TypedDict):
+    line_count: int
+    char_count: int
+
 
 # MARK: - EventTracker
 
@@ -35,7 +61,7 @@ class EventTracker:
         self._start_time: float = time.time()
         self._tools_executed: int = 0
         self._current_phase: str = "Initializing"
-        self._tool_results: dict[str, dict[str, Any]] = {}
+        self._tool_results: dict[str, ToolInfo] = {}
 
     # MARK: - Properties
 
@@ -57,7 +83,7 @@ class EventTracker:
         event_id: str,
         tool_type: str | None = None,
         agent_name: str | None = None,
-        tool_args: dict[str, Any] | None = None,
+        tool_args: ToolArgs | None = None,
     ) -> None:
         """Record tool execution start.
 
@@ -82,7 +108,7 @@ class EventTracker:
 
     # MARK: - Tool Information
 
-    def get_tool_info(self, event_id: str) -> dict[str, Any] | None:
+    def get_tool_info(self, event_id: str) -> ToolInfo | None:
         """Get tool execution information.
 
         Args:
@@ -130,7 +156,7 @@ class EventTracker:
 
     # MARK: - Metrics
 
-    def get_summary_metrics(self) -> dict[str, Any]:
+    def get_summary_metrics(self) -> SummaryMetrics:
         """Get summary metrics.
 
         Returns:
@@ -164,7 +190,7 @@ class FileWriter:
         Args:
             logs_dir: Custom logs directory (defaults to config value)
         """
-        self.logs_dir = Path(logs_dir or LOGS_DIRECTORY)
+        self.logs_dir: Path = Path(logs_dir or LOGS_DIRECTORY)
 
     # MARK: - File Operations
 
@@ -184,13 +210,13 @@ class FileWriter:
         """
         self._ensure_directory_exists()
         file_path = self._generate_file_path(extension)
-        file_path.write_text(content, encoding="utf-8")
+        _ = file_path.write_text(content, encoding="utf-8")
 
         return file_path, len(content)
 
     def _ensure_directory_exists(self) -> None:
         """Ensure the logs directory exists."""
-        self.logs_dir.mkdir(exist_ok=True)
+        _ = self.logs_dir.mkdir(exist_ok=True)
 
     def _generate_file_path(self, extension: str) -> Path:
         """Generate a timestamped file path.
@@ -256,7 +282,7 @@ class FileWriter:
         """
         return len(content) > max_chars
 
-    def get_content_stats(self, content: str) -> dict[str, Any]:
+    def get_content_stats(self, content: str) -> ContentStats:
         """Get statistics about content.
 
         Args:

@@ -1,15 +1,12 @@
-"""Base tool entity with modular design.
+"""Base tool entity shared by SDK tool implementations."""
 
-This module provides the refactored base tool entity using mixins
-to eliminate DRY violations and improve maintainability.
-"""
-
+# pyright: strict
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Final
 
-from maivn_shared import BaseDependency
+from maivn_shared import BaseDependency, ToolType
 from pydantic import Field
 
 from ..mixins import (
@@ -18,6 +15,15 @@ from ..mixins import (
     TaggableMixin,
     ToolIdentifiableMixin,
 )
+
+# MARK: - Tool Type Constants
+
+FUNCTION_TOOL_TYPE: Final[ToolType] = "func"
+MODEL_TOOL_TYPE: Final[ToolType] = "model"
+AGENT_TOOL_TYPE: Final[ToolType] = "agent"
+MCP_TOOL_TYPE: Final[ToolType] = "mcp"
+METHOD_TOOL_TYPE: Final[ToolType] = "method"
+
 
 # MARK: - BaseTool
 
@@ -30,11 +36,8 @@ class BaseTool(
 ):
     """Base model for all tools in the maivn package.
 
-    Uses mixins to provide:
-    - Configuration support (ConfigurableMixin)
-    - Unique identification (ToolIdentifiableMixin)
-    - Name and description (DescriptiveMixin)
-    - Tagging support (TaggableMixin)
+    Provides common metadata, dependency tracking, and hook fields for
+    concrete tool entities.
     """
 
     # MARK: Fields
@@ -51,27 +54,15 @@ class BaseTool(
         default=False,
         description="Flag indicating the tool's output is final",
     )
-    metadata: dict[str, Any] = Field(
+    metadata: dict[str, object] = Field(
         default_factory=dict,
         description="Additional tool metadata used during compilation and planning",
     )
-    tool_id: str = Field(
-        default="",
-        description="Unique tool identifier",
-    )
 
-    before_execute: Callable[[dict[str, Any]], Any] | None = Field(default=None)
-    after_execute: Callable[[dict[str, Any]], Any] | None = Field(default=None)
+    before_execute: Callable[..., object] | None = Field(default=None)
+    after_execute: Callable[..., object] | None = Field(default=None)
 
     # MARK: Dependency Management
-
-    def has_dependencies(self) -> bool:
-        """Check if tool has any dependencies.
-
-        Returns:
-            True if tool has dependencies
-        """
-        return bool(self.dependencies)
 
     def add_dependency(self, dependency: BaseDependency) -> None:
         """Add a dependency to the tool.
@@ -82,26 +73,15 @@ class BaseTool(
         if dependency not in self.dependencies:
             self.dependencies.append(dependency)
 
-    def remove_dependency(self, dependency: BaseDependency) -> None:
-        """Remove a dependency from the tool.
+    # MARK: Display Helpers
 
-        Args:
-            dependency: Dependency to remove
-        """
-        if dependency in self.dependencies:
-            self.dependencies.remove(dependency)
+    @staticmethod
+    def _callable_name(func: Callable[..., object], fallback: str) -> str:
+        name = getattr(func, "__name__", fallback)
+        return name if isinstance(name, str) else fallback
 
-    # MARK: Execution
-
-    def is_executable(self) -> bool:
-        """Check if tool can be executed (has required implementation).
-
-        This method should be overridden by subclasses.
-
-        Returns:
-            True if tool can be executed
-        """
-        return False
+    def _format_tool_label(self, detail: str) -> str:
+        return f"{self.name} ({detail})"
 
 
 # MARK: - Exports

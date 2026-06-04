@@ -4,11 +4,20 @@ This module provides common formatting logic and utilities shared between
 the rich and simple terminal reporter implementations.
 """
 
+# pyright: strict
+
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from typing import cast
 
 from .._formatters import format_elapsed_time, format_event_id, truncate_result
+
+# MARK: Types
+
+ToolArgs = Mapping[str, object]
+ToolDetails = dict[str, object]
+
 
 # MARK: Tool Type Configuration
 
@@ -57,7 +66,7 @@ def is_reevaluate_system_tool(tool_name: str | None, tool_type: str | None) -> b
 # MARK: Tool Arguments
 
 
-def extract_safe_arg_keys(tool_args: dict[str, Any] | None) -> list[str]:
+def extract_safe_arg_keys(tool_args: ToolArgs | None) -> list[str]:
     """Extract safe argument keys from tool args.
 
     Tool args may include server-injected private_data values.
@@ -74,11 +83,11 @@ def extract_safe_arg_keys(tool_args: dict[str, Any] | None) -> list[str]:
 
     arg_keys = tool_args.get("arg_keys")
     if isinstance(arg_keys, list):
-        return [str(k) for k in arg_keys]
+        return [str(k) for k in cast(list[object], arg_keys)]
     return [str(k) for k in tool_args.keys()]
 
 
-def format_tool_args_display(tool_args: dict[str, Any] | None) -> str | None:
+def format_tool_args_display(tool_args: ToolArgs | None) -> str | None:
     """Format tool arguments for display.
 
     Args:
@@ -101,8 +110,8 @@ def build_tool_start_details(
     event_id: str,
     tool_type: str | None,
     agent_name: str | None,
-    tool_args: dict[str, Any] | None,
-) -> dict[str, Any]:
+    tool_args: ToolArgs | None,
+) -> ToolDetails:
     """Build details dictionary for tool start event.
 
     Args:
@@ -114,7 +123,7 @@ def build_tool_start_details(
     Returns:
         Details dictionary with formatted values
     """
-    details: dict[str, Any] = {"Event ID": format_event_id(event_id)}
+    details: ToolDetails = {"Event ID": format_event_id(event_id)}
 
     if tool_type:
         details["Type"] = tool_type
@@ -133,7 +142,7 @@ def build_error_details(
     error: str,
     event_id: str | None,
     elapsed_ms: int | None,
-) -> dict[str, Any]:
+) -> ToolDetails:
     """Build details dictionary for error event.
 
     Args:
@@ -144,7 +153,7 @@ def build_error_details(
     Returns:
         Details dictionary with formatted values
     """
-    details: dict[str, Any] = {"Error": error}
+    details: ToolDetails = {"Error": error}
 
     if event_id:
         details["Event ID"] = format_event_id(event_id)
@@ -158,7 +167,7 @@ def build_error_details(
 # MARK: Result Processing
 
 
-def collect_injected_data_info(result: Any) -> list[tuple[str, str, list[str]]]:
+def collect_injected_data_info(result: object) -> list[tuple[str, str, list[str]]]:
     """Collect injected data information from a result.
 
     Args:
@@ -169,6 +178,7 @@ def collect_injected_data_info(result: Any) -> list[tuple[str, str, list[str]]]:
     """
     if not isinstance(result, dict):
         return []
+    result_map = cast(Mapping[str, object], result)
 
     injected_config = [
         ("private_data_injected", "Private Data"),
@@ -177,14 +187,14 @@ def collect_injected_data_info(result: Any) -> list[tuple[str, str, list[str]]]:
 
     items: list[tuple[str, str, list[str]]] = []
     for key, label in injected_config:
-        injected_keys = result.get(key, [])
+        injected_keys = result_map.get(key, [])
         if injected_keys:
-            items.append((key, label, injected_keys))
+            items.append((key, label, cast(list[str], injected_keys)))
 
     return items
 
 
-def extract_response_text(result: Any) -> str | None:
+def extract_response_text(result: object) -> str | None:
     """Extract response text from a result.
 
     Args:
@@ -195,16 +205,17 @@ def extract_response_text(result: Any) -> str | None:
     """
     if not isinstance(result, dict):
         return None
+    result_map = cast(Mapping[str, object], result)
 
-    responses = result.get("responses")
+    responses = result_map.get("responses")
     if isinstance(responses, list):
-        for item in reversed(responses):
+        for item in reversed(cast(list[object], responses)):
             if isinstance(item, str):
                 response_text = item.strip()
                 if response_text:
                     return response_text
 
-    response_value = result.get("response")
+    response_value = result_map.get("response")
     if not isinstance(response_value, str):
         return None
 
@@ -213,9 +224,9 @@ def extract_response_text(result: Any) -> str | None:
 
 
 def extract_result_for_display(
-    result: Any,
-    tool_info: dict[str, Any],
-) -> Any | None:
+    result: object,
+    tool_info: Mapping[str, object],
+) -> object | None:
     """Extract the displayable result portion.
 
     Filters out arguments that were passed as input (to avoid duplication),
@@ -235,22 +246,24 @@ def extract_result_for_display(
     if tool_name == "reevaluate":
         return None
 
-    result_to_display = result
+    result_to_display: object = result
     if isinstance(result, dict) and "result" in result:
-        result_to_display = result["result"]
+        result_to_display = cast(Mapping[str, object], result)["result"]
 
     tool_args = tool_info.get("tool_args")
     if isinstance(result_to_display, dict) and isinstance(tool_args, dict):
         # Filter out keys that match input args
+        result_map = cast(Mapping[str, object], result_to_display)
+        tool_args_map = cast(Mapping[str, object], tool_args)
         result_to_display = {
             k: v
-            for k, v in result_to_display.items()
-            if k not in tool_args or tool_args.get(k) != v
+            for k, v in result_map.items()
+            if k not in tool_args_map or tool_args_map.get(k) != v
         }
         if not result_to_display:
             return None
 
-    return result_to_display
+    return cast(object, result_to_display)
 
 
 __all__ = [

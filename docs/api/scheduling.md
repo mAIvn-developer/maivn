@@ -1,10 +1,11 @@
 # Scheduling
 
-Reference for the scheduled invocation API. Both `Agent` and `Swarm`
-inherit `cron()`, `every()`, and `at()` from `BaseScope`. Each returns a
-chainable `CronInvocationBuilder` whose terminal methods (`invoke`,
-`stream`, `batch`, `abatch`, `ainvoke`, `astream`) schedule the call and
-return a `ScheduledJob` handle.
+Reference for the scheduled invocation API.
+
+Both `Agent` and `Swarm` inherit `cron()`, `every()`, and `at()` from
+`BaseScope`. Each returns a chainable `CronInvocationBuilder` whose terminal
+methods (`invoke`, `stream`, `batch`, `abatch`, `ainvoke`, `astream`) schedule
+the call and return a `ScheduledJob` handle.
 
 For end-to-end usage and patterns, see the
 [Scheduled Invocation guide](../guides/scheduled-invocation.md).
@@ -208,6 +209,10 @@ for attempt `n` (1-indexed):
 
 `max_delay` caps the result. `retry_on` filters which exception types
 trigger a retry; others are surfaced immediately.
+
+> See also: [Timeouts, Retries & Reliability](../guides/reliability.md) for
+> when to retry, how to scope `retry_on` to transient failures, and how
+> retries interact with timeouts.
 
 ## ScheduledJob
 

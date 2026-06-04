@@ -1,11 +1,19 @@
 """Payload extraction and coercion helpers for normalized event forwarding."""
 
+# pyright: strict
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TypeAlias, cast
 
 from .._models import AppEvent
+
+# MARK: Types
+
+
+EventPayload: TypeAlias = dict[str, object]
+ToolArguments: TypeAlias = dict[str, object]
+
 
 # MARK: Tool Payload
 
@@ -16,8 +24,8 @@ class ToolPayload:
     tool_name: str | None
     tool_type: str | None
     status: str | None
-    args: dict[str, Any] | None
-    result: Any
+    args: ToolArguments | None
+    result: object
     error: str | None
     agent_name: str | None
     swarm_name: str | None
@@ -29,36 +37,39 @@ class ToolPayload:
 def extract_tool_payload(
     event: AppEvent,
     *,
-    payload: dict[str, Any],
+    payload: EventPayload,
 ) -> ToolPayload:
     tool = event.tool
     tool_id = (
         normalized_text(payload.get("tool_id"))
         or normalized_text(payload.get("event_id"))
-        or normalized_text(getattr(tool, "id", None))
+        or normalized_text(tool.id if tool is not None else None)
     )
     tool_name = (
         normalized_text(payload.get("tool_name"))
         or normalized_text(payload.get("tool_type"))
-        or normalized_text(getattr(tool, "name", None))
+        or normalized_text(tool.name if tool is not None else None)
     )
     tool_type = normalized_text(payload.get("tool_type")) or normalized_text(
-        getattr(tool, "type", None)
+        tool.type if tool is not None else None
     )
     status = normalized_text(payload.get("status")) or normalized_text(
-        getattr(tool, "status", None)
+        tool.status if tool is not None else None
     )
     args = coerce_mapping(payload.get("args")) or coerce_mapping(payload.get("params"))
     if args is None and tool is not None:
-        args = dict(tool.args)
-    result = payload.get("result", getattr(tool, "result", None))
-    error = normalized_text(payload.get("error")) or normalized_text(getattr(tool, "error", None))
+        args = coerce_mapping(cast(object, tool.args))
+    result = payload.get("result", cast(object, tool.result) if tool is not None else None)
+    error = normalized_text(payload.get("error")) or normalized_text(
+        tool.error if tool is not None else None
+    )
     agent_name = normalized_text(payload.get("agent_name"))
     swarm_name = normalized_text(payload.get("swarm_name"))
-    if agent_name is None and getattr(event.scope, "type", None) == "agent":
-        agent_name = normalized_text(getattr(event.scope, "name", None))
-    if swarm_name is None and getattr(event.scope, "type", None) == "swarm":
-        swarm_name = normalized_text(getattr(event.scope, "name", None))
+    scope = event.scope
+    if agent_name is None and scope is not None and scope.type == "agent":
+        agent_name = normalized_text(scope.name)
+    if swarm_name is None and scope is not None and scope.type == "swarm":
+        swarm_name = normalized_text(scope.name)
     return ToolPayload(
         tool_id=tool_id,
         tool_name=tool_name,
@@ -75,40 +86,42 @@ def extract_tool_payload(
 # MARK: Coercion
 
 
-def normalized_text(value: Any) -> str | None:
+def normalized_text(value: object) -> str | None:
     if not isinstance(value, str):
         return None
     stripped = value.strip()
     return stripped or None
 
 
-def string_value(value: Any) -> str | None:
+def string_value(value: object) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def coerce_mapping(value: Any) -> dict[str, Any] | None:
+def coerce_mapping(value: object) -> ToolArguments | None:
     if not isinstance(value, dict):
         return None
-    return dict(value)
+    mapping = cast(dict[object, object], value)
+    return {cast(str, key): item for key, item in mapping.items()}
 
 
-def mapping_value(value: Any, key: str) -> Any:
+def mapping_value(value: object, key: str) -> object | None:
     if isinstance(value, dict):
-        return value.get(key)
+        return cast(ToolArguments, value).get(key)
     return None
 
 
-def string_list(value: Any) -> list[str] | None:
+def string_list(value: object) -> list[str] | None:
     if not isinstance(value, list):
         return None
-    return [str(item) for item in value]
+    items = cast(list[object], value)
+    return [str(item) for item in items]
 
 
-def integer_value(value: Any) -> int | None:
+def integer_value(value: object) -> int | None:
     return value if isinstance(value, int) else None
 
 
-def float_value(value: Any) -> float | None:
+def float_value(value: object) -> float | None:
     return float(value) if isinstance(value, (int, float)) else None
 
 
@@ -131,7 +144,9 @@ def normalize_tool_status(status: str | None) -> str:
 
 
 __all__ = [
+    "EventPayload",
     "ToolPayload",
+    "ToolArguments",
     "coerce_mapping",
     "extract_tool_payload",
     "float_value",

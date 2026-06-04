@@ -1,6 +1,10 @@
 # Troubleshooting
 
-Common errors and solutions when using the maivn SDK.
+Common errors and solutions when using the mAIvn SDK. This is the cookbook: a
+specific error message, its cause, and a copy-pasteable fix. For the exception
+*types* behind these messages — the base `MaivnError`, the three failure layers,
+and how to structure a layered `try/except` — see
+[Errors & Exceptions](api/errors.md).
 
 ## Common Errors
 
@@ -123,10 +127,10 @@ agent's final tool.
 httpx.ConnectError: [Errno 111] Connection refused
 ```
 
-**Cause:** Cannot connect to the maivn server.
+**Cause:** Cannot connect to the mAIvn server.
 
 **Solutions:**
-1. Check that the maivn server is running
+1. Check that the mAIvn server is running
 2. Verify the server URL in configuration
 3. Check network connectivity
 4. Verify firewall rules
@@ -308,7 +312,7 @@ They shouldn't be. If you see this:
 Before debugging, verify:
 
 - [ ] An API key is available to your app and passed to `Agent` or `Client`
-- [ ] maivn server is running and accessible
+- [ ] mAIvn server is running and accessible
 - [ ] Network connectivity to server
 - [ ] Correct Python version (3.10+)
 - [ ] All dependencies installed (`uv sync` or `pip install maivn`)
@@ -324,6 +328,7 @@ If you're still stuck:
 
 ## See Also
 
+- [Errors & Exceptions](api/errors.md) - The exception types behind these messages, the three failure layers, and layered handling patterns
 - [Logging Reference](api/logging.md) - SDK logging
 - [Configuration Reference](api/configuration.md) - Environment variables
 - [Best Practices](best-practices.md) - Recommended patterns

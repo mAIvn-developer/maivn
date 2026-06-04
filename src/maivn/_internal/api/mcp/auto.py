@@ -1,9 +1,10 @@
+# pyright: strict
 """Auto-setup instructions for local stdio MCP servers."""
 
 from __future__ import annotations
 
 import shutil
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -18,7 +19,7 @@ class MCPAutoSetup(BaseModel):
     environment configuration.
     """
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(populate_by_name=True)
 
     provider: Literal["uvx"] = Field(
         default="uvx",
@@ -44,7 +45,7 @@ class MCPAutoSetup(BaseModel):
     @field_validator("package")
     @classmethod
     def _validate_package(cls, value: str) -> str:
-        if not value or not isinstance(value, str):
+        if not value:
             raise ValueError("auto_setup.package must be a non-empty string")
         return value
 

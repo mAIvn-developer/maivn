@@ -1,15 +1,17 @@
+# pyright: strict
 """Stream normalization entry points for AppEvent payloads."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
-from typing import Any
 
 from ..._internal.utils.reporting.app_event_payloads import APP_EVENT_CONTRACT_VERSION
-from .._models import AppEvent, NormalizedStreamState, RawSSEEvent
+from .._models import AppEvent, JsonObject, NormalizedStreamState, RawSSEEvent
 from .context import NormalizationOptions
 from .handlers import EVENT_HANDLERS
 from .helpers import clean_text, coerce_mapping, validate_payload
+
+# MARK: Public API
 
 
 def normalize_stream_event(
@@ -23,7 +25,7 @@ def normalize_stream_event(
     default_participant_role: str | None = None,
     assignment_name_map: dict[str, str] | None = None,
     tool_name_map: dict[str, str] | None = None,
-    tool_metadata_map: dict[str, dict[str, Any]] | None = None,
+    tool_metadata_map: dict[str, JsonObject] | None = None,
 ) -> list[AppEvent]:
     """Normalize a single raw SSE event into zero or more AppEvents.
 
@@ -60,20 +62,20 @@ def normalize_stream_event(
         return [validate_payload(payload)]
 
     options = NormalizationOptions(
-        default_agent_name=default_agent_name,
-        default_swarm_name=default_swarm_name,
-        default_participant_key=default_participant_key,
-        default_participant_name=default_participant_name,
-        default_participant_role=default_participant_role,
-        assignment_name_map=assignment_name_map,
-        tool_name_map=tool_name_map,
-        tool_metadata_map=tool_metadata_map,
+        default_agent_name,
+        default_swarm_name,
+        default_participant_key,
+        default_participant_name,
+        default_participant_role,
+        assignment_name_map,
+        tool_name_map,
+        tool_metadata_map,
     )
     handler = EVENT_HANDLERS.get(name)
     if handler is None:
         return []
 
-    normalized_payloads = handler(payload, active_state, options)
+    normalized_payloads: list[JsonObject] = handler(payload, active_state, options)
     return [validate_payload(item) for item in normalized_payloads]
 
 
@@ -87,7 +89,7 @@ def normalize_stream(
     default_participant_role: str | None = None,
     assignment_name_map: dict[str, str] | None = None,
     tool_name_map: dict[str, str] | None = None,
-    tool_metadata_map: dict[str, dict[str, Any]] | None = None,
+    tool_metadata_map: dict[str, JsonObject] | None = None,
 ) -> Iterator[AppEvent]:
     """Normalize an entire raw SSE stream into a flat AppEvent iterator.
 
@@ -101,18 +103,19 @@ def normalize_stream(
     see that function for parameter semantics.
     """
     state = NormalizedStreamState()
-    stream_options: dict[str, Any] = {
-        "default_agent_name": default_agent_name,
-        "default_swarm_name": default_swarm_name,
-        "default_participant_key": default_participant_key,
-        "default_participant_name": default_participant_name,
-        "default_participant_role": default_participant_role,
-        "assignment_name_map": assignment_name_map,
-        "tool_name_map": tool_name_map,
-        "tool_metadata_map": tool_metadata_map,
-    }
     for event in events:
-        yield from normalize_stream_event(event, state=state, **stream_options)
+        yield from normalize_stream_event(
+            event,
+            state=state,
+            default_agent_name=default_agent_name,
+            default_swarm_name=default_swarm_name,
+            default_participant_key=default_participant_key,
+            default_participant_name=default_participant_name,
+            default_participant_role=default_participant_role,
+            assignment_name_map=assignment_name_map,
+            tool_name_map=tool_name_map,
+            tool_metadata_map=tool_metadata_map,
+        )
 
 
 __all__ = ["normalize_stream", "normalize_stream_event"]

@@ -1,7 +1,7 @@
 # Agents & Tools
 
-The three ways to attach tools to an agent, plus the dependency and hook
-mechanics that go on top.
+This page covers the three ways to attach tools to an agent, plus the
+dependency, hook, and datetime-awareness mechanics that build on top of them.
 
 ## Tool registration: three equivalent forms
 
@@ -118,18 +118,8 @@ When `generate_research_report` is constructed, the runtime invokes
 The coordinator never has to know how the analyzer works — it just sees a
 field that gets filled in.
 
-### Required vs. optional agent dependencies
-
-`@depends_on_agent(agent_ref, arg_name='...')` is **required** — the
-upstream agent is always invoked. Mark the dependency optional and the LLM
-decides whether to trigger it:
-
-```python
-@depends_on_agent(data_analyzer, arg_name='analysis_result', required=False)
-@research_coordinator.toolify(name='generate_research_report')
-class ResearchReport(BaseModel):
-    ...
-```
+`@depends_on_agent(agent_ref, arg_name='...')` declares that the upstream
+agent is invoked and its output injected into the named argument.
 
 ## Tool execution hooks
 
@@ -148,7 +138,7 @@ def log_after(payload: dict) -> None:
     if payload.get('error'):
         print(f'[AFTER] tool={payload["tool"].name} FAILED: {payload["error"]}')
     else:
-        print(f'[AFTER] tool={payload["tool"].name} ok in {payload.get("elapsed_ms")}ms')
+        print(f'[AFTER] tool={payload["tool"].name} ok -> {payload.get("result")}')
 
 @agent.toolify(
     name='extract_ticket',
@@ -195,9 +185,9 @@ The hook payload includes:
 | `tool` | The tool descriptor (`.name`, `.description`, …) |
 | `tool_id` | A stable id for this execution |
 | `args` | Resolved arguments about to be passed in |
+| `context` | The execution context (messages, config) for this run |
 | `result` | The tool's return value (after only) |
 | `error` | The exception, if the tool raised (after only) |
-| `elapsed_ms` | Wall time the tool took (after only) |
 
 Hooks that fire are surfaced inline in mAIvn Studio on the owning card
 (tool / agent / swarm) so you can verify behavior without tailing logs.

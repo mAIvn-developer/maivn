@@ -1,10 +1,12 @@
 # Structured Output Guide
 
-Get guaranteed, typed responses from your agents using structured output patterns.
+By default an agent replies with free-form text. Often you want something your code can use directly instead — a sentiment score, a list of action items, a filled-in report. Structured output lets you hand the agent a schema (a Pydantic model) and get back a guaranteed, typed object that matches it every time.
+
+This guide covers the two ways to do that and when to reach for each.
 
 ## Overview
 
-The maivn SDK provides two approaches for structured output:
+The mAIvn SDK provides two approaches for structured output:
 
 | Approach | When to Use | Orchestration |
 |----------|-------------|---------------|
@@ -69,7 +71,7 @@ The `.structured_output()` builder returns an invocation builder with these opti
 ```python
 response = agent.structured_output(MyModel).invoke(
     messages=[HumanMessage(content='...')],
-    model='fast',        # 'fast', 'balanced', or 'max'
+    model='balanced',    # 'fast', 'balanced', or 'max' (omit for the default)
     reasoning='minimal', # 'minimal', 'low', 'medium', 'high'
     thread_id='...',     # For multi-turn conversations
 )
@@ -267,7 +269,7 @@ def logger() -> dict: ...
 class Report(BaseModel): ...
 ```
 
-When a top-level registered tool has `always_execute=True`, the assignment planner
+When a top-level registered tool has `always_execute=True`, the planner
 must schedule it at least once. This deterministic enforcement applies to regular
 agent calls and to nested Swarm member calls. Nested Pydantic models referenced by a
 top-level model field are schema definitions only; they do not inherit
@@ -492,7 +494,7 @@ response = agent.invoke(
 )
 ```
 
-## See Also
+## Next steps
 
 - [Tools Guide](tools.md) - Model tool basics
 - [Agent API](../api/agent.md) - `invoke()` and `structured_output()` methods

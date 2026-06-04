@@ -1,15 +1,14 @@
+# pyright: strict
 """Assistant-facing event normalization handlers."""
 
 from __future__ import annotations
-
-from typing import Any
 
 from ..._internal.utils.reporting.app_event_payloads import (
     build_agent_assignment_payload,
     build_assistant_chunk_payload,
     build_status_message_payload,
 )
-from .._models import NormalizedStreamState
+from .._models import JsonObject, NormalizedStreamState
 from .context import NormalizationOptions
 from .helpers import clean_stream_text, clean_text, compute_delta, map_assignment_status
 
@@ -17,7 +16,7 @@ from .helpers import clean_stream_text, clean_text, compute_delta, map_assignmen
 
 
 def _resolve_swarm_agent_name(
-    payload: dict[str, Any],
+    payload: JsonObject,
     options: NormalizationOptions,
 ) -> str:
     """Resolve the display name for a swarm-agent assignment update."""
@@ -36,23 +35,48 @@ def _resolve_swarm_agent_name(
 
 
 def handle_update_event(
-    payload: dict[str, Any],
+    payload: JsonObject,
     state: NormalizedStreamState,
     options: NormalizationOptions,
-) -> list[dict[str, Any]]:
-    normalized_payloads: list[dict[str, Any]] = []
+) -> list[JsonObject]:
+    normalized_payloads: list[JsonObject] = []
     streaming_content = clean_stream_text(payload.get("streaming_content"))
     if streaming_content is not None:
         assistant_id = clean_text(payload.get("assistant_id")) or "assistant"
         previous = state.streaming_text_by_id.get(assistant_id, "")
         delta = compute_delta(previous, streaming_content)
+        # Detect a divergent stream: we had prior text and the new cumulative
+        # text doesn't continue from it. This covers reevaluate cycles AND
+        # any other synthesis restart (evaluate-node re-entry, retries) that
+        # didn't fire a ``reevaluate_accrued`` enrichment event. Either case
+        # should overwrite the bubble for this chunk rather than append.
+        diverged_stream = (
+            bool(previous)
+            and bool(streaming_content)
+            and not streaming_content.startswith(previous)
+            and not previous.startswith(streaming_content)
+        )
         state.streaming_text_by_id[assistant_id] = streaming_content
+        replace_content = diverged_stream
+        if state.next_assistant_chunk_replaces:
+            replace_content = True
+            state.next_assistant_chunk_replaces = False
+        # When replacing the bubble, the downstream UI overwrites with this
+        # chunk's text — so it must be the FULL new cumulative content, not
+        # the suffix-after-shared-prefix that ``compute_delta`` returns for
+        # partial-overlap snapshots. Without this override the bubble shows
+        # only a fragment of the new synthesis.
+        if replace_content and streaming_content:
+            delta = streaming_content
         if delta:
             normalized_payloads.append(
                 build_assistant_chunk_payload(
                     assistant_id=assistant_id,
                     text=delta,
-                    **options.participant_kwargs(),
+                    participant_key=options.default_participant_key,
+                    participant_name=options.default_participant_name,
+                    participant_role=options.default_participant_role,
+                    replace_content=replace_content,
                 )
             )
 
@@ -76,10 +100,10 @@ def handle_update_event(
 
 
 def handle_progress_update_event(
-    payload: dict[str, Any],
+    payload: JsonObject,
     _state: NormalizedStreamState,
     options: NormalizationOptions,
-) -> list[dict[str, Any]]:
+) -> list[JsonObject]:
     text = clean_stream_text(payload.get("text"))
     if text is None:
         return []
@@ -87,16 +111,18 @@ def handle_progress_update_event(
         build_assistant_chunk_payload(
             assistant_id=clean_text(payload.get("assistant_id")) or "assistant",
             text=text,
-            **options.participant_kwargs(),
+            participant_key=options.default_participant_key,
+            participant_name=options.default_participant_name,
+            participant_role=options.default_participant_role,
         )
     ]
 
 
 def handle_status_message_event(
-    payload: dict[str, Any],
+    payload: JsonObject,
     _state: NormalizedStreamState,
     _options: NormalizationOptions,
-) -> list[dict[str, Any]]:
+) -> list[JsonObject]:
     message = clean_text(payload.get("message"))
     if message is None:
         return []

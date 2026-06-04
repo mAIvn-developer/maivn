@@ -1,15 +1,17 @@
+# pyright: strict
 from __future__ import annotations
 
 import shutil
-from typing import Any
+from collections.abc import Callable
 
+from rich.console import Console
 from rich.text import Text
 
 
 def report_system_tool_progress(
     *,
-    console: Any,
-    print_to_console: Any,
+    console: Console,
+    print_to_console: Callable[[str | Text], None],
     event_id: str,
     tool_name: str,
     streaming_max_lines: int,
@@ -18,9 +20,7 @@ def report_system_tool_progress(
     elapsed_seconds: float,
     text_content: str | None,
 ) -> tuple[str | None, int]:
-    supports_in_place_updates = bool(getattr(console.file, "isatty", lambda: False)()) and getattr(
-        console, "is_terminal", False
-    )
+    supports_in_place_updates = bool(console.file.isatty()) and console.is_terminal
 
     is_same_event = previous_event_id == event_id
 
@@ -32,17 +32,17 @@ def report_system_tool_progress(
             short_id = str(event_id).strip()[:8]
             for line in clean.split("\n"):
                 text = Text()
-                text.append("[SYSTEM] ", style="bold blue")
-                text.append(f"[{tool_name}:{short_id}] ", style="cyan")
-                text.append(line if line else "...", style="dim")
+                _ = text.append("[SYSTEM] ", style="bold blue")
+                _ = text.append(f"[{tool_name}:{short_id}] ", style="cyan")
+                _ = text.append(line if line else "...", style="dim")
                 print_to_console(text)
             return previous_event_id, previous_lines_printed
 
         if is_same_event and previous_lines_printed > 0:
-            console.file.write(f"\033[{previous_lines_printed}A")
+            _ = console.file.write(f"\033[{previous_lines_printed}A")
             for _ in range(previous_lines_printed):
-                console.file.write("\033[2K\033[1B")
-            console.file.write(f"\033[{previous_lines_printed}A")
+                _ = console.file.write("\033[2K\033[1B")
+            _ = console.file.write(f"\033[{previous_lines_printed}A")
             console.file.flush()
 
         terminal_width = shutil.get_terminal_size(fallback=(120, 24)).columns
@@ -63,11 +63,11 @@ def report_system_tool_progress(
         lines_printed = 0
         for line in display_lines:
             text = Text()
-            text.append("[SYSTEM] ", style="bold blue")
+            _ = text.append("[SYSTEM] ", style="bold blue")
             short_id = str(event_id).strip()[:8]
-            text.append(f"[{tool_name}:{short_id}] ", style="cyan")
+            _ = text.append(f"[{tool_name}:{short_id}] ", style="cyan")
             line_text = line.replace("\r", "").strip()
-            text.append(line_text if line_text else "...", style="dim italic")
+            _ = text.append(line_text if line_text else "...", style="dim italic")
             print_to_console(text)
             lines_printed += 1
 
@@ -78,15 +78,15 @@ def report_system_tool_progress(
         previous_lines_printed = 0
 
     if supports_in_place_updates and previous_lines_printed > 0:
-        console.file.write(f"\033[{previous_lines_printed}A")
+        _ = console.file.write(f"\033[{previous_lines_printed}A")
         for _ in range(previous_lines_printed):
-            console.file.write("\033[2K\033[1B")
-        console.file.write(f"\033[{previous_lines_printed}A")
+            _ = console.file.write("\033[2K\033[1B")
+        _ = console.file.write(f"\033[{previous_lines_printed}A")
         console.file.flush()
 
     text = Text()
-    text.append("[SYSTEM] ", style="bold blue")
-    text.append(f"[{tool_name}] ", style="cyan")
-    text.append(f"Processing... {elapsed_seconds:.0f}s elapsed", style="dim")
+    _ = text.append("[SYSTEM] ", style="bold blue")
+    _ = text.append(f"[{tool_name}] ", style="cyan")
+    _ = text.append(f"Processing... {elapsed_seconds:.0f}s elapsed", style="dim")
     print_to_console(text)
     return previous_event_id, 1

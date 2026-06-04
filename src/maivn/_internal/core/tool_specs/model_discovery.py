@@ -4,11 +4,13 @@ Finds Pydantic model classes by name within modules and packages,
 used to resolve $defs references during schema generation.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 import importlib
 import sys
-from typing import Any
+from types import ModuleType
+from typing import cast
 
 from pydantic import BaseModel
 
@@ -44,20 +46,20 @@ def find_model_class(class_name: str, module_name: str) -> type[BaseModel] | Non
 # MARK: - Search Strategies
 
 
-def _find_in_module(module: Any, class_name: str) -> type[BaseModel] | None:
+def _find_in_module(module: ModuleType, class_name: str) -> type[BaseModel] | None:
     """Look for the class directly in the module."""
     if hasattr(module, class_name):
-        attr = getattr(module, class_name)
+        attr = cast(object, getattr(module, class_name))
         if is_pydantic_model(attr):
             return attr
     return None
 
 
-def _find_in_module_attrs(module: Any, class_name: str) -> type[BaseModel] | None:
+def _find_in_module_attrs(module: ModuleType, class_name: str) -> type[BaseModel] | None:
     """Search through module's imported names."""
     for attr_name in dir(module):
-        attr = getattr(module, attr_name, None)
-        if attr and is_pydantic_model(attr) and attr.__name__ == class_name:
+        attr = cast(object, getattr(module, attr_name, None))
+        if is_pydantic_model(attr) and attr.__name__ == class_name:
             return attr
     return None
 
@@ -69,8 +71,8 @@ def _find_in_package(module_name: str, class_name: str) -> type[BaseModel] | Non
 
     package_name = module_name.rsplit(".", 1)[0]
     for mod_name, mod in list(sys.modules.items()):
-        if mod and mod_name.startswith(package_name) and hasattr(mod, class_name):
-            attr = getattr(mod, class_name)
+        if mod_name.startswith(package_name) and hasattr(mod, class_name):
+            attr = cast(object, getattr(mod, class_name))
             if is_pydantic_model(attr):
                 return attr
     return None

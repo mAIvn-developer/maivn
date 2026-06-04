@@ -1,9 +1,11 @@
+# pyright: strict
 """Normalization configuration shared across event handlers."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+
+from .._models import JsonObject
 
 # MARK: Options
 
@@ -17,7 +19,7 @@ class NormalizationOptions:
     default_participant_role: str | None = None
     assignment_name_map: dict[str, str] | None = None
     tool_name_map: dict[str, str] | None = None
-    tool_metadata_map: dict[str, dict[str, Any]] | None = None
+    tool_metadata_map: dict[str, JsonObject] | None = None
 
     def participant_kwargs(self) -> dict[str, str | None]:
         return {

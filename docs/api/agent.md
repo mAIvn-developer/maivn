@@ -1,6 +1,6 @@
 # Agent
 
-The `Agent` class is the primary interface for building agentic systems with maivn. It acts as a container for tools, configuration, and invocation logic.
+The `Agent` class is the primary interface for building agentic systems with maivn — a container for tools, configuration, and invocation logic.
 
 ## Import
 
@@ -62,7 +62,7 @@ Agent(
 | `use_as_final_output`       | `bool`                           | `False`    | When in a Swarm, designate this agent's output as final                                                                                                                |
 | `force_final_tool`          | `bool`                           | `False`    | Require this agent's `final_tool=True` tool on every invocation, including nested Swarm invocations. Registering a final tool alone leaves it optional                 |
 | `included_nested_synthesis` | `bool \| Literal['auto']`        | `'auto'`   | Nested synthesis mode for Swarm invocations: `True` always includes synthesized response, `False` returns tool results only, `'auto'` lets orchestrator/runtime decide |
-| `private_data`              | `dict \| list[PrivateData]`      | `{}`       | Server-side secret data for dependency injection                                                                                                                       |
+| `private_data`              | `dict \| list[PrivateData]`      | `{}`       | Declared private values for dependency injection; the model plans against the schema and real values are injected at execution time, held within the runtime           |
 | `allow_private_in_system_tools` | `bool`                       | `False`    | Permit raw `private_data` values to flow through system tools (web search, repl). Defaults to `False`; opt in only when needed                                         |
 | `memory_config`             | `MemoryConfig \| dict[str, Any]` | `{}`       | Default typed memory configuration applied on every invocation from this scope                                                                                         |
 | `system_tools_config`       | `SystemToolsConfig \| dict`      | `{}`       | Default typed system-tool allowlists and approval controls applied on every invocation                                                                                  |
@@ -158,7 +158,7 @@ Common fields:
 
 Notes:
 
-- Effective behavior is policy-gated server-side by workspace and plan limits.
+- Effective behavior is policy-gated by your workspace and plan limits.
 - Per-invocation `memory_config` can override these defaults for one call.
 - Reserved memory-control keys are rejected in invocation `metadata`; use `memory_config`.
 - `thread_id` governs episodic recall; skills, bound resources, and promoted insights are the cross-thread reuse layer.
@@ -207,11 +207,14 @@ def add_tool(
     tags: list[str] | None = None,
     before_execute: Callable[[dict[str, Any]], Any] | None = None,
     after_execute: Callable[[dict[str, Any]], Any] | None = None,
+    override: ToolOverride | None = None,
 ) -> BaseTool
 ```
 
 Use `Agent(..., tools=[...])` for simple constructor registration and `add_tool(...)`
 when you need options such as `name`, `description`, `tags`, or `final_tool`.
+Use `override=ToolOverride(...)` when you want the same per-tool override shape
+used by `add_toolset(..., overrides=...)` and `MCPServer(tool_overrides=...)`.
 
 ```python
 def load_profile(customer_id: str) -> dict:
@@ -238,7 +241,8 @@ def invoke(
     force_final_tool: bool = False,
     targeted_tools: list[str] | None = None,
     structured_output: type[BaseModel] | None = None,
-    model: Literal['fast', 'balanced', 'max'] | None = None,
+    model: Literal['auto', 'fast', 'balanced', 'max'] | None = None,
+    force_model: str | None = None,
     reasoning: Literal['minimal', 'low', 'medium', 'high'] | None = None,
     stream_response: bool = True,
     thread_id: str | None = None,
@@ -261,7 +265,8 @@ def invoke(
 | `force_final_tool`              | `bool`                                   | `False`  | Force this invocation to return the `final_tool=True` tool. The agent constructor can also set this as a default |
 | `targeted_tools`                | `list[str] \| None`                      | `None`   | Run only these tools (plus dependencies)                                                  |
 | `structured_output`             | `type[BaseModel] \| None`                | `None`   | Advanced direct structured-output schema. Prefer `agent.structured_output(Model).invoke(...)` for public use. |
-| `model`                         | `Literal`                                | `None`   | LLM selection hint: `'fast'`, `'balanced'`, `'max'`                                       |
+| `model`                         | `Literal`                                | `None`   | LLM selection hint: `'auto'`, `'fast'`, `'balanced'`, `'max'`                             |
+| `force_model`                   | `str \| None`                            | `None`   | Pin a specific model by name, overriding the `model` selection hint                       |
 | `reasoning`                     | `Literal`                                | `None`   | Reasoning level: `'minimal'` to `'high'`                                                  |
 | `stream_response`               | `bool`                                   | `True`   | Request streamed model output from the server transport                                   |
 | `thread_id`                     | `str \| None`                            | `None`   | Thread ID for multi-turn conversations                                                    |
@@ -430,7 +435,7 @@ Notes:
 
 ### preview_redaction()
 
-Preview server-side redaction for a `RedactedMessage` without starting an invocation.
+Preview the redaction applied to a `RedactedMessage` without starting an invocation.
 
 ```python
 def preview_redaction(
@@ -441,7 +446,7 @@ def preview_redaction(
 ) -> RedactionPreviewResponse
 ```
 
-Use this when you want to inspect which placeholders will be inserted, which values will be added to `private_data`, and which caller-supplied literals matched before sending the message to the model. The preview uses the same case-insensitive known-value matching the runtime applies before outbound handoff.
+Use this when you want to inspect which placeholders will be inserted, which values will be added to `private_data`, and which caller-supplied literals matched before sending the message to the model. The preview reflects the same known-value matching the runtime applies before a run.
 
 #### Parameters
 
@@ -476,7 +481,7 @@ preview = agent.preview_redaction(
     known_pii_values=['alice@example.com', 'bob@example.com'],
 )
 
-assert preview.inserted_keys == ['pii_email_1']
+assert len(preview.inserted_keys) == 1  # one email detected and redacted
 assert preview.matched_known_pii_values == ['alice@example.com']
 ```
 
@@ -489,7 +494,8 @@ def stream(
     messages: Sequence[BaseMessage],
     force_final_tool: bool = False,
     targeted_tools: list[str] | None = None,
-    model: Literal['fast', 'balanced', 'max'] | None = None,
+    model: Literal['auto', 'fast', 'balanced', 'max'] | None = None,
+    force_model: str | None = None,
     reasoning: Literal['minimal', 'low', 'medium', 'high'] | None = None,
     stream_response: bool = True,
     status_messages: bool = False,
@@ -512,7 +518,8 @@ def stream(
 | `messages`                      | `Sequence[BaseMessage]`                  | Required | Messages to send to the agent                                                          |
 | `force_final_tool`              | `bool`                                   | `False`  | Force this stream invocation to return the `final_tool=True` tool. The agent constructor can also set this as a default |
 | `targeted_tools`                | `list[str] \| None`                      | `None`   | Run only these tools, plus dependencies                                                 |
-| `model`                         | `Literal['fast', 'balanced', 'max'] \| None` | `None` | LLM selection hint                                                                      |
+| `model`                         | `Literal['auto', 'fast', 'balanced', 'max'] \| None` | `None` | LLM selection hint                                                              |
+| `force_model`                   | `str \| None`                            | `None`   | Pin a specific model by name, overriding the `model` selection hint                     |
 | `reasoning`                     | `Literal['minimal', 'low', 'medium', 'high'] \| None` | `None` | Reasoning level                                                        |
 | `stream_response`               | `bool`                                   | `True`   | Request streamed model output from the server transport                                 |
 | `status_messages`               | `bool`                                   | `False`  | Opt into normalized status-message events for frontend progress displays                |
@@ -866,7 +873,9 @@ def agent_id(self) -> str
 
 ### private_data
 
-Server-side secret data dictionary.
+Declared private values, keyed by name. The model plans against a schema of
+these keys; the real values are injected into tools only at execution time and
+are held within the runtime, never shown to the model.
 
 ```python
 agent.private_data = {'api_key': 'secret'}
@@ -923,7 +932,7 @@ Every time a hook callback fires, the SDK emits a `hook_fired`
 (and any attached [EventBridge](events.md)). The event carries the
 hook's name, `stage`, `status`, and the target it should attach to —
 the per-tool event id when `hook_execution_mode == "tool"`, or the
-agent id / swarm name when `hook_execution_mode == "scope"`. Maivn
+agent id / swarm name when `hook_execution_mode == "scope"`. mAIvn
 Studio renders each firing as a persistent header (`before`) or footer
 (`after`) on the matching tool card or scope card; custom frontends
 can subscribe via `normalize_stream()` and route on

@@ -1,14 +1,18 @@
+# pyright: strict
 """Abstract reporter contract for terminal reporter implementations."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from maivn_shared.utils.token_models import TokenUsage
+
+
+# MARK: Interfaces
 
 
 class BaseReporterInterface(ABC):
@@ -35,7 +39,7 @@ class BaseReporterInterface(ABC):
         self,
         event_type: str,
         message: str,
-        details: dict[str, Any] | None = None,
+        details: dict[str, object] | None = None,
     ) -> None:
         """Print an event message."""
 
@@ -44,7 +48,7 @@ class BaseReporterInterface(ABC):
         """Print execution summary."""
 
     @abstractmethod
-    def print_final_result(self, result: Any) -> None:
+    def print_final_result(self, result: object) -> None:
         """Print final result."""
 
     @abstractmethod
@@ -59,19 +63,19 @@ class BaseReporterInterface(ABC):
 
     @abstractmethod
     @contextmanager
-    def live_progress(self, description: str = "Processing...") -> Iterator[Any]:
+    def live_progress(self, description: str = "Processing...") -> Generator[object, None, None]:
         """Context manager for live progress display."""
         yield
 
     @abstractmethod
-    def update_progress(self, task_id: Any, description: str | None = None) -> None:
+    def update_progress(self, task_id: object, description: str | None = None) -> None:
         """Update progress description."""
 
     # MARK: User Input
 
     @abstractmethod
     @contextmanager
-    def prepare_for_user_input(self) -> Iterator[None]:
+    def prepare_for_user_input(self) -> Generator[None, None, None]:
         """Prepare reporter for user input collection."""
         yield
 
@@ -95,7 +99,7 @@ class BaseReporterInterface(ABC):
         """Report session start."""
 
     @abstractmethod
-    def report_private_data(self, private_data: dict[str, Any]) -> None:
+    def report_private_data(self, private_data: dict[str, object]) -> None:
         """Report private data parameters."""
 
     @abstractmethod
@@ -111,7 +115,7 @@ class BaseReporterInterface(ABC):
         event_id: str,
         tool_type: str | None = None,
         agent_name: str | None = None,
-        tool_args: dict[str, Any] | None = None,
+        tool_args: dict[str, object] | None = None,
         swarm_name: str | None = None,
     ) -> None:
         """Report tool execution start."""
@@ -121,7 +125,7 @@ class BaseReporterInterface(ABC):
         self,
         event_id: str,
         elapsed_ms: int | None = None,
-        result: Any | None = None,
+        result: object | None = None,
     ) -> None:
         """Report tool execution completion."""
 
@@ -142,6 +146,6 @@ class BaseReporterInterface(ABC):
         event_id: str | None = None,
         agent_name: str | None = None,
         swarm_name: str | None = None,
-        result: Any | None = None,
+        result: object | None = None,
     ) -> None:
         """Report model tool execution completion."""

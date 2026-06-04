@@ -1,5 +1,6 @@
 """Client cache helpers for Agent construction."""
 
+# pyright: strict
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

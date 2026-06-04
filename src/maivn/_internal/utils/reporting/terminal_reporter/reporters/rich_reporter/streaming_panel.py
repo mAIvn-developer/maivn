@@ -1,15 +1,18 @@
+# pyright: strict
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
 
 from rich import box
 from rich.align import Align
+from rich.console import Console, RenderableType
 from rich.padding import Padding
 from rich.panel import Panel
 from rich.text import Text
 
 from ...config import SECTION_BORDER_STYLE
+
+# MARK: Stream Line Formatting
 
 
 def _normalize_stream_lines(text_content: str, *, max_lines: int) -> list[str]:
@@ -37,6 +40,9 @@ def _format_tool_stream_label(tool_name: str) -> str:
     return str(tool_name or "").strip().upper() or "STREAM"
 
 
+# MARK: Panel Rendering
+
+
 def _build_streaming_panel(
     *,
     event_id: str | None,
@@ -53,16 +59,16 @@ def _build_streaming_panel(
 
     tool_label = _format_tool_stream_label(tool_name)
     title = Text()
-    title.append(tool_label, style="bold cyan")
+    _ = title.append(tool_label, style="bold cyan")
     if event_suffix:
-        title.append(event_suffix, style="dim")
-    title.append(f"  {elapsed_seconds:.0f}s  chunks={chunk_count}", style="dim")
+        _ = title.append(event_suffix, style="dim")
+    _ = title.append(f"  {elapsed_seconds:.0f}s  chunks={chunk_count}", style="dim")
 
     body = Text()
     for idx, line in enumerate(lines):
         if idx > 0:
-            body.append("\n")
-        body.append(line, style="dim")
+            _ = body.append("\n")
+        _ = body.append(line, style="dim")
 
     return Panel(
         Align.left(body),
@@ -75,7 +81,7 @@ def _build_streaming_panel(
 
 def render_streaming_panel_lines(
     *,
-    console: Any,
+    console: Console,
     event_id: str | None,
     tool_name: str,
     elapsed_seconds: float,
@@ -92,7 +98,7 @@ def render_streaming_panel_lines(
         chunk_count=chunk_count,
         lines=lines,
     )
-    renderable: Any = panel
+    renderable: RenderableType = panel
     if indent > 0:
         renderable = Padding(panel, (0, 0, 0, indent))
 
@@ -100,7 +106,7 @@ def render_streaming_panel_lines(
         with console.capture() as capture:
             console.print(renderable)
         rendered = str(capture.get())
-    except Exception:
+    except Exception:  # noqa: BLE001 - Rich capture failures fall back to a blank frame.
         rendered = ""
 
     rendered_lines: list[str] = rendered.splitlines()

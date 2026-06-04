@@ -1,11 +1,11 @@
 # Real-World Projects
 
-Longer end-to-end examples that demonstrate the SDK at the scale of an
-actual feature. Each project is a complete agent or swarm with non-trivial
-schemas, multi-step dependencies, and realistic tool integration.
+Longer end-to-end examples that show the SDK at the scale of an actual feature.
+Each project is a complete agent or swarm with non-trivial schemas, multi-step
+dependencies, and realistic tool integration.
 
-These are more "study these" than "copy these" — they show patterns that
-are awkward to demonstrate in a single-page example.
+These are more "study these" than "copy these" — they show patterns that are
+awkward to demonstrate in a single-page example.
 
 ## Automobile specification
 
@@ -211,8 +211,8 @@ A few patterns repeat across these projects — worth internalizing:
 ## What's next
 
 - **[Basics](./basics.md)** — the patterns above, in their simplest form.
-- **[Swarms](./swarms.md)** — the multi-agent pieces of the financial
-  planner.
+- **[Swarms](./swarms.md)** — the multi-agent building blocks behind the
+  financial planner.
 - **[MCP Integration](./mcp.md)** — registering MCP servers like the
   ones in the planner.
 - **[Memory](./memory.md)** — for projects where the agent needs to

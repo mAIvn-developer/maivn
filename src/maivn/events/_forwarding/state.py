@@ -1,9 +1,9 @@
 """State shared across normalized event forwarding targets."""
 
+# pyright: strict
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 # MARK: Tool Context
 
@@ -26,7 +26,7 @@ class NormalizedEventForwardingState:
     assistant_text_by_id: dict[str, str] = field(default_factory=dict)
     tool_context_by_id: dict[str, ToolContext] = field(default_factory=dict)
     system_tool_chunk_count_by_id: dict[str, int] = field(default_factory=dict)
-    enrichment_support_by_reporter_type: dict[type[Any], tuple[bool, bool, bool]] = field(
+    enrichment_support_by_reporter_type: dict[type[object], tuple[bool, bool, bool]] = field(
         default_factory=dict
     )
 
@@ -52,8 +52,8 @@ def remember_tool_context(
 
 
 def clear_tool_state(state: NormalizedEventForwardingState, tool_id: str) -> None:
-    state.tool_context_by_id.pop(tool_id, None)
-    state.system_tool_chunk_count_by_id.pop(tool_id, None)
+    _ = state.tool_context_by_id.pop(tool_id, None)
+    _ = state.system_tool_chunk_count_by_id.pop(tool_id, None)
 
 
 __all__ = [

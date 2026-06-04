@@ -1,23 +1,25 @@
 """Normalization helpers for BaseScope fields."""
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from typing import cast
 
 from maivn_shared import PrivateData
 
 # MARK: Private Data
 
 
-def private_data_list_to_dict(items: list[Any]) -> dict[str, Any]:
+def private_data_list_to_dict(items: list[object]) -> dict[str, object]:
     """Convert a list of PrivateData objects to a key-value dict."""
-    result: dict[str, Any] = {}
+    result: dict[str, object] = {}
     counter = 0
     for item in items:
         if isinstance(item, PrivateData):
             private_data = item
         elif isinstance(item, dict) and "value" in item:
-            private_data = PrivateData.model_validate(item)
+            private_data = PrivateData.model_validate(cast(Mapping[str, object], item))
         else:
             raise TypeError(
                 'private_data list entries must be PrivateData objects or dicts with a "value" key'

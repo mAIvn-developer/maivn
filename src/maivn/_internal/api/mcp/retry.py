@@ -1,21 +1,28 @@
+# pyright: strict
 from __future__ import annotations
 
 import threading
 import time
 from collections import deque
-from typing import Any
+from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from .tools import JsonValue, as_json_array, as_json_object
+
+# MARK: Rate Limiting
 
 
 class RateLimiter:
     """Simple sliding-window rate limiter."""
 
     def __init__(self, max_calls: int, window_seconds: float) -> None:
-        self._max_calls = max_calls
-        self._window_seconds = window_seconds
-        self._min_interval_seconds = window_seconds / max_calls if max_calls > 0 else window_seconds
-        self._lock = threading.Lock()
+        self._max_calls: int = max_calls
+        self._window_seconds: float = window_seconds
+        self._min_interval_seconds: float = (
+            window_seconds / max_calls if max_calls > 0 else window_seconds
+        )
+        self._lock: threading.Lock = threading.Lock()
         self._timestamps: deque[float] = deque()
         self._next_allowed_at: float = 0.0
 
@@ -24,7 +31,7 @@ class RateLimiter:
         if now < self._next_allowed_at:
             wait_for = max(wait_for, self._next_allowed_at - now)
         while self._timestamps and (now - self._timestamps[0]) >= self._window_seconds:
-            self._timestamps.popleft()
+            _ = self._timestamps.popleft()
 
         if len(self._timestamps) >= self._max_calls:
             wait_for = max(wait_for, self._window_seconds - (now - self._timestamps[0]))
@@ -50,6 +57,9 @@ class RateLimiter:
                 time.sleep(sleep_for)
 
 
+# MARK: Soft Error Handling
+
+
 class MCPSoftErrorHandling(BaseModel):
     """Configuration for retrying MCP tools that signal failure inside a 200 OK.
 
@@ -60,7 +70,7 @@ class MCPSoftErrorHandling(BaseModel):
     ``max_retries`` times before surfacing the error.
     """
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(populate_by_name=True)
 
     enabled: bool = Field(default=False, description="Enable soft error detection")
     keys: list[str] = Field(
@@ -95,17 +105,22 @@ class MCPSoftErrorHandling(BaseModel):
         return value
 
 
-def find_soft_error_message(payload: Any, keys: set[str]) -> str | None:
-    if isinstance(payload, dict):
-        for key, value in payload.items():
+# MARK: Helpers
+
+
+def find_soft_error_message(payload: JsonValue, keys: set[str]) -> str | None:
+    payload_object = as_json_object(payload)
+    if payload_object is not None:
+        for key, value in payload_object.items():
             if key in keys and isinstance(value, str) and value.strip():
                 return value.strip()
             nested = find_soft_error_message(value, keys)
             if nested:
                 return nested
         return None
-    if isinstance(payload, list):
-        for item in payload:
+    payload_array = as_json_array(payload)
+    if payload_array is not None:
+        for item in payload_array:
             nested = find_soft_error_message(item, keys)
             if nested:
                 return nested

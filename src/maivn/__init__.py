@@ -1,3 +1,4 @@
+# pyright: strict
 """Top-level SDK exports for Maivn.
 Re-exports clients, agents, decorators, logging, and configuration.
 Configuration mutation helpers are intentionally not exported to avoid external rewiring.
@@ -8,6 +9,8 @@ from __future__ import annotations
 # MARK: - Shared Models
 from maivn_shared import (
     HIPAA_SAFE_HARBOR_CATEGORIES,
+    PERMISSION_FLAG_NAMES,
+    AuthMode,
     FinalOutputMode,
     MemoryAssetsConfig,
     MemoryConfig,
@@ -20,9 +23,13 @@ from maivn_shared import (
     MemorySkillConfig,
     MemorySkillExtractionConfig,
     OrchestrationMode,
+    PermissionFlag,
+    PermissionSet,
     PIIWhitelist,
     PIIWhitelistEntry,
     PrivateData,
+    ProviderCapability,
+    ProviderMetadata,
     RedactedMessage,
     RedactionPreviewRequest,
     RedactionPreviewResponse,
@@ -33,9 +40,7 @@ from maivn_shared import (
     SwarmAgentConfig,
     SwarmConfig,
     SystemToolsConfig,
-)
-from maivn_shared import (
-    SessionResponse as SessionResponse,
+    require_permissions,
 )
 
 # MARK: - Version
@@ -51,6 +56,16 @@ from ._internal.api import (
     MCPServer,
     MCPSoftErrorHandling,
     Swarm,
+    ToolOverride,
+)
+from ._internal.api.billing_models import (
+    BillingCurrentUsage,
+    BillingPlan,
+    BillingUsage,
+    BillingUsageApiKey,
+    BillingUsageBreakdown,
+    BillingUsageProject,
+    BillingUsageTotals,
 )
 from ._internal.api.resource_models import (
     MemoryInsight,
@@ -106,6 +121,8 @@ from ._internal.utils import (
     depends_on_private_data,
     depends_on_reevaluate,
     depends_on_tool,
+    toolify,
+    toolset,
 )
 
 # MARK: - Configuration
@@ -116,11 +133,13 @@ from ._internal.utils.configuration import (
 )
 
 # MARK: - Logging
-# Logging must be importable before other modules to allow early configuration
+# Import maivn.logging directly when logging must be configured before root SDK imports.
 from ._internal.utils.logging import (
     configure_logging,
     get_logger,
 )
+
+# MARK: - Events
 from .events import (
     APP_EVENT_CONTRACT_VERSION,
     AppEvent,
@@ -195,6 +214,8 @@ __all__ = [
     "depends_on_interrupt",
     "depends_on_reevaluate",
     "depends_on_tool",
+    "toolify",
+    "toolset",
     # Core Classes
     "Agent",
     "BaseScope",
@@ -204,6 +225,7 @@ __all__ = [
     "MCPServer",
     "MCPSoftErrorHandling",
     "Swarm",
+    "ToolOverride",
     "OrganizationMemoryPolicy",
     "OrganizationMemoryPurgeResult",
     "MemoryPersistenceCeiling",
@@ -219,6 +241,23 @@ __all__ = [
     "MemoryInsightOrigin",
     "MemoryUnboundResourceCandidate",
     "ProjectMemoryResources",
+    # Billing / usage
+    "BillingUsage",
+    "BillingPlan",
+    "BillingCurrentUsage",
+    "BillingUsageBreakdown",
+    "BillingUsageProject",
+    "BillingUsageApiKey",
+    "BillingUsageTotals",
+    # Shared Models - Permissions
+    "PERMISSION_FLAG_NAMES",
+    "PermissionFlag",
+    "PermissionSet",
+    "require_permissions",
+    # Shared Models - Provider Metadata
+    "AuthMode",
+    "ProviderCapability",
+    "ProviderMetadata",
     # Shared Models
     "HIPAA_SAFE_HARBOR_CATEGORIES",
     "PIIWhitelist",

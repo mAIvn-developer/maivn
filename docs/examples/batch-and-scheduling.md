@@ -1,7 +1,7 @@
 # Batch & Scheduling
 
-Run multiple inputs concurrently, or run agents on a schedule. The same
-chain works for `Agent` and `Swarm`.
+These examples run multiple inputs concurrently, or run agents on a schedule.
+The same chain works for `Agent` and `Swarm`.
 
 ## Batch invocation
 
@@ -216,7 +216,7 @@ mAIvn Studio surfaces the runs table for every scheduled app and streams
 updates as fires happen — no polling delay between the countdown hitting
 zero and the run card appearing. Status pills flip from running to
 succeeded / failed / skipped as soon as the matching terminal callback
-fires server-side.
+fires within the runtime.
 
 ## Production checklist
 
@@ -236,5 +236,8 @@ fires server-side.
 - **[Scheduled Invocation guide](../guides/scheduled-invocation.md)** — the
   deep dive on cron syntax, time zones, DST handling, jitter shapes, misfire
   policies, and the full lifecycle API.
+- **[Timeouts, Retries & Reliability](../guides/reliability.md)** — the
+  timeout bounds, the retry/backoff model, and how to handle the failures
+  that still get through.
 - **[Interrupts](./interrupts.md)** — for jobs that need human input
   mid-execution.

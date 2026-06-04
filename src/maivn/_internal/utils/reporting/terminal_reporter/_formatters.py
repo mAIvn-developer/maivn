@@ -3,12 +3,14 @@
 This module provides functions for formatting events, results, and display elements.
 """
 
+# pyright: strict
+
 from __future__ import annotations
 
 import ast
 import json
 from collections.abc import Mapping
-from typing import Any
+from typing import cast
 
 from maivn_shared import dumps
 
@@ -111,7 +113,7 @@ def format_total_time(elapsed_seconds: float) -> str:
 # MARK: - Result Serialization
 
 
-def result_to_json(result: Any, indent: int = 2) -> str:
+def result_to_json(result: object, indent: int = 2) -> str:
     """Convert result to JSON string.
 
     Args:
@@ -127,19 +129,19 @@ def result_to_json(result: Any, indent: int = 2) -> str:
     return dumps(result, pretty=indent > 0)
 
 
-def extract_text_from_response(response: Any) -> str | None:
+def extract_text_from_response(response: object) -> str | None:
     if isinstance(response, str):
         raw = response.strip()
         if raw.startswith(("[", "{")) and (
             "'type'" in raw or '"type"' in raw or "'text'" in raw or '"text"' in raw
         ):
-            parsed: Any | None = None
+            parsed: object | None = None
             try:
-                parsed = json.loads(raw)
-            except Exception:
+                parsed = cast(object, json.loads(raw))
+            except Exception:  # noqa: BLE001 - best-effort response text parsing fallback
                 try:
-                    parsed = ast.literal_eval(raw)
-                except Exception:
+                    parsed = cast(object, ast.literal_eval(raw))
+                except Exception:  # noqa: BLE001 - malformed response payload is ignored
                     parsed = None
 
             if parsed is not None and not isinstance(parsed, str):
@@ -151,22 +153,23 @@ def extract_text_from_response(response: Any) -> str | None:
 
     if isinstance(response, list):
         parts: list[str] = []
-        for item in response:
+        for item in cast(list[object], response):
             if isinstance(item, str):
                 parts.append(item)
                 continue
             if isinstance(item, Mapping):
-                item_text = item.get("text")
+                item_text = cast(Mapping[str, object], item).get("text")
                 if isinstance(item_text, str) and item_text:
                     parts.append(item_text)
         return "".join(parts) if parts else None
 
     if isinstance(response, Mapping):
-        direct_text = response.get("text")
+        response_map = cast(Mapping[str, object], response)
+        direct_text = response_map.get("text")
         if isinstance(direct_text, str) and direct_text:
             return direct_text
 
-        content = response.get("content")
+        content = response_map.get("content")
         if content is not None:
             return extract_text_from_response(content)
 

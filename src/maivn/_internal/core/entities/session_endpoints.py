@@ -1,3 +1,4 @@
+# pyright: strict
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
@@ -6,7 +7,11 @@ from pydantic import BaseModel, Field
 
 
 class SessionEndpoints(BaseModel):
-    """Connection data returned when starting a session."""
+    """Connection data returned when starting a session.
+
+    This wire DTO intentionally keeps BaseModel assignment behavior; enabling
+    ConfigurableMixin would add post-construction assignment validation.
+    """
 
     session_id: str = Field(..., description="Unique identifier for the session")
     assistant_id: str | None = Field(

@@ -2,13 +2,14 @@
 Provides helpers for choosing safe defaults based on available system resources.
 Used primarily for parallel execution sizing."""
 
+# pyright: strict
 from __future__ import annotations
 
 import os
 
 from ..constants import MAX_PARALLEL_WORKERS
 
-# MARK: - Worker Count Utilities
+# MARK: Worker Count Utilities
 
 
 def get_optimal_worker_count() -> int:
@@ -36,7 +37,7 @@ def get_optimal_worker_count() -> int:
     return MAX_PARALLEL_WORKERS
 
 
-# MARK: - Private Helpers
+# MARK: Private Helpers
 
 
 def _get_cpu_count() -> int | None:
@@ -47,10 +48,10 @@ def _get_cpu_count() -> int | None:
     """
     try:
         return os.cpu_count()
-    except Exception:
+    except Exception:  # noqa: BLE001 - CPU-count lookup is best-effort; use safe cap.
         return None
 
 
-# MARK: - Public API
+# MARK: Public API
 
 __all__ = ["get_optimal_worker_count"]

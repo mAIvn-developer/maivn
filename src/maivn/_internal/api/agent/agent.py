@@ -1,31 +1,40 @@
 """Core Agent class implementation."""
 
+# pyright: strict
 from __future__ import annotations
 
 import sys
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from maivn_shared import BaseDependency
 from maivn_shared.domain.entities.dependencies import AwaitForDependency, ReevaluateDependency
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field, PrivateAttr, field_validator
+from typing_extensions import override
 
 from maivn._internal.core.entities.tools import BaseTool
+from maivn._internal.core.entities.tools.method_tool import MethodTool
 from maivn._internal.core.interfaces import AgentOrchestratorInterface
+from maivn._internal.core.orchestrator.protocols import OrchestratedSwarm
 from maivn._internal.core.services.team_dependencies import (
+    TeamControlReference,
     add_team_dependency,
     add_team_execution_control,
     resolve_team_control_reference,
 )
 
-from ..base_scope import BaseScope
+from ..base_scope import BaseScope, ToolOverride
 from .client_cache import get_or_create_client
 from .invocation_methods import AgentInvocationMethodsMixin
 
 if TYPE_CHECKING:
     from ..client import Client
-    from ..swarm import Swarm
+
+
+# MARK: Types
+
+InitialTool = BaseTool | Callable[..., object] | type[PydanticBaseModel]
 
 
 # MARK: Agent
@@ -82,13 +91,13 @@ class Agent(AgentInvocationMethodsMixin, BaseScope):
         default="auto",
         description=("Control nested synthesis behavior for this agent when invoked by a Swarm."),
     )
-    tools: list[Any] = Field(
+    tools: list[InitialTool] = Field(
         default_factory=list,
         description="Tools registered on this agent at construction time.",
         exclude=True,
     )
 
-    _swarm: Swarm | None = PrivateAttr(default=None)
+    _swarm: OrchestratedSwarm | None = PrivateAttr(default=None)
     _orchestrator: AgentOrchestratorInterface | None = PrivateAttr(default=None)
     _closed: bool = PrivateAttr(default=False)
     _team_dependencies: list[BaseDependency] = PrivateAttr(default_factory=list)
@@ -105,7 +114,8 @@ class Agent(AgentInvocationMethodsMixin, BaseScope):
 
     # MARK: - Lifecycle
 
-    def model_post_init(self, context: Any) -> None:
+    @override
+    def model_post_init(self, context: object) -> None:
         """Initialize client from api_key if needed."""
         super().model_post_init(context)
         self._initialize_client()
@@ -114,13 +124,13 @@ class Agent(AgentInvocationMethodsMixin, BaseScope):
     def _initialize_client(self) -> None:
         """Initialize client from api_key or validate existing client."""
         if self.api_key and not self.client:
-            self.client = self._get_or_create_client(self.api_key)
+            self.client = get_or_create_client(self.api_key)
         elif not self.api_key and not self.client:
             raise ValueError("Agent requires either a Client instance or an api_key.")
 
     @field_validator("included_nested_synthesis", mode="before")
     @classmethod
-    def _normalize_included_nested_synthesis(cls, value: Any) -> bool | Literal["auto"]:
+    def _normalize_included_nested_synthesis(cls, value: object) -> bool | Literal["auto"]:
         """Normalize include-nested-synthesis mode."""
         if value is None:
             return "auto"
@@ -136,24 +146,21 @@ class Agent(AgentInvocationMethodsMixin, BaseScope):
                 return False
         raise ValueError("included_nested_synthesis must be True, False, or 'auto'")
 
-    @staticmethod
-    def _get_or_create_client(api_key: str) -> Client:
-        """Get cached client or create new one."""
-        return get_or_create_client(api_key)
-
     # MARK: - Tool Management
 
+    @override
     def add_tool(
         self,
-        tool: BaseTool | Callable[..., Any] | type[PydanticBaseModel],
+        tool: BaseTool | Callable[..., object] | type[PydanticBaseModel],
         name: str | None = None,
         description: str | None = None,
         *,
         always_execute: bool = False,
         final_tool: bool = False,
         tags: list[str] | None = None,
-        before_execute: Callable[[dict[str, Any]], Any] | None = None,
-        after_execute: Callable[[dict[str, Any]], Any] | None = None,
+        before_execute: Callable[[dict[str, object]], object] | None = None,
+        after_execute: Callable[[dict[str, object]], object] | None = None,
+        override: ToolOverride | None = None,
     ) -> BaseTool:
         """Register a callable, Pydantic model, or prebuilt tool on this agent."""
         registered_tool = super().add_tool(
@@ -165,20 +172,59 @@ class Agent(AgentInvocationMethodsMixin, BaseScope):
             tags=tags,
             before_execute=before_execute,
             after_execute=after_execute,
+            override=override,
         )
         self._remember_registered_tool(registered_tool)
         return registered_tool
+
+    @override
+    def add_toolset(
+        self,
+        instance: object,
+        *,
+        include: list[str] | tuple[str, ...] | None = None,
+        exclude: list[str] | tuple[str, ...] | None = None,
+        include_tags: list[str] | tuple[str, ...] | None = None,
+        exclude_tags: list[str] | tuple[str, ...] | None = None,
+        overrides: dict[str, ToolOverride] | None = None,
+    ) -> list[MethodTool]:
+        """Register every ``@toolify`` method on a ``@toolset`` instance.
+
+        Thin Agent-facing wrapper around
+        :meth:`BaseScopeToolingMixin.add_toolset`. Filter kwargs
+        (``include``, ``exclude``, ``include_tags``, ``exclude_tags``)
+        pass through unchanged; see the scope mixin for semantics. The
+        ``overrides`` map applies a per-method :class:`ToolOverride` at
+        registration time (e.g. to pin a discovery tool with
+        ``always_execute=True`` or attach app-specific dependencies). Each
+        registered :class:`MethodTool` is also tracked on ``self.tools``
+        so consumers of the existing Agent API observe the new tools the
+        same way they observe ones added via :meth:`add_tool`.
+        """
+        registered = super().add_toolset(
+            instance,
+            include=include,
+            exclude=exclude,
+            include_tags=include_tags,
+            exclude_tags=exclude_tags,
+            overrides=overrides,
+        )
+        for tool in registered:
+            self._remember_registered_tool(tool)
+        return registered
 
     def _register_initial_tools(self) -> None:
         initial_tools = list(self.tools)
         self.tools = []
         for tool in initial_tools:
-            self.add_tool(tool)
+            _ = self.add_tool(tool)
 
     def _remember_registered_tool(self, tool: BaseTool) -> None:
-        tool_id = getattr(tool, "tool_id", None)
+        tool_id = tool.tool_id
         for registered_tool in self.tools:
-            if tool_id is not None and getattr(registered_tool, "tool_id", None) == tool_id:
+            if not isinstance(registered_tool, BaseTool):
+                continue
+            if registered_tool.tool_id == tool_id:
                 return
             if registered_tool is tool:
                 return
@@ -186,7 +232,7 @@ class Agent(AgentInvocationMethodsMixin, BaseScope):
 
     # MARK: - Swarm
 
-    def get_swarm(self) -> Swarm | None:
+    def get_swarm(self) -> OrchestratedSwarm | None:
         """Get parent swarm if agent belongs to one."""
         return self._swarm
 
@@ -201,7 +247,7 @@ class Agent(AgentInvocationMethodsMixin, BaseScope):
         """Attach execution-control metadata for Swarm team invocation."""
         add_team_execution_control(self, control)
 
-    def _resolve_team_control_reference(self, ref: Any) -> tuple[str, str]:
+    def _resolve_team_control_reference(self, ref: TeamControlReference) -> tuple[str, str]:
         """Resolve Swarm agent/tool refs for team execution-control decorators."""
         swarm = self.get_swarm()
         if swarm is None:
@@ -221,10 +267,8 @@ class Agent(AgentInvocationMethodsMixin, BaseScope):
             self.close_mcp_servers()
         except Exception:  # noqa: BLE001 - cleanup must never raise
             pass
-        orchestrator = getattr(self, "_orchestrator", None)
+        orchestrator = self._orchestrator
         if orchestrator is None:
-            return
-        if not hasattr(orchestrator, "close"):
             return
         try:
             orchestrator.close()
@@ -241,10 +285,23 @@ class Agent(AgentInvocationMethodsMixin, BaseScope):
             pass
 
 
+def bind_agent_swarm(agent: Agent, swarm: OrchestratedSwarm) -> None:
+    """Bind an agent to its parent swarm (framework-internal).
+
+    Centralizes the single private back-reference write the swarm-registration flow
+    performs. It is a module function -- not a public ``Agent`` method -- so it stays
+    off the developer-facing API: application code only ever *reads* an agent's swarm,
+    via :meth:`Agent.get_swarm`. The dynamic ``__setattr__`` keeps ``_swarm`` private
+    (a normal assignment from outside the class is rejected by the type checker) while
+    still routing through Pydantic's private-attr store.
+    """
+    agent.__setattr__("_swarm", swarm)
+
+
 def _rebuild_agent_model() -> None:
     from ..client import Client
 
-    Agent.model_rebuild(_types_namespace={"Client": Client})
+    _ = Agent.model_rebuild(_types_namespace={"Client": Client})
 
 
 _rebuild_agent_model()

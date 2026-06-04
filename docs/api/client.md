@@ -1,6 +1,6 @@
 # Client
 
-The `Client` class manages HTTP connections to the maivn server. It handles authentication, thread management, timeout configuration, and programmatic resource management.
+The `Client` class manages HTTP connections to the mAIvn service. It handles authentication, thread management, timeout configuration, and programmatic resource management.
 
 Most users won't interact with `Client` directly - it's auto-created when you provide `api_key` to an `Agent`. However, explicit `Client` usage enables connection reuse across multiple agents.
 
@@ -49,7 +49,7 @@ Client(
 
 ### Timezone Configuration
 
-The maivn system has built-in datetime awareness. The timezone parameters control how the system interprets time-related queries:
+The mAIvn runtime has built-in datetime awareness. The timezone parameters control how the system interprets time-related queries:
 
 | Parameter                             | Behavior                                                     |
 | ------------------------------------- | ------------------------------------------------------------ |
@@ -140,7 +140,7 @@ def get_total_execution_timeout() -> float | None
 
 #### preview_redaction()
 
-Preview server-side redaction without starting a full session.
+Preview the redaction the mAIvn service would apply, without starting a full session.
 
 ```python
 def preview_redaction(
@@ -149,7 +149,7 @@ def preview_redaction(
 ) -> RedactionPreviewResponse
 ```
 
-Pass either a `RedactionPreviewRequest` model or an equivalent dictionary payload. The client sends the request to `/preview-redaction` and validates the response as `RedactionPreviewResponse`.
+Pass either a `RedactionPreviewRequest` model or an equivalent dictionary payload. The client submits the request to the mAIvn service and validates the response as `RedactionPreviewResponse`.
 
 Example:
 
@@ -228,6 +228,19 @@ resource = client.create_memory_resource(
 Resource APIs and SDK-bound `resources=[...]` payloads are content-hash aware. Re-sending the
 same bytes reuses the existing resource. Sending an existing `resource_id` with different
 `content_base64` registers a new version and supersedes the prior active row.
+
+### Billing & Usage
+
+#### get_usage()
+
+Read your organization's plan, usage-vs-limits, and the org → project → API-key
+usage breakdown. Requires a full-access (`all`) API key.
+
+```python
+def get_usage(*, year: int | None = None, month: int | None = None) -> BillingUsage
+```
+
+See [Billing & Usage](billing.md) for the full reference.
 
 ### Resource Management
 
@@ -357,3 +370,4 @@ This means multiple agents with the same `api_key` share the same `Client` autom
 
 - [Agent](agent.md) - Main agent class
 - [Configuration](configuration.md) - Configuration system
+- [Billing & Usage](billing.md) - Read plan, usage, and the per-API-key breakdown

@@ -1,20 +1,16 @@
-"""Function-based tool entity.
+"""Function-based tool entity."""
 
-This module provides a tool implementation for Python functions,
-using mixins for common functionality.
-"""
-
+# pyright: strict
 from __future__ import annotations
 
-import inspect
 from collections.abc import Callable
-from typing import Any
 
 from maivn_shared import ToolType
 from pydantic import Field
+from typing_extensions import override
 
 from ..mixins import FunctionToolIdentifiableMixin
-from .base_tool import BaseTool
+from .base_tool import FUNCTION_TOOL_TYPE, BaseTool
 
 # MARK: - FunctionTool
 
@@ -28,27 +24,13 @@ class FunctionTool(FunctionToolIdentifiableMixin, BaseTool):
     """
 
     tool_type: ToolType = Field(
-        default="func",
+        default=FUNCTION_TOOL_TYPE,
         description="Type of tool (always func for this class)",
     )
-    tool_id: str = Field(
-        default="",
-        description="Unique tool identifier",
-    )
-    func: Callable[..., Any] = Field(
+    func: Callable[..., object] = Field(
         ...,
         description="The function that implements this tool's behavior",
     )
-
-    # MARK: Execution
-
-    def is_executable(self) -> bool:
-        """Check if tool can be executed.
-
-        Returns:
-            True if func is callable
-        """
-        return callable(self.func)
 
     # MARK: Function Metadata
 
@@ -58,32 +40,14 @@ class FunctionTool(FunctionToolIdentifiableMixin, BaseTool):
         Returns:
             Function name or '<lambda>' for lambda functions
         """
-        return getattr(self.func, "__name__", "<lambda>")
-
-    def get_function_module(self) -> str | None:
-        """Get the module name where the function is defined.
-
-        Returns:
-            Module name or None if not available
-        """
-        return getattr(self.func, "__module__", None)
-
-    def get_function_signature(self) -> str:
-        """Get a string representation of the function signature.
-
-        Returns:
-            String representation of function signature
-        """
-        try:
-            return str(inspect.signature(self.func))
-        except (ValueError, TypeError):
-            return "<signature unavailable>"
+        return self._callable_name(self.func, "<lambda>")
 
     # MARK: String Representation
 
+    @override
     def __str__(self) -> str:
         """Return string representation with function name."""
-        return f"{self.name} ({self.get_function_name()})"
+        return self._format_tool_label(self.get_function_name())
 
 
 __all__ = [

@@ -1,5 +1,6 @@
 """Registry for EventBridge instances."""
 
+# pyright: strict
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -39,9 +40,19 @@ class BridgeRegistry:
 
     def remove(self, session_id: str) -> None:
         """Remove and close an event bridge."""
-        if session_id in self._bridges:
-            self._bridges[session_id].close()
-            del self._bridges[session_id]
+        bridge = self._bridges.pop(session_id, None)
+        if bridge is not None:
+            bridge.close()
+
+    def clear(self) -> None:
+        """Remove and close every registered event bridge.
+
+        Iterates a snapshot of the registered session IDs and applies
+        :meth:`remove` to each, so ``close()`` runs for every bridge and the
+        registry ends up empty.
+        """
+        for session_id in list(self._bridges):
+            self.remove(session_id)
 
 
 __all__ = ["BridgeRegistry"]

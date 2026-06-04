@@ -2,9 +2,9 @@
 Provides SSE parsing and routing utilities used by the orchestrator.
 """
 
+# pyright: strict
 from __future__ import annotations
 
-# MARK: - Imports
 from .event_handlers import EventProcessingState
 from .event_stream_processor import EventStreamHandlers, EventStreamProcessor
 

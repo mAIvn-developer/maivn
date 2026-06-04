@@ -1,8 +1,7 @@
 """Deduplication helpers for EventBridge."""
 
+# pyright: strict
 from __future__ import annotations
-
-from typing import Any
 
 # MARK: Fingerprints
 
@@ -26,7 +25,7 @@ def build_interrupt_fingerprint(
     )
 
 
-def build_status_fingerprint(data: dict[str, Any]) -> tuple[str, str] | None:
+def build_status_fingerprint(data: dict[str, object]) -> tuple[str, str] | None:
     """Fingerprint for a ``status_message`` payload, or ``None`` if uniqueable."""
     message = data.get("message")
     if not isinstance(message, str):

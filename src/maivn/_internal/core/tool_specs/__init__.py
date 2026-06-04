@@ -5,6 +5,7 @@ from function tools, model tools, and MCP tools. It handles nested Pydantic mode
 flattening and dependency detection.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 from .dependency_detector import DependencyDetector
@@ -14,6 +15,8 @@ from .flattener import ToolFlattener
 from .model_discovery import find_model_class
 from .schema_builder import SchemaBuilder
 from .schema_processors import SchemaTypeProcessor
+
+# MARK: Public API
 
 __all__ = [
     "DependencyDetector",

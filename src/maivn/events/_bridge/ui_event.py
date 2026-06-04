@@ -1,11 +1,11 @@
 """UI event value object for EventBridge."""
 
+# pyright: strict
 from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
 
 from .serialization import build_safe_event_payload
 
@@ -17,7 +17,7 @@ class UIEvent:
     """A single event to be delivered to the frontend via SSE."""
 
     type: str
-    data: dict[str, Any]
+    data: dict[str, object]
     id: str = ""
     timestamp: str = ""
 
@@ -27,9 +27,9 @@ class UIEvent:
         if not self.timestamp:
             self.timestamp = datetime.now(timezone.utc).isoformat()
 
-    def to_sse(self) -> dict[str, Any]:
+    def to_sse(self) -> dict[str, object]:
         """Build an ``EventSourceResponse``-compatible payload."""
-        payload = {
+        payload: dict[str, object] = {
             "id": self.id,
             "type": self.type,
             "data": self.data,
@@ -46,7 +46,7 @@ class UIEvent:
             ),
         }
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         """Serialize for history/snapshot APIs."""
         return {
             "id": self.id,

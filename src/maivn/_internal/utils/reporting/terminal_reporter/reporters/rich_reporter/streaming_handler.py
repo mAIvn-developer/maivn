@@ -2,10 +2,11 @@
 Manages in-place terminal updates, panel rendering, and debug overlays.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from ...config import (
     DEBUG_SYSTEM_TOOL_STREAM_BUFFER_MAX_CHARS,
@@ -27,12 +28,12 @@ if TYPE_CHECKING:
 class StreamingHandler:
     """Manages in-place system tool streaming display."""
 
-    STREAMING_MAX_LINES = 50
-    SYSTEM_TOOL_STREAM_INDENT = "  "
+    STREAMING_MAX_LINES: ClassVar[int] = 50
+    SYSTEM_TOOL_STREAM_INDENT: ClassVar[str] = "  "
 
     def __init__(self, console: Console) -> None:
-        self.console = console
-        self._stream_state = SystemToolStreamState()
+        self.console: Console = console
+        self._stream_state: SystemToolStreamState = SystemToolStreamState()
 
     @property
     def state(self) -> SystemToolStreamState:
@@ -54,9 +55,7 @@ class StreamingHandler:
 
     def supports_in_place_updates(self) -> bool:
         """Check if console supports in-place updates."""
-        return bool(getattr(self.console.file, "isatty", lambda: False)()) and getattr(
-            self.console, "is_terminal", False
-        )
+        return bool(self.console.file.isatty()) and self.console.is_terminal
 
     def handle_panel_progress(
         self,
@@ -123,7 +122,7 @@ class StreamingHandler:
             all_lines = self._render_panels(render_ids)
             if all_lines:
                 self._update_streaming_display(all_lines)
-                self.console.file.write("\n")
+                _ = self.console.file.write("\n")
                 self.console.file.flush()
 
         self._stream_state.reset_panel_state()
@@ -207,16 +206,16 @@ class StreamingHandler:
             )
 
         for line in lines:
-            self.console.file.write(line + "\n")
+            _ = self.console.file.write(line + "\n")
         self.console.file.flush()
         self._stream_state.total_lines_printed = len(lines)
 
     def _clear_previous_lines(self, lines: int) -> None:
         """Clear previous streaming lines from terminal."""
-        self.console.file.write(f"\033[{lines}A")
+        _ = self.console.file.write(f"\033[{lines}A")
         for _ in range(lines):
-            self.console.file.write("\033[2K\033[1B")
-        self.console.file.write(f"\033[{lines}A")
+            _ = self.console.file.write("\033[2K\033[1B")
+        _ = self.console.file.write(f"\033[{lines}A")
         self.console.file.flush()
 
     # MARK: - Debug Helpers

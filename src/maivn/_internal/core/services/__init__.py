@@ -1,5 +1,6 @@
 """Internal Core Services Package Exports."""
 
+# pyright: strict
 from __future__ import annotations
 
 from ..application_services.events.event_stream_processor import (
@@ -11,7 +12,7 @@ from ..application_services.events.interrupt_manager import (
     InterruptManager,
 )
 
-# Application services re-exports for backward compatibility
+# Application services re-exports
 from ..application_services.execution.background_executor import BackgroundExecutor
 from ..application_services.http.http_client_service import HttpClientService
 from ..application_services.orchestration.tool_execution_orchestrator import (
@@ -31,6 +32,8 @@ from .agent_execution_service import AgentExecutionService, MockAgentExecutionSe
 from .dependency_execution_service import DependencyExecutionService
 from .interrupt_service import InterruptService
 from .toolify import ToolifyService
+
+# MARK: Exports
 
 __all__ = [
     # Local services

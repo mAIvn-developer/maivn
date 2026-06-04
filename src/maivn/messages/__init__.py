@@ -2,6 +2,7 @@
 Re-exports the core message classes used by the Maivn SDK.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 from maivn_shared import (

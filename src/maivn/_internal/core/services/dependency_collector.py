@@ -4,9 +4,11 @@ This module provides the DependencyCollector class which extracts dependencies
 from callables and Pydantic models, including nested model dependencies.
 """
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import Any, get_args, get_origin
+from collections.abc import Iterable
+from typing import cast, get_args, get_origin
 
 from maivn_shared import BaseDependency
 from pydantic import BaseModel
@@ -24,7 +26,7 @@ class DependencyCollector:
 
     # MARK: - Public Methods
 
-    def collect_all(self, obj: Any) -> list[BaseDependency]:
+    def collect_all(self, obj: object) -> list[BaseDependency]:
         """Collect all dependencies from an object.
 
         Args:
@@ -45,27 +47,27 @@ class DependencyCollector:
 
     def _collect_direct_dependencies(
         self,
-        obj: Any,
+        obj: object,
         dependencies: list[BaseDependency],
     ) -> None:
         """Collect dependencies from _dependencies attribute."""
-        for dep in getattr(obj, "_dependencies", []):
+        for dep in _iter_attached_dependencies(obj, "_dependencies"):
             if dep not in dependencies:
                 dependencies.append(dep)
 
     def _collect_pending_dependencies(
         self,
-        obj: Any,
+        obj: object,
         dependencies: list[BaseDependency],
     ) -> None:
         """Collect pending dependencies from __maivn_pending_deps__ attribute."""
-        for dep in getattr(obj, "__maivn_pending_deps__", []):
+        for dep in _iter_attached_dependencies(obj, "__maivn_pending_deps__"):
             if dep not in dependencies:
                 dependencies.append(dep)
 
     def _collect_model_dependencies(
         self,
-        obj: Any,
+        obj: object,
         dependencies: list[BaseDependency],
     ) -> None:
         """Collect nested dependencies from Pydantic models."""
@@ -84,7 +86,8 @@ class DependencyCollector:
         visited: set[type[BaseModel]] | None = None,
     ) -> list[BaseDependency]:
         """Recursively collect dependencies from a Pydantic model."""
-        visited = visited or set()
+        if visited is None:
+            visited = set()
 
         if model in visited:
             return []
@@ -104,11 +107,11 @@ class DependencyCollector:
         all_deps: list[BaseDependency],
     ) -> None:
         """Collect direct and pending dependencies from model."""
-        for dep in getattr(model, "_dependencies", []):
+        for dep in _iter_attached_dependencies(model, "_dependencies"):
             if dep not in all_deps:
                 all_deps.append(dep)
 
-        for dep in getattr(model, "__maivn_pending_deps__", []):
+        for dep in _iter_attached_dependencies(model, "__maivn_pending_deps__"):
             if dep not in all_deps:
                 all_deps.append(dep)
 
@@ -121,15 +124,15 @@ class DependencyCollector:
         if not hasattr(model, "__dict__"):
             return
 
-        for attr_value in model.__dict__.values():
+        for attr_value in cast(Iterable[object], model.__dict__.values()):
             if not callable(attr_value):
                 continue
 
-            for dep in getattr(attr_value, "_dependencies", []):
+            for dep in _iter_attached_dependencies(attr_value, "_dependencies"):
                 if dep not in all_deps:
                     all_deps.append(dep)
 
-            for dep in getattr(attr_value, "__maivn_pending_deps__", []):
+            for dep in _iter_attached_dependencies(attr_value, "__maivn_pending_deps__"):
                 if dep not in all_deps:
                     all_deps.append(dep)
 
@@ -155,7 +158,7 @@ class DependencyCollector:
     # MARK: - Type Extraction
 
     @staticmethod
-    def _extract_nested_models(field_type: Any) -> list[type[BaseModel]]:
+    def _extract_nested_models(field_type: object) -> list[type[BaseModel]]:
         """Extract Pydantic model classes from a field type annotation."""
         if isinstance(field_type, type) and issubclass(field_type, BaseModel):
             return [field_type]
@@ -165,10 +168,18 @@ class DependencyCollector:
             return []
 
         models: list[type[BaseModel]] = []
-        for arg in get_args(field_type):
+        for arg in cast(tuple[object, ...], get_args(field_type)):
             models.extend(DependencyCollector._extract_nested_models(arg))
 
         return models
+
+
+# MARK: - Attribute Helpers
+
+
+def _iter_attached_dependencies(obj: object, attr_name: str) -> Iterable[BaseDependency]:
+    """Return decorator-attached dependencies from a dynamic metadata attribute."""
+    return cast(Iterable[BaseDependency], getattr(obj, attr_name, []))
 
 
 __all__ = ["DependencyCollector"]

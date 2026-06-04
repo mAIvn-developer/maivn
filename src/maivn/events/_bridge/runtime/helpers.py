@@ -1,25 +1,26 @@
+# pyright: strict
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import cast
 
 # MARK: Text Helpers
 
 
-def normalize_text(value: Any) -> str | None:
+def normalize_text(value: object) -> str | None:
     if not isinstance(value, str):
         return None
     normalized = value.strip()
     return normalized or None
 
 
-def coerce_text(value: Any) -> str | None:
+def coerce_text(value: object) -> str | None:
     if isinstance(value, str):
         return value
     return None
 
 
-def normalize_key_part(value: Any) -> str | None:
+def normalize_key_part(value: object) -> str | None:
     normalized = normalize_text(value)
     return normalized.lower() if normalized is not None else None
 
@@ -27,16 +28,16 @@ def normalize_key_part(value: Any) -> str | None:
 # MARK: Mapping Helpers
 
 
-def coerce_mapping(value: Any) -> dict[str, Any] | None:
+def coerce_mapping(value: object) -> dict[str, object] | None:
     if isinstance(value, dict):
-        return value
+        return cast(dict[str, object], value)
     return None
 
 
 def merge_extra_fields(
-    normalized_payload: dict[str, Any],
-    original_payload: dict[str, Any],
-) -> dict[str, Any]:
+    normalized_payload: dict[str, object],
+    original_payload: dict[str, object],
+) -> dict[str, object]:
     merged = dict(normalized_payload)
     for key, value in original_payload.items():
         if key not in merged:
@@ -47,7 +48,7 @@ def merge_extra_fields(
 # MARK: Identity Helpers
 
 
-def fingerprint_mapping(value: dict[str, Any] | None) -> str | None:
+def fingerprint_mapping(value: dict[str, object] | None) -> str | None:
     if not isinstance(value, dict) or not value:
         return None
     try:

@@ -1,37 +1,43 @@
+# pyright: strict
 """Agent repository interface.
 Defines abstract methods for storing and retrieving Agent instances.
 """
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from maivn._internal.api.agent import Agent
+from typing import Protocol, TypeVar
 
 
-class AgentRepoInterface(ABC):
+class AgentRepositoryEntity(Protocol):
+    """Minimal shape an agent repository needs from an Agent-like object."""
+
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def name(self) -> str | None: ...
+
+
+AgentT = TypeVar("AgentT", bound=AgentRepositoryEntity)
+
+
+class AgentRepoInterface(Protocol[AgentT]):
     """
     Interface for an agent repository.
     """
 
-    store: dict[str, Agent]
-
     # MARK: - Agent methods
 
-    @abstractmethod
-    def add_agent(self, agent: Agent) -> None:
+    def add_agent(self, agent: AgentT) -> None:
         """
         Adds an agent to the agent repository.
 
         Args:
             agent: The agent to add.
         """
-        raise NotImplementedError
+        ...
 
-    @abstractmethod
-    def get_agent(self, agent_id: str) -> Agent | None:
+    def get_agent(self, agent_id: str) -> AgentT | None:
         """
         Gets an agent from the agent repository by ID.
 
@@ -41,10 +47,9 @@ class AgentRepoInterface(ABC):
         Returns:
             The agent with the given ID, or None if not found.
         """
-        raise NotImplementedError
+        ...
 
-    @abstractmethod
-    def get_agent_by_name(self, name: str) -> Agent | None:
+    def get_agent_by_name(self, name: str) -> AgentT | None:
         """
         Gets an agent from the agent repository by name.
 
@@ -54,19 +59,17 @@ class AgentRepoInterface(ABC):
         Returns:
             The agent with the given name, or None if not found.
         """
-        raise NotImplementedError
+        ...
 
-    @abstractmethod
-    def list_agents(self) -> list[Agent]:
+    def list_agents(self) -> list[AgentT]:
         """
         Lists all agents in the agent repository.
 
         Returns:
             A list of all agents in the agent repository.
         """
-        raise NotImplementedError
+        ...
 
-    @abstractmethod
     def remove_agent(self, agent_id: str) -> None:
         """
         Removes an agent from the agent repository.
@@ -74,14 +77,13 @@ class AgentRepoInterface(ABC):
         Args:
             agent_id: The ID of the agent to remove.
         """
-        raise NotImplementedError
+        ...
 
-    @abstractmethod
-    def update_agent(self, agent: Agent) -> None:
+    def update_agent(self, agent: AgentT) -> None:
         """
         Updates an agent in the agent repository.
 
         Args:
             agent: The agent to update.
         """
-        raise NotImplementedError
+        ...

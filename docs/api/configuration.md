@@ -1,6 +1,6 @@
 # Configuration
 
-The maivn SDK uses a layered configuration system that supports environment variables and programmatic configuration.
+The mAIvn SDK uses a layered configuration system that supports environment variables and programmatic configuration.
 
 This page covers SDK environment and process-level settings. Invocation-time runtime
 controls such as memory, system tools, orchestration, structured output, and swarm
@@ -51,8 +51,6 @@ Execution timing and limits.
 | `tool_execution_timeout_seconds`  | `float`         | `900.0`  | Per-tool timeout (15 min)                                                |
 | `dependency_wait_timeout_seconds` | `float`         | `300.0`  | Dependency resolution timeout                                            |
 | `total_execution_timeout_seconds` | `float \| None` | `7200.0` | Total session timeout (2 hours)                                          |
-| `max_prompt_length_for_tool_name` | `int`           | `30`     | Max prompt length for naming (overridable via `MAIVN_MAX_PROMPT_LENGTH`) |
-| `tool_name_hash_modulo`           | `int`           | `10000`  | Hash modulo for tool IDs (overridable via `MAIVN_TOOL_NAME_HASH_MODULO`) |
 
 ### SecurityConfiguration
 
@@ -102,8 +100,6 @@ This is the recommended way to configure the SDK in production.
 | `MAIVN_TOOL_EXECUTION_TIMEOUT`      | `execution.tool_execution_timeout_seconds`  | Per-tool timeout                             |
 | `MAIVN_DEPENDENCY_WAIT_TIMEOUT`     | `execution.dependency_wait_timeout_seconds` | Dependency timeout                           |
 | `MAIVN_TOTAL_EXECUTION_TIMEOUT`     | `execution.total_execution_timeout_seconds` | Total timeout                                |
-| `MAIVN_MAX_PROMPT_LENGTH`           | `execution.max_prompt_length_for_tool_name` | Max prompt length used when naming tools     |
-| `MAIVN_TOOL_NAME_HASH_MODULO`       | `execution.tool_name_hash_modulo`           | Hash modulo applied when generating tool IDs |
 | `MAIVN_LOG_LEVEL`                   | `logging.level`                             | Log level                                    |
 | `MAIVN_LOG_FORMAT`                  | `logging.format_string`                     | Log format                                   |
 | `MAIVN_ENABLE_TIMING_LOGS`          | `logging.enable_timing_logs`                | Timing logs                                  |

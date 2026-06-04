@@ -5,9 +5,11 @@ Handles merging, normalization, and registration of:
 - Argument policies (compose_artifact)
 """
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import Any, Literal, cast
+from collections.abc import Iterable, Mapping
+from typing import Literal, TypeAlias, TypedDict, cast
 
 from maivn_shared import BaseDependency
 from maivn_shared.domain.entities.dependencies import (
@@ -16,10 +18,23 @@ from maivn_shared.domain.entities.dependencies import (
 )
 
 from maivn._internal.core.entities.tools import BaseTool
+from maivn._internal.core.interfaces.repositories import DependencyRepoInterface
 from maivn._internal.core.utils.dependency_utils import normalize_dependencies
 
 ComposeArtifactMode = Literal["forbid", "allow", "require"]
 ComposeArtifactApproval = Literal["none", "explicit"]
+ExecutionControl: TypeAlias = AwaitForDependency | ReevaluateDependency
+ExecutionControlMetadata: TypeAlias = dict[str, object]
+ArgPolicyMap: TypeAlias = dict[str, dict[str, dict[str, str]]]
+
+
+class NormalizedArgPolicy(TypedDict):
+    """Normalized dynamic argument policy metadata."""
+
+    arg_name: str
+    policy: str
+    mode: ComposeArtifactMode
+    approval: ComposeArtifactApproval
 
 
 # MARK: Dependency Helpers
@@ -33,7 +48,7 @@ def get_dependency_signature(dependency: BaseDependency) -> str:
     return str(dependency)
 
 
-def has_matching_dependency(items: list[Any], dep_signature: str) -> bool:
+def has_matching_dependency(items: Iterable[object], dep_signature: str) -> bool:
     """Check if a matching dependency exists in the list."""
     for item in items:
         if isinstance(item, BaseDependency):
@@ -43,13 +58,13 @@ def has_matching_dependency(items: list[Any], dep_signature: str) -> bool:
 
 
 def add_dependency_to_target(
-    target: Any,
+    target: object,
     attr: str,
     dependency: BaseDependency,
     dep_signature: str,
 ) -> None:
     """Add dependency to target if not already present."""
-    items = list(getattr(target, attr, []) or [])
+    items = list(cast(Iterable[object], getattr(target, attr, []) or []))
     if not has_matching_dependency(items, dep_signature):
         items.append(dependency)
         setattr(target, attr, items)
@@ -59,18 +74,18 @@ def add_dependency_to_target(
 
 
 def normalize_execution_control(
-    control: AwaitForDependency | ReevaluateDependency,
-) -> dict[str, Any]:
+    control: ExecutionControl,
+) -> ExecutionControlMetadata:
     """Normalize an execution control to a comparable dict."""
-    payload = control.model_dump(mode="json")
-    payload.pop("arg_name", None)
-    payload.pop("name", None)
+    payload = cast(ExecutionControlMetadata, control.model_dump(mode="json"))
+    _ = payload.pop("arg_name", None)
+    _ = payload.pop("name", None)
     return payload
 
 
 def has_matching_control(
-    items: list[Any],
-    control: AwaitForDependency | ReevaluateDependency,
+    items: Iterable[object],
+    control: ExecutionControl,
 ) -> bool:
     """Check if a matching execution control exists in the list."""
     normalized = normalize_execution_control(control)
@@ -82,40 +97,47 @@ def has_matching_control(
 
 
 def add_execution_control_to_target(
-    target: Any,
-    control: AwaitForDependency | ReevaluateDependency,
+    target: object,
+    control: ExecutionControl,
 ) -> None:
     """Register an execution control on a target object."""
-    existing_controls = list(getattr(target, "__maivn_execution_controls__", []) or [])
+    existing_controls = list(
+        cast(Iterable[ExecutionControl], getattr(target, "__maivn_execution_controls__", []) or [])
+    )
     if not has_matching_control(existing_controls, control):
         existing_controls.append(control)
-        target.__maivn_execution_controls__ = existing_controls
+        _set_dynamic_attr(target, "__maivn_execution_controls__", existing_controls)
 
-    metadata = dict(getattr(target, "metadata", {}) or {})
+    metadata = _copy_metadata(target)
     normalized = normalize_execution_control(control)
     execution_controls = metadata.setdefault("execution_controls", {})
     if not isinstance(execution_controls, dict):
         execution_controls = {}
         metadata["execution_controls"] = execution_controls
+    execution_controls = cast(dict[str, object], execution_controls)
     key = control.dependency_type
     current_items = execution_controls.get(key, [])
-    merged = list(current_items) if isinstance(current_items, list) else []
+    merged: list[object] = (
+        list(cast(list[object], current_items)) if isinstance(current_items, list) else []
+    )
     if normalized not in merged:
         merged.append(normalized)
     execution_controls[key] = merged
-    target.metadata = metadata
+    _set_dynamic_attr(target, "metadata", metadata)
 
 
-def collect_execution_controls(obj: Any) -> dict[str, list[dict[str, Any]]]:
+def collect_execution_controls(obj: object) -> dict[str, list[ExecutionControlMetadata]]:
     """Collect execution controls from an object's metadata attributes."""
-    controls = list(getattr(obj, "__maivn_execution_controls__", []))
-    controls.extend(getattr(obj, "__maivn_pending_execution_controls__", []))
+    controls = list(cast(Iterable[object], getattr(obj, "__maivn_execution_controls__", [])))
+    controls.extend(
+        cast(Iterable[object], getattr(obj, "__maivn_pending_execution_controls__", []))
+    )
 
-    grouped: dict[str, list[dict[str, Any]]] = {}
+    grouped: dict[str, list[ExecutionControlMetadata]] = {}
     for control in controls:
         if not isinstance(control, AwaitForDependency | ReevaluateDependency):
             continue
-        grouped.setdefault(control.dependency_type, [])
+        _ = grouped.setdefault(control.dependency_type, [])
         normalized = normalize_execution_control(control)
         if normalized not in grouped[control.dependency_type]:
             grouped[control.dependency_type].append(normalized)
@@ -126,18 +148,19 @@ def collect_execution_controls(obj: Any) -> dict[str, list[dict[str, Any]]]:
 # MARK: Arg Policy Helpers
 
 
-def normalize_arg_policy(policy: Any) -> dict[str, str] | None:
+def normalize_arg_policy(policy: object) -> NormalizedArgPolicy | None:
     """Normalize an arg policy dict, returning None if invalid."""
     if not isinstance(policy, dict):
         return None
 
-    arg_name = policy.get("arg_name")
+    policy_data = cast(dict[object, object], policy)
+    arg_name = policy_data.get("arg_name")
     if not isinstance(arg_name, str) or not arg_name.strip():
         return None
 
-    mode = policy.get("mode", "allow")
-    approval = policy.get("approval", "none")
-    policy_key = policy.get("policy", "compose_artifact")
+    mode = policy_data.get("mode", "allow")
+    approval = policy_data.get("approval", "none")
+    policy_key = policy_data.get("policy", "compose_artifact")
     if not isinstance(mode, str) or mode not in {"forbid", "allow", "require"}:
         return None
     if not isinstance(approval, str) or approval not in {"none", "explicit"}:
@@ -153,12 +176,12 @@ def normalize_arg_policy(policy: Any) -> dict[str, str] | None:
     }
 
 
-def merge_arg_policies(source: Any) -> dict[str, dict[str, dict[str, str]]]:
+def merge_arg_policies(source: object) -> ArgPolicyMap:
     """Merge arg policies from a list or dict source."""
-    merged: dict[str, dict[str, dict[str, str]]] = {}
+    merged: ArgPolicyMap = {}
 
     if isinstance(source, list):
-        for item in source:
+        for item in cast(list[object], source):
             normalized = normalize_arg_policy(item)
             if normalized is None:
                 continue
@@ -171,16 +194,19 @@ def merge_arg_policies(source: Any) -> dict[str, dict[str, dict[str, str]]]:
         return merged
 
     if isinstance(source, dict):
-        for arg_name, value in source.items():
+        for arg_name, value in cast(dict[object, object], source).items():
             if not isinstance(arg_name, str) or not isinstance(value, dict):
                 continue
             normalized_policies: dict[str, dict[str, str]] = {}
-            for policy_key, raw_policy in value.items():
+            for policy_key, raw_policy in cast(dict[object, object], value).items():
+                raw_policy_values = (
+                    cast(dict[str, object], raw_policy) if isinstance(raw_policy, dict) else {}
+                )
                 normalized = normalize_arg_policy(
                     {
                         "arg_name": arg_name,
                         "policy": policy_key,
-                        **(raw_policy if isinstance(raw_policy, dict) else {}),
+                        **raw_policy_values,
                     }
                 )
                 if normalized is None:
@@ -195,27 +221,31 @@ def merge_arg_policies(source: Any) -> dict[str, dict[str, dict[str, str]]]:
     return merged
 
 
-def collect_arg_policies(obj: Any) -> dict[str, dict[str, dict[str, str]]]:
+def collect_arg_policies(obj: object) -> ArgPolicyMap:
     """Collect arg policies from an object's metadata attributes."""
-    policies = list(getattr(obj, "__maivn_arg_policies__", []))
-    policies.extend(getattr(obj, "__maivn_pending_arg_policies__", []))
+    policies = list(cast(Iterable[object], getattr(obj, "__maivn_arg_policies__", [])))
+    policies.extend(cast(Iterable[object], getattr(obj, "__maivn_pending_arg_policies__", [])))
     return merge_arg_policies(policies)
 
 
-def add_arg_policy_to_target(target: Any, policy: dict[str, Any]) -> None:
+def add_arg_policy_to_target(target: object, policy: object) -> None:
     """Register an arg policy on a target object."""
     normalized = normalize_arg_policy(policy)
     if normalized is None:
         return
 
-    existing_policies = list(getattr(target, "__maivn_arg_policies__", []) or [])
+    existing_policies = list(
+        cast(Iterable[NormalizedArgPolicy], getattr(target, "__maivn_arg_policies__", []) or [])
+    )
     if normalized not in existing_policies:
         existing_policies.append(normalized)
-        target.__maivn_arg_policies__ = existing_policies
+        _set_dynamic_attr(target, "__maivn_arg_policies__", existing_policies)
 
-    metadata = dict(getattr(target, "metadata", {}) or {})
+    metadata = _copy_metadata(target)
     arg_policies = metadata.get("arg_policies")
-    merged_arg_policies = merge_arg_policies(arg_policies) if isinstance(arg_policies, dict) else {}
+    merged_arg_policies = (
+        merge_arg_policies(cast(object, arg_policies)) if isinstance(arg_policies, dict) else {}
+    )
     arg_name = normalized["arg_name"]
     policy_key = normalized["policy"]
     current_map = merged_arg_policies.setdefault(arg_name, {})
@@ -224,19 +254,19 @@ def add_arg_policy_to_target(target: Any, policy: dict[str, Any]) -> None:
         "approval": normalized["approval"],
     }
     metadata["arg_policies"] = merged_arg_policies
-    target.metadata = metadata
+    _set_dynamic_attr(target, "metadata", metadata)
 
 
 # MARK: Dynamic Registration Helpers
 
 
 def register_dependency_on_targets(
-    dependency: BaseDependency,
+    dependency: BaseDependency | None,
     *,
-    obj: Any,
+    obj: object,
     tool: BaseTool,
     tool_id: str,
-    dependency_repo: Any,
+    dependency_repo: DependencyRepoInterface,
 ) -> None:
     """Register a dependency dynamically after tool creation."""
     if dependency is None:
@@ -254,14 +284,14 @@ def register_dependency_on_targets(
     if not has_matching_dependency(repo_items, dep_signature):
         try:
             dependency_repo.add_dependency(tool_id, dependency)
-        except Exception:
+        except Exception:  # noqa: BLE001 - best-effort dynamic dep registration.
             pass
 
 
 def register_execution_control_on_targets(
-    control: AwaitForDependency | ReevaluateDependency,
+    control: ExecutionControl | None,
     *,
-    obj: Any,
+    obj: object,
     tool: BaseTool,
 ) -> None:
     """Register an execution control on both obj and tool."""
@@ -273,17 +303,32 @@ def register_execution_control_on_targets(
 
 
 def register_arg_policy_on_targets(
-    policy: dict[str, Any],
+    policy: object,
     *,
-    obj: Any,
+    obj: object,
     tool: BaseTool,
 ) -> None:
     """Register an arg policy on both obj and tool."""
     if not isinstance(policy, dict):
         return
 
-    add_arg_policy_to_target(obj, policy)
-    add_arg_policy_to_target(tool, policy)
+    policy_obj = cast(object, policy)
+    add_arg_policy_to_target(obj, policy_obj)
+    add_arg_policy_to_target(tool, policy_obj)
+
+
+# MARK: Attribute Helpers
+
+
+def _copy_metadata(target: object) -> dict[str, object]:
+    """Copy optional dynamic metadata from a target object."""
+    raw_metadata = cast(object, getattr(target, "metadata", {}))
+    return dict(cast(Mapping[str, object], raw_metadata or {}))
+
+
+def _set_dynamic_attr(target: object, attr_name: str, value: object) -> None:
+    """Set a decorator-attached dynamic attribute."""
+    setattr(target, attr_name, value)
 
 
 __all__ = [

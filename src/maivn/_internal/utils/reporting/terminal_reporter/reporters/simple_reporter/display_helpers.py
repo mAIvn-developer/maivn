@@ -2,10 +2,12 @@
 Box drawing, result printing, and event label formatting.
 """
 
+# pyright: strict
+
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Iterable, Mapping
+from typing import cast
 
 from ..._components import FileWriter
 from ..._formatters import (
@@ -86,7 +88,7 @@ def print_section_box(
     print(f"{bl}{border}{br}\n")
 
 
-def print_kv_lines(*, details: dict[str, Any]) -> None:
+def print_kv_lines(*, details: Mapping[str, object]) -> None:
     """Print key-value detail lines."""
     for key, value in details.items():
         print(f"  {key}: {value}")
@@ -97,33 +99,35 @@ def print_kv_lines(*, details: dict[str, Any]) -> None:
 
 def print_tool_child_lines(
     *,
-    result: Any,
+    result: object | None,
     truncate_fn: Callable[[str], str] = truncate_result,
 ) -> None:
     """Print tool child result lines with tree-style connectors."""
     lines: list[str] = []
 
     if isinstance(result, dict):
-        private_data_injected = result.get("private_data_injected", [])
+        result_map = cast(Mapping[str, object], result)
+        private_data_injected = cast(Iterable[str], result_map.get("private_data_injected", []))
         if private_data_injected:
             lines.append(f"[PRIVATE_DATA] {', '.join(private_data_injected)}")
 
-        interrupt_data_injected = result.get("interrupt_data_injected", [])
+        interrupt_data_injected = cast(Iterable[str], result_map.get("interrupt_data_injected", []))
         if interrupt_data_injected:
             lines.append(f"[INTERRUPT_DATA] {', '.join(interrupt_data_injected)}")
 
-        response_text = extract_response_text(result)
+        response_text = extract_response_text(result_map)
         if response_text:
             lines.append(f"Response: {truncate_fn(response_text)}")
 
     if result is not None:
         if isinstance(result, dict):
-            if "result" in result:
-                result_to_display = result["result"]
+            result_map = cast(Mapping[str, object], result)
+            if "result" in result_map:
+                result_to_display = result_map["result"]
                 result_str = truncate_fn(str(result_to_display))
                 lines.append(f"Result: {result_str}")
-            elif "response" not in result and "responses" not in result:
-                result_str = truncate_fn(str(result))
+            elif "response" not in result_map and "responses" not in result_map:
+                result_str = truncate_fn(str(result_map))
                 lines.append(f"Result: {result_str}")
         else:
             result_str = truncate_fn(str(result))
@@ -141,7 +145,7 @@ def print_tool_child_lines(
 
 
 def print_result_content(
-    result: Any,
+    result: object,
     file_writer: FileWriter,
 ) -> None:
     """Print result content, handling large results with file fallback."""
@@ -222,13 +226,13 @@ def get_event_label(event_type: str) -> str:
 def build_tool_start_details_simple(
     tool_type: str | None,
     agent_name: str | None,
-    tool_args: dict[str, Any] | None,
-) -> dict[str, Any] | None:
+    tool_args: Mapping[str, object] | None,
+) -> dict[str, object] | None:
     """Build tool start details for simple reporter (without event ID)."""
     if not (tool_type or agent_name or tool_args):
         return None
 
-    details: dict[str, Any] = {}
+    details: dict[str, object] = {}
     if tool_type:
         details["Type"] = tool_type
     if agent_name:
@@ -236,7 +240,7 @@ def build_tool_start_details_simple(
     if tool_args:
         arg_keys = tool_args.get("arg_keys")
         if isinstance(arg_keys, list):
-            safe_keys = [str(k) for k in arg_keys]
+            safe_keys = [str(k) for k in cast(list[object], arg_keys)]
         else:
             safe_keys = [str(k) for k in tool_args.keys()]
         details["Args"] = truncate_result(str({"arg_keys": safe_keys}))
@@ -246,7 +250,7 @@ def build_tool_start_details_simple(
 # MARK: Response Normalization
 
 
-def normalize_response_text(extracted: str | None, response: str) -> str:
+def normalize_response_text(extracted: str | None, response: object) -> str:
     """Normalize response text for display."""
     if isinstance(extracted, str):
         return extracted.strip()

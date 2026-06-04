@@ -4,25 +4,41 @@ This service coordinates the execution of various dependency types including
 agent dependencies and interrupt dependencies.
 """
 
+# pyright: strict
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any, cast
+import inspect
+from collections.abc import Callable, Mapping, Sequence
+from typing import Protocol, TypeAlias, cast, runtime_checkable
 
 from maivn_shared import (
     AgentDependency,
     BaseDependency,
     BaseMessage,
     DataDependency,
+    HumanMessage,
     InterruptDependency,
     ToolDependency,
 )
+from maivn_shared.infrastructure.logging import LoggerProtocol, get_optional_logger
 
 from maivn._internal.core.entities.execution_context import ExecutionContext
-from maivn._internal.core.utils.logger import ensure_domain_logger
 
-from .agent_execution_service import AgentExecutionService
+from .agent_execution_service import AgentExecutionService, AgentRegistry
 from .interrupt_service import InterruptService
+
+# MARK: - Types
+
+DependencyExecutionResult: TypeAlias = object
+InputHandler: TypeAlias = Callable[..., object]
+
+
+@runtime_checkable
+class PrivateDataScope(Protocol):
+    """Scope surface carrying private data for data dependencies."""
+
+    private_data: Mapping[str, object]
+
 
 # MARK: - DependencyExecutionService
 
@@ -37,7 +53,7 @@ class DependencyExecutionService:
         *,
         agent_execution_service: AgentExecutionService | None = None,
         interrupt_service: InterruptService | None = None,
-        logger: Any | None = None,
+        logger: LoggerProtocol | None = None,
     ) -> None:
         """Initialize dependency execution service.
 
@@ -46,11 +62,11 @@ class DependencyExecutionService:
             interrupt_service: Service for handling interrupts
             logger: Optional logger
         """
-        self._agent_execution_service = agent_execution_service or AgentExecutionService(
-            logger=logger
+        self._agent_execution_service: AgentExecutionService = (
+            agent_execution_service or AgentExecutionService(logger=logger)
         )
-        self._interrupt_service = interrupt_service or InterruptService()
-        self._logger = ensure_domain_logger(logger)
+        self._interrupt_service: InterruptService = interrupt_service or InterruptService()
+        self._logger: LoggerProtocol = logger or get_optional_logger()
 
     # MARK: - Public Methods
 
@@ -58,7 +74,7 @@ class DependencyExecutionService:
         self,
         dependency: BaseDependency,
         context: ExecutionContext,
-    ) -> Any:
+    ) -> DependencyExecutionResult:
         """Execute a dependency and return the result.
 
         Args:
@@ -74,19 +90,19 @@ class DependencyExecutionService:
         self._logger.debug(
             "Executing dependency: %s (type: %s, arg: %s)",
             type(dependency).__name__,
-            getattr(dependency, "arg_name", "unknown"),
+            dependency.arg_name,
             str(dependency),
         )
 
         try:
             return self._dispatch_dependency(dependency, context)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - dispatch failure logged and re-raised
             self._logger.error(
                 "Dependency execution failed: %s - %s", type(dependency).__name__, str(e)
             )
             raise
 
-    def set_agent_registry(self, registry: Any) -> None:
+    def set_agent_registry(self, registry: AgentRegistry) -> None:
         """Set the agent registry for agent dependency resolution.
 
         Args:
@@ -108,7 +124,7 @@ class DependencyExecutionService:
         self,
         dependency: BaseDependency,
         context: ExecutionContext,
-    ) -> Any:
+    ) -> DependencyExecutionResult:
         """Dispatch dependency to appropriate handler.
 
         Args:
@@ -138,7 +154,7 @@ class DependencyExecutionService:
         self,
         dependency: AgentDependency,
         context: ExecutionContext,
-    ) -> Any:
+    ) -> DependencyExecutionResult:
         """Execute an agent dependency.
 
         Args:
@@ -165,8 +181,6 @@ class DependencyExecutionService:
         if context.messages:
             return cast(Sequence[BaseMessage], context.messages)
 
-        from maivn_shared import HumanMessage
-
         return [HumanMessage(content="Execute task based on dependency context")]
 
     # MARK: - Interrupt Dependencies
@@ -175,7 +189,7 @@ class DependencyExecutionService:
         self,
         dependency: InterruptDependency,
         context: ExecutionContext,
-    ) -> Any:
+    ) -> DependencyExecutionResult:
         """Execute an interrupt dependency.
 
         Args:
@@ -185,12 +199,13 @@ class DependencyExecutionService:
         Returns:
             User input result
         """
-        prompt = getattr(dependency, "prompt", "Please provide input:")
-        input_type = getattr(dependency, "input_type", "text")
-        choices = getattr(dependency, "choices", [])
+        _ = context
+        prompt = dependency.prompt or "Please provide input:"
+        input_type = dependency.input_type
+        choices = dependency.choices
 
-        input_handler = getattr(dependency, "input_handler", None)
-        if input_handler and callable(input_handler):
+        input_handler: object = dependency.input_handler
+        if callable(input_handler):
             result = self._try_custom_input_handler(
                 input_handler, prompt, input_type=input_type, choices=choices
             )
@@ -205,12 +220,12 @@ class DependencyExecutionService:
 
     def _try_custom_input_handler(
         self,
-        handler: Any,
+        handler: InputHandler,
         prompt: str,
         *,
         input_type: str = "text",
         choices: list[str] | None = None,
-    ) -> Any | None:
+    ) -> object | None:
         """Try to execute custom input handler.
 
         Args:
@@ -223,15 +238,11 @@ class DependencyExecutionService:
             Handler result or None if failed
         """
         try:
-            # Try calling with extended signature first (input_type, choices)
-            import inspect
-
             sig = inspect.signature(handler)
             params = list(sig.parameters.keys())
 
             if "input_type" in params or "choices" in params:
-                # Handler supports extended signature
-                kwargs: dict[str, Any] = {}
+                kwargs: dict[str, object] = {}
                 if "input_type" in params:
                     kwargs["input_type"] = input_type
                 if "choices" in params:
@@ -244,9 +255,8 @@ class DependencyExecutionService:
                         return handler(prompt)
                     raise
 
-            # Fall back to basic signature
             return handler(prompt)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - custom input handler fallback
             self._logger.warning("Custom input handler failed, falling back to default: %s", e)
             return None
 
@@ -256,7 +266,7 @@ class DependencyExecutionService:
         self,
         dependency: DataDependency,
         context: ExecutionContext,
-    ) -> Any:
+    ) -> DependencyExecutionResult:
         """Execute a data dependency.
 
         Args:
@@ -269,7 +279,7 @@ class DependencyExecutionService:
         Raises:
             ValueError: If data_key is missing or not found in scope
         """
-        data_key = getattr(dependency, "data_key", None)
+        data_key = dependency.data_key
         if not data_key:
             raise ValueError("DataDependency must have a data_key")
 
@@ -280,7 +290,7 @@ class DependencyExecutionService:
 
         return private_data[data_key]
 
-    def _get_private_data_from_context(self, context: ExecutionContext) -> dict[str, Any]:
+    def _get_private_data_from_context(self, context: ExecutionContext) -> Mapping[str, object]:
         """Get private_data from context scope.
 
         Args:
@@ -295,15 +305,17 @@ class DependencyExecutionService:
         if not context.scope:
             raise ValueError("No scope available in context for data dependency")
 
-        return getattr(context.scope, "private_data", {})
+        if isinstance(context.scope, PrivateDataScope):
+            return context.scope.private_data
+        return {}
 
     # MARK: - Tool Dependencies
 
     def _execute_tool_dependency(
         self,
-        dependency: ToolDependency,
-        context: ExecutionContext,
-    ) -> Any:
+        _dependency: ToolDependency,
+        _context: ExecutionContext,
+    ) -> DependencyExecutionResult:
         """Execute a tool dependency.
 
         Args:
@@ -316,10 +328,11 @@ class DependencyExecutionService:
         Raises:
             ValueError: Tool dependencies should be handled by tool execution service
         """
-        raise ValueError(
+        message = (
             "Tool dependencies should be resolved by tool execution service, "
             "not dependency execution service"
         )
+        raise ValueError(message)
 
 
 __all__ = [

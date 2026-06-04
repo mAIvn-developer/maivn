@@ -1,5 +1,7 @@
 """Progress state tracking for SimpleReporter system tool streaming."""
 
+# pyright: strict
+
 from __future__ import annotations
 
 # MARK: Progress State
@@ -19,9 +21,9 @@ class SystemToolProgressState:
         self.last_event_id = event_id
         self.last_emit_at = 0.0
         self.last_chunk_count = 0
-        self.text_by_event_id.pop(event_id, None)
+        _ = self.text_by_event_id.pop(event_id, None)
 
-    def update_emit_state(self, now: float, chunk_count: int) -> None:
+    def update_emit_state(self, now: float, chunk_count: object) -> None:
         """Update state after emitting progress."""
         self.last_emit_at = now
         self.last_chunk_count = int(chunk_count) if isinstance(chunk_count, int) else 0

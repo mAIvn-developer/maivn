@@ -2,22 +2,27 @@
 Builds FunctionTools for agent invocation and other dependency-driven behaviors.
 Used by state compilation to augment an agent's tool list."""
 
+# pyright: strict
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from collections.abc import Sequence
+from typing import Literal, Protocol, TypeAlias, TypeGuard
 
 from maivn_shared import (
     AgentDependency,
+    BaseDependency,
     HumanMessage,
     InterruptDependency,
     create_uuid,
 )
+from maivn_shared.domain.entities.session_config import NestedSynthesisMode
 
 from maivn._internal.core.entities import AgentTool, BaseTool, FunctionTool
 from maivn._internal.core.services.team_dependencies import (
     SWARM_AGENT_DEPENDENCY_CONTEXT_KEYS_METADATA_KEY,
     TEAM_DEPENDENCY_ARG_SCHEMAS_METADATA_KEY,
+    TeamExecutionControl,
     apply_team_invocation_signature,
     build_execution_controls_metadata,
     build_team_dependency_arg_schemas,
@@ -30,10 +35,39 @@ from maivn._internal.core.services.team_dependencies import (
 from .nested import DynamicToolFactoryNestedInvocationMixin
 from .response import DynamicToolFactoryResponseMixin
 
-if TYPE_CHECKING:
-    from maivn._internal.api.base_scope import BaseScope
+# MARK: - Types
+
+ModelSelection: TypeAlias = Literal["fast", "balanced", "max"]
 
 logger = logging.getLogger(__name__)
+
+
+class DynamicInvocationAgent(Protocol):
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def name(self) -> str | None: ...
+
+    @property
+    def description(self) -> str | None: ...
+
+    @property
+    def included_nested_synthesis(self) -> bool | Literal["auto"]: ...
+
+    @property
+    def force_final_tool(self) -> bool: ...
+
+    def invoke(self, **kwargs: object) -> object: ...
+
+    def get_swarm(self) -> DynamicInvocationSwarm | None: ...
+
+
+class DynamicInvocationSwarm(Protocol):
+    @property
+    def agents(self) -> Sequence[DynamicInvocationAgent]: ...
+
+    def list_tools(self) -> Sequence[BaseTool]: ...
 
 
 class DynamicToolFactory(
@@ -51,7 +85,7 @@ class DynamicToolFactory(
     def create_dependency_tools(
         self,
         tools: list[BaseTool],
-        scope: BaseScope,
+        scope: object,
     ) -> tuple[list[FunctionTool], list[FunctionTool]]:
         """Create dynamic tools for all dependencies in the tool list.
 
@@ -68,7 +102,7 @@ class DynamicToolFactory(
 
     def create_swarm_agent_invocation_tools(
         self,
-        scope: BaseScope,
+        scope: object,
     ) -> list[FunctionTool]:
         """Create agent invocation tools for all agents in a swarm.
 
@@ -81,20 +115,18 @@ class DynamicToolFactory(
         Returns:
             List of agent invocation tools for all swarm members
         """
-        from maivn._internal.api import Agent, Swarm
-
-        swarm_scope: Any = None
-        if isinstance(scope, Swarm):
+        swarm_scope: DynamicInvocationSwarm | None = None
+        if _is_dynamic_invocation_swarm(scope):
             swarm_scope = scope
-        elif isinstance(scope, Agent):
+        elif _is_dynamic_invocation_agent(scope):
             swarm_scope = scope.get_swarm()
 
-        if not swarm_scope or not hasattr(swarm_scope, "agents"):
+        if swarm_scope is None:
             return []
 
         tools: list[FunctionTool] = []
         for agent in swarm_scope.agents:
-            agent_id = getattr(agent, "id", None)
+            agent_id = agent.id
             if agent_id:
                 tool = self._create_agent_invocation_tool(agent_id, swarm_scope)
                 tools.append(tool)
@@ -118,7 +150,7 @@ class DynamicToolFactory(
         user_dependencies: list[InterruptDependency] = []
 
         for tool in tools:
-            dependencies = getattr(tool, "dependencies", None)
+            dependencies = tool.dependencies
             if not dependencies:
                 continue
             for dep in dependencies:
@@ -132,7 +164,7 @@ class DynamicToolFactory(
     # MARK: - Agent Tool Creation
 
     def _create_agent_invocation_tools(
-        self, agent_ids: set[str], scope: BaseScope
+        self, agent_ids: set[str], scope: object
     ) -> list[FunctionTool]:
         """Create dynamic agent invocation tools for each agent dependency.
 
@@ -152,7 +184,11 @@ class DynamicToolFactory(
         swarm_scope = self._resolve_swarm_scope(scope)
         return [self._create_agent_invocation_tool(agent_id, swarm_scope) for agent_id in agent_ids]
 
-    def _create_agent_invocation_tool(self, agent_id: str, swarm_scope: Any) -> FunctionTool:
+    def _create_agent_invocation_tool(
+        self,
+        agent_id: str,
+        swarm_scope: DynamicInvocationSwarm,
+    ) -> FunctionTool:
         """Create a single dynamic agent invocation tool.
 
         Args:
@@ -172,11 +208,11 @@ class DynamicToolFactory(
             prompt: str,
             use_as_final_output: bool = False,
             force_final_tool: bool = False,
-            model: str | None = None,
-            included_nested_synthesis: bool | str | None = None,
+            model: ModelSelection | None = None,
+            included_nested_synthesis: NestedSynthesisMode | str | None = None,
             memory_recall_turn_active: bool = False,
-            **dependency_kwargs: Any,
-        ) -> Any:
+            **dependency_kwargs: object,
+        ) -> object:
             """Invoke the target agent with a prompt and return its result.
 
             Args:
@@ -198,7 +234,7 @@ class DynamicToolFactory(
                 team_dependencies,
             )
             nested_prompt = format_dependency_context_for_prompt(prompt, dependency_context)
-            agent_default_nested_synthesis = getattr(agent, "included_nested_synthesis", "auto")
+            agent_default_nested_synthesis = agent.included_nested_synthesis
             resolved_nested_synthesis = self._normalize_included_nested_synthesis(
                 included_nested_synthesis
                 if included_nested_synthesis is not None
@@ -253,7 +289,7 @@ class DynamicToolFactory(
             ):
                 logger.debug(
                     "[DYNAMIC_TOOL_FACTORY] Honoring agent.force_final_tool=True "
-                    "for nested swarm agent '%s' (developer-declared default).",
+                    + "for nested swarm agent '%s' (developer-declared default).",
                     agent_name,
                 )
             try:
@@ -263,11 +299,11 @@ class DynamicToolFactory(
                     memory_config=nested_memory_config,
                     memory_assets_config=memory_assets_config,
                     swarm_config=swarm_config,
-                    model=model,  # type: ignore[arg-type]
+                    model=model,
                 )
             finally:
                 allow_nested_response_stream.reset(stream_token)
-            return self._extract_agent_response(
+            return self.extract_agent_response(
                 response,
                 agent_id,
                 include_response=True,
@@ -288,27 +324,25 @@ class DynamicToolFactory(
             description=tool_description,
             func=invoke_agent,
             tags=["dynamic", "agent_invocation"],
-            target_agent_id=getattr(target_agent, "id", agent_id),
+            target_agent_id=target_agent.id,
             metadata=metadata,
         )
 
     def _build_team_invocation_tool_metadata(
         self,
         *,
-        team_dependencies: list[Any],
-        team_execution_controls: list[Any],
-        swarm_scope: Any,
-    ) -> dict[str, Any]:
+        team_dependencies: list[BaseDependency],
+        team_execution_controls: list[TeamExecutionControl],
+        swarm_scope: DynamicInvocationSwarm,
+    ) -> dict[str, object]:
         """Build metadata attached to generated Swarm agent invocation tools."""
-        metadata: dict[str, Any] = {}
+        metadata: dict[str, object] = {}
         if team_dependencies:
             metadata[TEAM_DEPENDENCY_ARG_SCHEMAS_METADATA_KEY] = build_team_dependency_arg_schemas(
                 team_dependencies, swarm_scope
             )
             metadata[SWARM_AGENT_DEPENDENCY_CONTEXT_KEYS_METADATA_KEY] = [
-                getattr(dependency, "arg_name", "")
-                for dependency in team_dependencies
-                if getattr(dependency, "arg_name", "")
+                dependency.arg_name for dependency in team_dependencies if dependency.arg_name
             ]
         if team_execution_controls:
             metadata["execution_controls"] = build_execution_controls_metadata(
@@ -318,7 +352,7 @@ class DynamicToolFactory(
 
     # MARK: - Scope Resolution
 
-    def _resolve_swarm_scope(self, scope: BaseScope) -> Any:
+    def _resolve_swarm_scope(self, scope: object) -> DynamicInvocationSwarm:
         """Resolve the scope to a Swarm for cross-agent communication.
 
         Args:
@@ -330,26 +364,28 @@ class DynamicToolFactory(
         Raises:
             ValueError: If scope is not in a Swarm context
         """
-        from maivn._internal.api import Agent, Swarm
-
-        if isinstance(scope, Swarm):
+        if _is_dynamic_invocation_swarm(scope):
             return scope
 
-        if isinstance(scope, Agent):
+        if _is_dynamic_invocation_agent(scope):
             swarm = scope.get_swarm()
             if swarm is None:
                 raise ValueError(
                     "Agent dependencies (depends_on_agent) require the agent to be part of a "
-                    "Swarm. Create a Swarm and add the agent to enable cross-agent communication."
+                    + "Swarm. Create a Swarm and add the agent to enable cross-agent communication."
                 )
             return swarm
 
         raise ValueError(
             "Agent dependencies (depends_on_agent) can only be used within a Swarm context. "
-            "The scope must be either an Agent (part of a Swarm) or a Swarm itself."
+            + "The scope must be either an Agent (part of a Swarm) or a Swarm itself."
         )
 
-    def _find_agent_in_swarm(self, agent_id: str, swarm_scope: Any) -> Any:
+    def _find_agent_in_swarm(
+        self,
+        agent_id: str,
+        swarm_scope: DynamicInvocationSwarm,
+    ) -> DynamicInvocationAgent:
         """Find an agent in the swarm by ID or name.
 
         Args:
@@ -363,15 +399,15 @@ class DynamicToolFactory(
             ValueError: If agent is not found
         """
         for agent in swarm_scope.agents:
-            if getattr(agent, "id", None) == agent_id or getattr(agent, "name", None) == agent_id:
+            if agent.id == agent_id or agent.name == agent_id:
                 return agent
 
-        available = [getattr(a, "name", "unnamed") for a in swarm_scope.agents]
+        available = [agent.name or "unnamed" for agent in swarm_scope.agents]
         raise ValueError(f"Agent '{agent_id}' not found in swarm. Available agents: {available}")
 
     # MARK: - Agent Metadata
 
-    def _get_required_agent_name(self, agent: Any, agent_id: str) -> str:
+    def _get_required_agent_name(self, agent: DynamicInvocationAgent, agent_id: str) -> str:
         """Get the agent name, raising if not set.
 
         Args:
@@ -384,15 +420,15 @@ class DynamicToolFactory(
         Raises:
             ValueError: If agent has no name
         """
-        agent_name = getattr(agent, "name", None)
+        agent_name = agent.name
         if not agent_name:
             raise ValueError(
                 f"Agent with ID '{agent_id}' must have a 'name' attribute to be used with "
-                f"@depends_on_agent. Please set a name when creating the Agent."
+                + "@depends_on_agent. Please set a name when creating the Agent."
             )
         return agent_name
 
-    def _build_tool_description(self, agent: Any, agent_name: str) -> str:
+    def _build_tool_description(self, agent: DynamicInvocationAgent, agent_name: str) -> str:
         """Build the tool description from agent metadata.
 
         Args:
@@ -402,10 +438,23 @@ class DynamicToolFactory(
         Returns:
             The tool description
         """
-        description = getattr(agent, "description", None)
+        description = agent.description
         if description:
             return description
         return f"Invoke agent '{agent_name}' with a prompt and retrieve its result"
+
+
+# MARK: - Runtime Type Guards
+
+
+def _is_dynamic_invocation_swarm(value: object) -> TypeGuard[DynamicInvocationSwarm]:
+    return isinstance(getattr(value, "agents", None), list) and callable(
+        getattr(value, "list_tools", None)
+    )
+
+
+def _is_dynamic_invocation_agent(value: object) -> TypeGuard[DynamicInvocationAgent]:
+    return callable(getattr(value, "get_swarm", None)) and callable(getattr(value, "invoke", None))
 
 
 __all__ = ["DynamicToolFactory"]

@@ -1,3 +1,4 @@
+# pyright: strict
 """Tool registrar.
 Registers tools in a repository and enforces scope-level registration policies.
 """
@@ -7,8 +8,8 @@ from __future__ import annotations
 # MARK: Tool Registrar Service
 from collections.abc import Iterable
 
-from maivn._internal.core.entities.tools import BaseTool
-from maivn._internal.core.interfaces.repositories import ToolRepoInterface
+from ..entities.tools import BaseTool
+from ..interfaces.repositories.tool import ToolRepoInterface
 
 
 class ToolRegistrar:
@@ -22,7 +23,7 @@ class ToolRegistrar:
     # MARK: Initialization
 
     def __init__(self, repo: ToolRepoInterface) -> None:
-        self._repo = repo
+        self._repo: ToolRepoInterface = repo
 
     # MARK: Public API
 
@@ -30,7 +31,7 @@ class ToolRegistrar:
         """Register a tool, enforcing repository-level policies.
 
         Policies enforced:
-        - Only one final_output tool allowed per scope/repository.
+        - Only one final_tool is allowed per scope/repository.
         """
         self._enforce_single_final_tool(tool)
         self._repo.add_tool(tool)
@@ -46,7 +47,7 @@ class ToolRegistrar:
         if existing:
             names = ", ".join(getattr(t, "name", "<unnamed>") for t in existing)
             raise ValueError(
-                f"Only one final_tool is allowed per scope. Existing final_tool tool(s): {names}"
+                f"Only one final_tool is allowed per scope. Existing final_tool(s): {names}"
             )
 
     # MARK: - Helpers
@@ -58,7 +59,7 @@ class ToolRegistrar:
     def _get_final_tools(self) -> list[BaseTool]:
         """Retrieve all existing final_tool tools from the repository."""
         try:
-            tools: Iterable[object] = self._repo.list_tools()
-        except Exception as e:
-            raise RuntimeError("Failed to list tools while enforcing final_tool policy.") from e
+            tools: Iterable[BaseTool] = self._repo.list_tools()
+        except Exception as exc:  # noqa: BLE001 - repository backends may raise arbitrary errors.
+            raise RuntimeError("Failed to list tools while enforcing final_tool policy.") from exc
         return [t for t in tools if self._is_final_tool(t)]

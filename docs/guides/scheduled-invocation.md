@@ -1,9 +1,14 @@
 # Scheduled Invocation
 
-Run any `Agent` or `Swarm` on a schedule — cron, fixed interval, or
-one-shot — with optional jitter, retry, and overlap controls. The same
-chain works with `invoke`, `stream`, `batch`, and the async variants
-`ainvoke`, `astream`, `abatch`.
+Sometimes you want an agent to run on its own — every weekday at 9 a.m.,
+once an hour, or just once two weeks from now — without anyone clicking a
+button. Scheduled invocation is how you set that up: you describe *when*,
+and the SDK fires the agent for you and keeps track of every run.
+
+Concretely, you can run any `Agent` or `Swarm` on a schedule — cron, fixed
+interval, or one-shot — with optional jitter, retry, and overlap controls.
+The same chain works with `invoke`, `stream`, `batch`, and the async
+variants `ainvoke`, `astream`, `abatch`.
 
 For the API reference, see [Scheduling](../api/scheduling.md).
 
@@ -278,6 +283,10 @@ Retries happen *within a single fire*, so a flaky run doesn't burn the
 next slot. Only the final outcome is recorded on the `RunRecord`. If
 all attempts fail, `on_error` fires once with the last exception.
 
+See [Timeouts, Retries & Reliability](reliability.md) for the timeout
+bounds that govern how long each attempt may run, and for guidance on
+scoping `retry_on` to the failures actually worth retrying.
+
 ## Misfire and overlap
 
 If the scheduler wakes up to a fire that's already late by more than 30
@@ -374,8 +383,15 @@ made in Studio call directly into the SDK; the underlying
 The runs table is driven by the SDK's lifecycle callbacks
 (`on_fire`, `on_success`, `on_error`, `on_skip`), pushed straight
 to the browser over SSE. A new run's card appears the moment
-`on_fire` runs server-side — no polling delay between the countdown
+`on_fire` runs in the runtime — no polling delay between the countdown
 hitting zero and the card showing the live message, tool cards, and
 enrichment chips. The status pill flips from running to
 succeeded / failed / skipped as soon as the matching terminal
 callback fires.
+
+## Related
+
+- [Scheduling](../api/scheduling.md) — full API reference for the
+  schedule classes, builder methods, and `ScheduledJob`.
+- [Timeouts, Retries & Reliability](reliability.md) — the timeout
+  bounds that govern each attempt and how to scope `retry_on`.

@@ -1,12 +1,18 @@
 """Retry policy for scheduled invocations."""
 
+# pyright: strict
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Literal
+from typing import Literal, TypeAlias
 
-RetryBackoff = Literal["constant", "linear", "exponential"]
+# MARK: Types
+
+RetryBackoff: TypeAlias = Literal["constant", "linear", "exponential"]
+
+
+# MARK: Retry Policy
 
 
 @dataclass(frozen=True)
@@ -51,5 +57,7 @@ class Retry:
             return False
         return isinstance(exc, self.retry_on)
 
+
+# MARK: Exports
 
 __all__ = ["Retry", "RetryBackoff"]

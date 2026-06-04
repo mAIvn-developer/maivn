@@ -1,5 +1,7 @@
 """Reporter implementations (rich and simple)."""
 
+# pyright: strict
+
 from __future__ import annotations
 
 from .rich_reporter import RichReporter

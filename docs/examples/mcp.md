@@ -1,8 +1,9 @@
 # MCP Integration
 
-[MCP (Model Context Protocol)](https://modelcontextprotocol.io) lets agents
-call tools that live in another process — local stdio servers, remote HTTP
-servers, or third-party servers installed on demand.
+These examples wire external tool servers into an agent. [MCP (Model Context
+Protocol)](https://modelcontextprotocol.io) lets agents call tools that live in
+another process — local stdio servers, remote HTTP servers, or third-party
+servers installed on demand.
 
 Register an MCP server and its tools become first-class tools on the agent:
 the agent picks when to call them, the runtime handles the wire protocol.
@@ -56,6 +57,8 @@ tools. Headers, auth, and rate limiting are configured on the
 Mix transports freely:
 
 ```python
+from maivn.messages import HumanMessage
+
 agent.register_mcp_servers([
     MCPServer(name='local_http', transport='http', url='http://127.0.0.1:8080/mcp'),
     MCPServer(name='local_stdio', transport='stdio', command=sys.executable, args=['server.py']),
@@ -80,7 +83,7 @@ fetch_server = MCPServer(
     name='fetch',
     transport='stdio',
     auto_setup=MCPAutoSetup(
-        tool='uvx',
+        provider='uvx',
         package='mcp-server-fetch',
     ),
     soft_error_handling=MCPSoftErrorHandling(
@@ -104,6 +107,8 @@ useful when calling rate-limited upstream APIs.
 MCP servers can declare a per-minute call cap to protect upstream APIs:
 
 ```python
+import os
+
 alpha_server = MCPServer(
     name='alpha_vantage',
     transport='stdio',
@@ -154,6 +159,8 @@ FastAPI's shutdown hook).
 
 ## What's next
 
+- **[Connecting MCP Servers](../guides/mcp.md)** — the concept guide: where MCP
+  tools run, choosing a transport, authentication, and failure handling.
 - **[Agents & Tools](./agents-and-tools.md)** — combining MCP tools with
   registered tools, hooks, and cross-agent dependencies.
 - **[Real-World Projects](./projects.md)** — the financial-planner project

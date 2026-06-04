@@ -1,3 +1,4 @@
+# pyright: strict
 """Payload builder for ``hook_fired`` events.
 
 Emitted each time a developer-registered scope or tool hook callback runs.
@@ -8,9 +9,9 @@ render its name + status as a persistent header (before) or footer (after).
 
 from __future__ import annotations
 
-from typing import Any
+from .common import JsonObject, attach_common_fields
 
-from .common import attach_common_fields
+# MARK: Hook Payloads
 
 
 def build_hook_fired_payload(
@@ -24,7 +25,7 @@ def build_hook_fired_payload(
     source: str | None = None,
     error: str | None = None,
     elapsed_ms: int | None = None,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Build the payload for a single hook-callback firing.
 
     Args:
@@ -44,7 +45,7 @@ def build_hook_fired_payload(
         error: Error message when ``status == "failed"``.
         elapsed_ms: How long the hook callable ran, in milliseconds.
     """
-    payload = {
+    hook: JsonObject = {
         "name": name,
         "stage": stage,
         "status": status,
@@ -54,17 +55,18 @@ def build_hook_fired_payload(
         "source": source,
         "error": error,
         "elapsed_ms": elapsed_ms,
-        "hook": {
-            "name": name,
-            "stage": stage,
-            "status": status,
-            "target_type": target_type,
-            "target_id": target_id,
-            "target_name": target_name,
-            "source": source,
-            "error": error,
-            "elapsed_ms": elapsed_ms,
-        },
+    }
+    payload: JsonObject = {
+        "name": name,
+        "stage": stage,
+        "status": status,
+        "target_type": target_type,
+        "target_id": target_id,
+        "target_name": target_name,
+        "source": source,
+        "error": error,
+        "elapsed_ms": elapsed_ms,
+        "hook": hook,
     }
     return attach_common_fields(
         payload,

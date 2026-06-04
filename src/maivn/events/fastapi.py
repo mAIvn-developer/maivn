@@ -1,3 +1,4 @@
+# pyright: strict
 """FastAPI / Starlette adapter for streaming :class:`EventBridge` events.
 
 This module is the **one-liner** developers reach for when they want their
@@ -41,44 +42,73 @@ etc.), use :class:`maivn.events.EventBridge` directly — see the
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Protocol, TypeAlias, cast
 
 from . import BridgeAudience, BridgeRegistry, EventBridge
 
 if TYPE_CHECKING:
     from fastapi import APIRouter, FastAPI
+    from starlette.responses import Response
+
+
+# MARK: Types
+
+AuthHook: TypeAlias = Callable[..., Awaitable[None]]
+BridgeFactory: TypeAlias = Callable[[str], EventBridge]
+StreamEventsHandler: TypeAlias = Callable[[str, str | None], Awaitable["Response"]]
+RouteDecorator: TypeAlias = Callable[[StreamEventsHandler], StreamEventsHandler]
+
+
+class FastAPIModule(Protocol):
+    def APIRouter(self, *, prefix: str, tags: list[str]) -> object: ...
+
+    def Depends(self, dependency: AuthHook) -> object: ...
+
+
+class EventRouter(Protocol):
+    def get(self, path: str, *, dependencies: list[object]) -> RouteDecorator: ...
+
+
+class EventSourceResponseFactory(Protocol):
+    def __call__(self, content: object) -> Response: ...
+
 
 # MARK: Optional dependencies
 
 
-def _require_fastapi() -> Any:
+def _as_object(value: object) -> object:
+    return value
+
+
+def _require_fastapi() -> FastAPIModule:
     try:
         import fastapi as _fastapi  # noqa: PLC0415
     except ModuleNotFoundError as exc:
         raise ModuleNotFoundError(
             "maivn.events.fastapi requires fastapi + sse-starlette. "
-            "Install with `pip install maivn[fastapi]`."
+            + "Install with `pip install maivn[fastapi]`."
         ) from exc
-    return _fastapi
+    return cast(FastAPIModule, _as_object(_fastapi))
 
 
-def _require_sse_starlette() -> Any:
+def _require_sse_starlette() -> EventSourceResponseFactory:
     try:
         from sse_starlette.sse import EventSourceResponse  # noqa: PLC0415
     except ModuleNotFoundError as exc:
         raise ModuleNotFoundError(
             "maivn.events.fastapi requires sse-starlette. "
-            "Install with `pip install maivn[fastapi]`."
+            + "Install with `pip install maivn[fastapi]`."
         ) from exc
-    return EventSourceResponse
+    return cast(EventSourceResponseFactory, cast(object, EventSourceResponse))
 
 
 # MARK: Module-level registry
 
 _default_registry = BridgeRegistry()
 
-AuthHook = Callable[..., Awaitable[None]]
-BridgeFactory = Callable[[str], EventBridge]
+
+def _resolve_registry(registry: BridgeRegistry | None) -> BridgeRegistry:
+    return registry if registry is not None else _default_registry
 
 
 # MARK: Public helpers
@@ -114,13 +144,22 @@ def get_event_bridge(
         FastAPI adapter defaults to ``"frontend_safe"`` because events are
         usually consumed by end-user browser clients.
     """
-    target_registry = registry if registry is not None else _default_registry
+    target_registry = _resolve_registry(registry)
     existing = target_registry.get(session_id)
     if existing is not None:
         return existing
     if not create:
         raise KeyError(f"No event bridge registered for session {session_id!r}")
-    bridge_factory = factory or (lambda sid: EventBridge(sid, audience=audience))
+    bridge_factory: BridgeFactory
+    if factory is not None:
+        bridge_factory = factory
+    else:
+
+        def default_bridge_factory(session_id: str) -> EventBridge:
+            return EventBridge(session_id, audience=audience)
+
+        bridge_factory = default_bridge_factory
+
     return target_registry.create(session_id, factory=bridge_factory)
 
 
@@ -133,7 +172,7 @@ def remove_event_bridge(
 
     Idempotent — safe to call when no bridge exists.
     """
-    (registry if registry is not None else _default_registry).remove(session_id)
+    _resolve_registry(registry).remove(session_id)
 
 
 # MARK: Router factory
@@ -188,19 +227,20 @@ def create_event_router(
     if "{session_id}" not in path:
         raise ValueError("path must contain a {session_id} placeholder")
 
-    target_registry = registry if registry is not None else _default_registry
-    router = fastapi.APIRouter(prefix=prefix, tags=tags or ["maivn-events"])
+    target_registry = _resolve_registry(registry)
+    router = cast("APIRouter", fastapi.APIRouter(prefix=prefix, tags=tags or ["maivn-events"]))
+    event_router = cast(EventRouter, cast(object, router))
 
     if auth is not None:
         dependencies = [fastapi.Depends(auth)]
     else:
         dependencies = []
 
-    @router.get(path, dependencies=dependencies)
-    async def stream_events(  # type: ignore[misc]
+    @event_router.get(path, dependencies=dependencies)
+    async def stream_events(
         session_id: str,
         last_event_id: str | None = None,
-    ) -> Any:
+    ) -> Response:
         """Stream session events via Server-Sent Events.
 
         Supports the standard SSE ``Last-Event-ID`` reconnection protocol.
@@ -222,6 +262,7 @@ def create_event_router(
             )
         )
 
+    _ = stream_events
     return router
 
 

@@ -1,25 +1,46 @@
+# pyright: strict
 """Display and progress forwarding mixin for EventRouterReporter."""
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
+from ..base import BaseReporter
 from ..event_categories import category_for_print_event
 
 if TYPE_CHECKING:
     from maivn_shared.utils.token_models import TokenUsage
 
 
+# MARK: Types
+
+RouterPayload = dict[str, object]
+
+
 # MARK: Display Forwarding
 
 
 class DisplayRouterMixin:
-    _forward: Any
-    _reporter: Any
+    _reporter: BaseReporter = cast(BaseReporter, cast(object, None))
 
-    def print_header(self, title: str, subtitle: str = "") -> None:
+    def _forward(
+        self,
+        *,
+        category: str,
+        event_name: str,
+        payload: RouterPayload,
+        forward: Callable[[], None],
+    ) -> None:
+        _ = (category, event_name, payload, forward)
+        raise NotImplementedError
+
+    def print_header(
+        self,
+        title: str,
+        subtitle: str = "",
+    ) -> None:
         self._forward(
             category="lifecycle",
             event_name="print_header",
@@ -27,7 +48,11 @@ class DisplayRouterMixin:
             forward=lambda: self._reporter.print_header(title, subtitle),
         )
 
-    def print_section(self, title: str, style: str = "bold cyan") -> None:
+    def print_section(
+        self,
+        title: str,
+        style: str = "bold cyan",
+    ) -> None:
         self._forward(
             category="lifecycle",
             event_name="print_section",
@@ -39,7 +64,7 @@ class DisplayRouterMixin:
         self,
         event_type: str,
         message: str,
-        details: dict[str, Any] | None = None,
+        details: dict[str, object] | None = None,
     ) -> None:
         category = category_for_print_event(event_type)
         self._forward(
@@ -53,7 +78,10 @@ class DisplayRouterMixin:
             forward=lambda: self._reporter.print_event(event_type, message, details),
         )
 
-    def print_summary(self, token_usage: TokenUsage | None = None) -> None:
+    def print_summary(
+        self,
+        token_usage: TokenUsage | None = None,
+    ) -> None:
         self._forward(
             category="lifecycle",
             event_name="summary",
@@ -61,7 +89,7 @@ class DisplayRouterMixin:
             forward=lambda: self._reporter.print_summary(token_usage),
         )
 
-    def print_final_result(self, result: Any) -> None:
+    def print_final_result(self, result: object) -> None:
         self._forward(
             category="lifecycle",
             event_name="final_result",
@@ -90,11 +118,17 @@ class DisplayRouterMixin:
 
 
 class ProgressRouterMixin:
-    _is_enabled: Any
-    _reporter: Any
+    _reporter: BaseReporter = cast(BaseReporter, cast(object, None))
+
+    def _is_enabled(self, category: str) -> bool:
+        _ = category
+        raise NotImplementedError
 
     @contextmanager
-    def live_progress(self, description: str = "Processing...") -> Iterator[Any]:
+    def live_progress(
+        self,
+        description: str = "Processing...",
+    ) -> Generator[object, None, None]:
         if not self._is_enabled("lifecycle"):
             yield None
             return
@@ -103,7 +137,7 @@ class ProgressRouterMixin:
 
     def update_progress(
         self,
-        task_id: Any,
+        task_id: object,
         description: str | None = None,
     ) -> None:
         if not self._is_enabled("lifecycle"):
@@ -111,7 +145,9 @@ class ProgressRouterMixin:
         self._reporter.update_progress(task_id, description)
 
     @contextmanager
-    def prepare_for_user_input(self) -> Iterator[None]:
+    def prepare_for_user_input(
+        self,
+    ) -> Generator[None, None, None]:
         with self._reporter.prepare_for_user_input():
             yield
 

@@ -4,25 +4,23 @@ Extracted from event_handlers.py to keep each module focused
 on a cohesive set of SSE event types.
 """
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import cast
 
 from maivn_shared.infrastructure.logging import LoggerProtocol
 
 from maivn._internal.core import SSEEvent, UpdateEventPayload
 
-if TYPE_CHECKING:
-    from .event_handlers import EventProcessingState
-    from .event_stream_processor import EventStreamHandlers
-
+from .event_handlers import EventProcessingState, EventStreamHandlerCallbacks, JsonObject
 
 # MARK: System Tool Handlers
 
 
 def handle_system_tool_start(
     event: SSEEvent,
-    handlers: EventStreamHandlers,
+    handlers: EventStreamHandlerCallbacks,
     logger: LoggerProtocol,
 ) -> None:
     """Handle system tool start event."""
@@ -37,7 +35,7 @@ def handle_system_tool_start(
 
 def handle_system_tool_chunk(
     event: SSEEvent,
-    handlers: EventStreamHandlers,
+    handlers: EventStreamHandlerCallbacks,
     logger: LoggerProtocol,
 ) -> None:
     """Handle system tool streaming chunk event."""
@@ -65,7 +63,7 @@ def handle_system_tool_chunk(
                 elapsed_seconds,
                 text_len,
             )
-    except Exception:
+    except Exception:  # noqa: BLE001 - chunk logging is best-effort telemetry only
         pass
 
     handlers.handle_system_tool_chunk(payload)
@@ -73,7 +71,7 @@ def handle_system_tool_chunk(
 
 def handle_system_tool_complete(
     event: SSEEvent,
-    handlers: EventStreamHandlers,
+    handlers: EventStreamHandlerCallbacks,
     logger: LoggerProtocol,
 ) -> None:
     """Handle system tool completion event."""
@@ -88,7 +86,7 @@ def handle_system_tool_complete(
 
 def handle_system_tool_error(
     event: SSEEvent,
-    handlers: EventStreamHandlers,
+    handlers: EventStreamHandlerCallbacks,
     logger: LoggerProtocol,
 ) -> None:
     """Handle system tool error event."""
@@ -107,15 +105,15 @@ def handle_system_tool_error(
 def handle_update_event(
     event: SSEEvent,
     resume_url: str,
-    handlers: EventStreamHandlers,
+    handlers: EventStreamHandlerCallbacks,
     state: EventProcessingState,
     logger: LoggerProtocol,
 ) -> None:
     """Handle update event, triggering pending event processing."""
-    update_payload = cast(UpdateEventPayload, handlers.coerce_payload(event.payload))
+    update_payload = cast(UpdateEventPayload, cast(object, handlers.coerce_payload(event.payload)))
 
     if handlers.handle_action_update:
-        handlers.handle_action_update(cast(dict[str, Any], update_payload))
+        handlers.handle_action_update(cast(JsonObject, cast(object, update_payload)))
 
     if not state.pending_tool_events:
         return
@@ -132,7 +130,7 @@ def handle_update_event(
 
 def handle_progress_update(
     event: SSEEvent,
-    handlers: EventStreamHandlers,
+    handlers: EventStreamHandlerCallbacks,
     logger: LoggerProtocol,
 ) -> None:
     """Handle streamed assistant progress updates without flushing pending tool events.
@@ -140,10 +138,10 @@ def handle_progress_update(
     Unlike ``handle_update_event``, this handler does not flush pending tool
     events since progress updates are informational only.
     """
-    update_payload = cast(UpdateEventPayload, handlers.coerce_payload(event.payload))
+    update_payload = cast(UpdateEventPayload, cast(object, handlers.coerce_payload(event.payload)))
 
     if handlers.handle_action_update:
-        handlers.handle_action_update(cast(dict[str, Any], update_payload))
+        handlers.handle_action_update(cast(JsonObject, cast(object, update_payload)))
 
     streaming_content = update_payload.get("streaming_content")
     assistant_id = update_payload.get("assistant_id")
@@ -159,11 +157,11 @@ def handle_progress_update(
 
 def handle_status_message(
     event: SSEEvent,
-    handlers: EventStreamHandlers,
+    handlers: EventStreamHandlerCallbacks,
     logger: LoggerProtocol,
 ) -> None:
     """Handle a standalone status message emitted at swarm lifecycle milestones."""
-    payload = cast(dict[str, Any], handlers.coerce_payload(event.payload))
+    payload = handlers.coerce_payload(event.payload)
 
     if handlers.handle_status_message:
         handlers.handle_status_message(payload)
@@ -182,7 +180,7 @@ def handle_status_message(
 
 def handle_final_event(
     event: SSEEvent,
-    handlers: EventStreamHandlers,
+    handlers: EventStreamHandlerCallbacks,
     state: EventProcessingState,
     logger: LoggerProtocol,
 ) -> bool:
@@ -193,15 +191,11 @@ def handle_final_event(
     """
     state.final_payload = handlers.coerce_payload(event.payload)
     logger.info("[EVENT_PROCESSOR] Received final event")
+    logger.info("[EVENT_PROCESSOR] Final payload keys: %s", list(state.final_payload.keys()))
     logger.info(
-        "[EVENT_PROCESSOR] Final payload keys: %s",
-        list(state.final_payload.keys()) if isinstance(state.final_payload, dict) else "not a dict",
+        "[EVENT_PROCESSOR] Final payload status: %s",
+        state.final_payload.get("status"),
     )
-    if isinstance(state.final_payload, dict):
-        logger.info(
-            "[EVENT_PROCESSOR] Final payload status: %s",
-            state.final_payload.get("status"),
-        )
     return True
 
 
@@ -210,7 +204,7 @@ def handle_final_event(
 
 def handle_enrichment(
     event: SSEEvent,
-    handlers: EventStreamHandlers,
+    handlers: EventStreamHandlerCallbacks,
     logger: LoggerProtocol,
 ) -> None:
     """Handle enrichment phase change event."""

@@ -1,12 +1,16 @@
 """State compilation utilities for agent orchestration."""
 
+# pyright: strict
 from __future__ import annotations
 
+import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Literal, Protocol, TypeAlias, cast
 
 from maivn_shared import (
     BaseMessage,
+    InterruptDependency,
     MemoryAssetsConfig,
     MemoryConfig,
     SessionExecutionConfig,
@@ -17,7 +21,7 @@ from maivn_shared import (
     SystemToolsConfig,
     ToolSpec,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue
 
 from maivn._internal.core.entities import BaseTool, FunctionTool
 from maivn._internal.core.entities.state_compilation_config import (
@@ -31,6 +35,17 @@ from .dependency_updates import deduplicate_tool_specs, update_tool_dependency_r
 from .dynamic_tool_factory import DynamicToolFactory
 from .tool_normalization import normalize_tools_for_structured_output
 
+# MARK: - Types
+
+JsonObject: TypeAlias = dict[str, JsonValue]
+ModelSelection: TypeAlias = Literal["auto", "fast", "balanced", "max"]
+ReasoningLevel: TypeAlias = Literal["minimal", "low", "medium", "high"]
+
+
+class StateCompilationScope(Protocol):
+    @property
+    def id(self) -> str: ...
+
 
 class StateCompiler:
     """Handles compilation of agent state and messages for orchestration."""
@@ -42,10 +57,13 @@ class StateCompiler:
         config: StateCompilationConfig | None = None,
         dynamic_tool_factory: DynamicToolFactory | None = None,
     ) -> None:
-        self._tool_spec_factory = tool_spec_factory
-        self._config = config or StateCompilationConfig()
-        self._dynamic_tool_factory = dynamic_tool_factory or DynamicToolFactory()
+        self._tool_spec_factory: ToolSpecFactory = tool_spec_factory
+        self._config: StateCompilationConfig = config or StateCompilationConfig()
+        self._dynamic_tool_factory: DynamicToolFactory = (
+            dynamic_tool_factory or DynamicToolFactory()
+        )
         self._dynamic_tools: list[FunctionTool] = []
+        self._tool_spec_lock: threading.Lock = threading.Lock()
 
     # MARK: - Public API
 
@@ -53,13 +71,14 @@ class StateCompiler:
         self,
         messages: list[BaseMessage],
         tools: list[BaseTool],
-        scope: Any,
+        scope: StateCompilationScope,
         timeout: int | None = None,
         force_final_tool: bool = False,
         targeted_tools: list[str] | None = None,
         structured_output: type[BaseModel] | None = None,
-        model: Any = None,
-        reasoning: Any = None,
+        model: ModelSelection | None = None,
+        force_model: str | None = None,
+        reasoning: ReasoningLevel | None = None,
         stream_response: bool = True,
         status_messages: bool = False,
         max_results: int | None = None,
@@ -69,7 +88,7 @@ class StateCompiler:
         orchestration_config: SessionOrchestrationConfig | None = None,
         memory_assets_config: MemoryAssetsConfig | None = None,
         swarm_config: SwarmConfig | None = None,
-        metadata: dict[str, Any] | None = None,
+        metadata: JsonObject | None = None,
         config: StateCompilationConfig | None = None,
     ) -> SessionRequest:
         """Compile messages and tools into a state dictionary for orchestration.
@@ -82,7 +101,8 @@ class StateCompiler:
             force_final_tool: Whether to force final tool.
             targeted_tools: Optional list of tool_id strings to target.
             structured_output: Optional Pydantic model for structured output.
-            model: Optional model name.
+            model: Optional model tier ("auto", "fast", "balanced", "max").
+            force_model: Optional exact model identifier to force (e.g. "claude-opus-5").
             reasoning: Optional reasoning level.
             stream_response: Whether to stream intermediate responses.
             status_messages: Whether to emit status messages at swarm lifecycle milestones.
@@ -99,7 +119,7 @@ class StateCompiler:
         Returns:
             Compiled SessionRequest.
         """
-        config = config or StateCompilationConfig()
+        active_config = config or self._config
 
         try:
             self._tool_spec_factory.reset_cache()
@@ -129,8 +149,13 @@ class StateCompiler:
         )
         update_tool_dependency_references(tool_specs, all_tools)
 
-        metadata = self._build_metadata(scope, metadata)
-        execution_config = self._build_execution_config(scope, timeout, execution_config)
+        metadata = self._build_metadata(active_config, metadata)
+        execution_config = self._build_execution_config(
+            scope,
+            timeout,
+            execution_config,
+            active_config,
+        )
         system_tools_config = self._build_system_tools_config(scope, system_tools_config)
         memory_assets_config = self._build_memory_assets_config(scope, memory_assets_config)
         system_tools_config = self._auto_approve_compose_artifact_targets(
@@ -147,7 +172,7 @@ class StateCompiler:
             force_final_tool = True
             targeted_tools = None
         interrupt_data_keys = self._extract_interrupt_data_keys(all_tools)
-        private_data = getattr(scope, "private_data", None)
+        private_data = _optional_attr(scope, "private_data")
 
         return SessionRequest(
             messages=messages,
@@ -163,17 +188,22 @@ class StateCompiler:
             force_final_tool=force_final_tool,
             targeted_tools=targeted_tools,
             model=model,
+            force_model=force_model,
             reasoning=reasoning,
             stream_response=stream_response,
             status_messages=status_messages,
             max_results=max_results,
-            private_data=private_data if private_data else None,
+            private_data=cast(JsonObject, private_data) if private_data else None,
             interrupt_data_keys=interrupt_data_keys if interrupt_data_keys else None,
         )
 
     # MARK: - Tool List Building
 
-    def _build_tool_list(self, tools: list[BaseTool], scope: Any) -> list[BaseTool]:
+    def _build_tool_list(
+        self,
+        tools: list[BaseTool],
+        scope: StateCompilationScope,
+    ) -> list[BaseTool]:
         """Build complete tool list including dynamic tools.
 
         Args:
@@ -253,7 +283,7 @@ class StateCompiler:
         Returns:
             Deduplicated list of ToolSpec instances
         """
-        all_specs = []
+        all_specs: list[ToolSpec] = []
         for tool in tools:
             all_specs.extend(self._create_single_tool_spec(tool, agent_id))
         return deduplicate_tool_specs(all_specs)
@@ -277,7 +307,7 @@ class StateCompiler:
             futures = [
                 executor.submit(self._create_single_tool_spec, tool, agent_id) for tool in tools
             ]
-            all_specs = []
+            all_specs: list[ToolSpec] = []
             for future in futures:
                 all_specs.extend(future.result())
 
@@ -293,31 +323,34 @@ class StateCompiler:
         Returns:
             List of ToolSpec instances for the tool
         """
-        return self._tool_spec_factory.create_all(
-            agent_id=agent_id,
-            tool=tool,
-            dependencies=getattr(tool, "dependencies", None),
-            always_execute=getattr(tool, "always_execute", False),
-            final_tool=getattr(tool, "final_tool", False),
-        )
+        # ToolSpecFactory owns mutable caches and a function registry. Keep each
+        # create_all call atomic while preserving the existing threaded collection path.
+        with self._tool_spec_lock:
+            return self._tool_spec_factory.create_all(
+                agent_id=agent_id,
+                tool=tool,
+                dependencies=tool.dependencies,
+                always_execute=tool.always_execute,
+                final_tool=tool.final_tool,
+            )
 
     # MARK: - Metadata Building
 
+    @staticmethod
     def _build_metadata(
-        self,
-        scope: Any,
-        override_metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+        config: StateCompilationConfig,
+        override_metadata: JsonObject | None = None,
+    ) -> JsonObject:
         """Build metadata dictionary for the session request.
 
         Args:
-            scope: Agent scope.
+            config: Compilation configuration.
             override_metadata: Optional metadata to merge on top of defaults.
 
         Returns:
             Metadata dictionary.
         """
-        metadata: dict[str, Any] = dict(self._config.base_metadata)
+        metadata = cast(JsonObject, dict(config.base_metadata))
         if override_metadata:
             metadata.update(override_metadata)
 
@@ -341,11 +374,11 @@ class StateCompiler:
         derived_targets: list[str] = []
 
         for spec in tool_specs:
-            tool_name = spec.name if hasattr(spec, "name") else None
+            tool_name = spec.name
             if not tool_name:
                 continue
 
-            spec_metadata = spec.metadata if hasattr(spec, "metadata") else None
+            spec_metadata = spec.metadata
             if not isinstance(spec_metadata, dict):
                 continue
 
@@ -353,7 +386,7 @@ class StateCompiler:
             if not isinstance(arg_policies, dict):
                 continue
 
-            for arg_name, policy_map in arg_policies.items():
+            for arg_name, policy_map in cast(dict[str, JsonValue], arg_policies).items():
                 if not isinstance(policy_map, dict):
                     continue
                 compose_policy = policy_map.get("compose_artifact")
@@ -384,58 +417,67 @@ class StateCompiler:
 
     def _build_execution_config(
         self,
-        scope: Any,
+        scope: StateCompilationScope,
         timeout: int | None,
         override: SessionExecutionConfig | None,
+        config: StateCompilationConfig,
     ) -> SessionExecutionConfig | None:
         base = SessionExecutionConfig(
-            agent_id=getattr(scope, "id", None),
-            timeout=timeout if timeout is not None and self._config.include_timeout else None,
+            agent_id=scope.id,
+            timeout=timeout if timeout is not None and config.include_timeout else None,
         )
-        config = SessionExecutionConfig.merge(base, override)
-        return config if config is not None and config.is_configured() else None
+        merged_config = SessionExecutionConfig.merge(base, override)
+        return (
+            merged_config if merged_config is not None and merged_config.is_configured() else None
+        )
 
     @staticmethod
     def _build_system_tools_config(
-        scope: Any,
+        scope: StateCompilationScope,
         override: SystemToolsConfig | None,
     ) -> SystemToolsConfig | None:
         if override is not None and override.is_configured():
             return override
-        resolver = getattr(scope, "resolve_system_tools_config", None)
-        if callable(resolver):
-            resolved = resolver(None)
-            if isinstance(resolved, SystemToolsConfig) and resolved.is_configured():
-                return resolved
+        resolve_config = _optional_attr(scope, "resolve_system_tools_config")
+        if not callable(resolve_config):
+            return override
+
+        resolved = cast(Callable[[SystemToolsConfig | None], object], resolve_config)(None)
+        if isinstance(resolved, SystemToolsConfig) and resolved.is_configured():
+            return resolved
         return override
 
     @staticmethod
     def _build_memory_assets_config(
-        scope: Any,
+        scope: StateCompilationScope,
         override: MemoryAssetsConfig | None,
     ) -> MemoryAssetsConfig | None:
         if override is not None and override.is_configured():
             return override
-        build_assets = getattr(scope, "build_memory_asset_payloads", None)
+
+        build_assets = _optional_attr(scope, "build_memory_asset_payloads")
         if not callable(build_assets):
             return override
 
-        default_agent_id = getattr(scope, "id", None)
+        default_agent_id = scope.id
         default_swarm_id = None
-        get_swarm = getattr(scope, "get_swarm", None)
+        get_swarm = _optional_attr(scope, "get_swarm")
         if callable(get_swarm):
-            swarm = get_swarm()
+            swarm = cast(Callable[[], object | None], get_swarm)()
             if swarm is not None:
-                default_swarm_id = getattr(swarm, "id", None)
+                default_swarm_id = _optional_str_attr(swarm, "id")
 
         raw_assets = build_assets(
             default_agent_id=default_agent_id,
             default_swarm_id=default_swarm_id,
         )
-        if not (isinstance(raw_assets, tuple) and len(raw_assets) == 2):
+        if not isinstance(raw_assets, tuple):
+            return override
+        raw_assets_tuple = cast(tuple[object, ...], raw_assets)
+        if len(raw_assets_tuple) != 2:
             return override
 
-        skills, resources = raw_assets
+        skills, resources = raw_assets_tuple
         config = MemoryAssetsConfig.model_validate(
             {
                 "defined_skills": skills if isinstance(skills, list) else [],
@@ -445,9 +487,9 @@ class StateCompiler:
         return config if config.is_configured() else override
 
     def _build_memory_config(
-        self, scope: Any, override: MemoryConfig | None
+        self, scope: StateCompilationScope, override: MemoryConfig | None
     ) -> MemoryConfig | None:
-        resolver = getattr(scope, "resolve_memory_config", None)
+        resolver = _optional_attr(scope, "resolve_memory_config")
         if callable(resolver):
             resolved = resolver(override)
             if isinstance(resolved, MemoryConfig) and resolved.is_configured():
@@ -468,17 +510,27 @@ class StateCompiler:
         """
         keys: list[str] = []
         for tool in tools:
-            dependencies = getattr(tool, "dependencies", None)
+            dependencies = tool.dependencies
             if not dependencies:
                 continue
 
             for dep in dependencies:
-                if getattr(dep, "dependency_type", None) == "user":
-                    arg_name = getattr(dep, "arg_name", None)
-                    if arg_name:
-                        keys.append(arg_name)
+                if isinstance(dep, InterruptDependency) and dep.arg_name:
+                    keys.append(dep.arg_name)
 
         return keys
+
+
+# MARK: - Attribute Helpers
+
+
+def _optional_attr(value: object, attr: str) -> object | None:
+    return cast(object | None, getattr(value, attr, None))
+
+
+def _optional_str_attr(value: object, attr: str) -> str | None:
+    attr_value = _optional_attr(value, attr)
+    return attr_value if isinstance(attr_value, str) and attr_value else None
 
 
 __all__ = ["StateCompiler"]

@@ -1,20 +1,21 @@
 """Display and output helpers for RichReporter.
 Provides rich panels, tables, and formatting for console output."""
 
+# pyright: strict
 from __future__ import annotations
-
-from typing import TYPE_CHECKING, Any
 
 from maivn_shared.utils.token_models import TokenUsage
 from rich import box
+from rich.console import Console, JustifyMethod, OverflowMethod, RenderableType
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.rule import Rule
+from rich.style import StyleType
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
-from ..._components import FileWriter
+from ..._components import EventTracker, FileWriter, SummaryMetrics
 from ..._formatters import (
     count_lines,
     extract_text_from_response,
@@ -36,12 +37,6 @@ from ...config import (
     SUMMARY_BORDER_STYLE,
 )
 
-if TYPE_CHECKING:
-    from rich.console import Console
-
-    from ..._components import EventTracker
-
-
 # MARK: Display Manager
 
 
@@ -55,20 +50,51 @@ class DisplayManager:
             console: Rich console instance
             tracker: Event tracker for metrics
         """
-        self.console = console
-        self.tracker = tracker
-        self.file_writer = FileWriter()
+        self.console: Console = console
+        self.tracker: EventTracker = tracker
+        self.file_writer: FileWriter = FileWriter()
 
-    def _print(self, *args: Any, **kwargs: Any) -> None:
+    def _print(
+        self,
+        *objects: RenderableType,
+        sep: str = " ",
+        end: str = "\n",
+        style: StyleType | None = None,
+        justify: JustifyMethod | None = None,
+        overflow: OverflowMethod | None = "fold",
+        no_wrap: bool | None = None,
+        emoji: bool | None = None,
+        markup: bool | None = None,
+        highlight: bool | None = None,
+        width: int | None = None,
+        height: int | None = None,
+        crop: bool = True,
+        soft_wrap: bool | None = None,
+        new_line_start: bool = False,
+    ) -> None:
         """Print with default overflow settings.
 
         Args:
-            *args: Positional arguments for console.print
-            **kwargs: Keyword arguments for console.print
+            *objects: Renderables for console.print
+            overflow: Rich overflow behavior; defaults to fold for terminal readability
         """
-        # Don't use soft_wrap as it causes mid-word breaks at console width
-        kwargs.setdefault("overflow", "fold")
-        self.console.print(*args, **kwargs)
+        self.console.print(
+            *objects,
+            sep=sep,
+            end=end,
+            style=style,
+            justify=justify,
+            overflow=overflow,
+            no_wrap=no_wrap,
+            emoji=emoji,
+            markup=markup,
+            highlight=highlight,
+            width=width,
+            height=height,
+            crop=crop,
+            soft_wrap=soft_wrap,
+            new_line_start=new_line_start,
+        )
 
     def print_header(self, title: str, subtitle: str = "") -> None:
         """Print a beautiful header.
@@ -78,9 +104,9 @@ class DisplayManager:
             subtitle: Optional subtitle
         """
         text = Text()
-        text.append(f"\n{title}\n", style="bold cyan")
+        _ = text.append(f"\n{title}\n", style="bold cyan")
         if subtitle:
-            text.append(f"{subtitle}\n", style="dim")
+            _ = text.append(f"{subtitle}\n", style="dim")
 
         panel = Panel(
             text,
@@ -109,7 +135,7 @@ class DisplayManager:
         self,
         event_type: str,
         message: str,
-        details: dict[str, Any] | None = None,
+        details: dict[str, object] | None = None,
     ) -> None:
         """Print an event with color coding.
 
@@ -127,7 +153,7 @@ class DisplayManager:
             for key, value in details.items():
                 self._print(f"  [{color}dim]{key}:[/{color}dim] {value}")
 
-    def print_private_data(self, private_data: dict[str, Any]) -> None:
+    def print_private_data(self, private_data: dict[str, object]) -> None:
         """Print private data parameters.
 
         Args:
@@ -161,14 +187,16 @@ class DisplayManager:
         Args:
             token_usage: Optional token usage data from the session.
         """
-        metrics = self.tracker.get_summary_metrics()
+        metrics: SummaryMetrics = self.tracker.get_summary_metrics()
+        tools_executed = metrics.get("tools_executed", 0)
+        elapsed_seconds = metrics.get("elapsed_seconds", 0.0)
 
         table = Table(title="Execution Summary", border_style=SUMMARY_BORDER_STYLE)
         table.add_column("Metric", style="cyan", no_wrap=True)
         table.add_column("Value", style="green")
 
-        table.add_row("Tools Executed", str(metrics["tools_executed"]))
-        table.add_row("Total Time", format_total_time(metrics["elapsed_seconds"]))
+        table.add_row("Tools Executed", str(tools_executed))
+        table.add_row("Total Time", format_total_time(float(elapsed_seconds)))
 
         # Add token usage metrics if available
         if token_usage and token_usage.total_tokens > 0:
@@ -177,7 +205,7 @@ class DisplayManager:
             table.add_row("  Total Tokens", f"{token_usage.total_tokens:,}")
             table.add_row("  Input Tokens", f"{token_usage.input_tokens:,}")
             table.add_row("  Output Tokens", f"{token_usage.output_tokens:,}")
-            if getattr(token_usage, "reasoning_tokens", 0) > 0:
+            if token_usage.reasoning_tokens > 0:
                 table.add_row("  Reasoning Tokens", f"{token_usage.reasoning_tokens:,}")
             if token_usage.cache_read_tokens > 0:
                 table.add_row("  Cache Read", f"{token_usage.cache_read_tokens:,}")
@@ -188,7 +216,7 @@ class DisplayManager:
         self._print(table)
         self._print("\n")
 
-    def print_final_result(self, result: Any) -> None:
+    def print_final_result(self, result: object) -> None:
         """Print final result in a copyable format.
 
         Args:
@@ -220,7 +248,7 @@ class DisplayManager:
                 if has_extremely_long_lines:
                     self._print(
                         "[yellow]Result contains long lines that may be cut off "
-                        "by the terminal renderer[/yellow]"
+                        + "by the terminal renderer[/yellow]"
                     )
                 else:
                     too_large_msg = (
@@ -271,11 +299,7 @@ class DisplayManager:
 
         extracted_text = extract_text_from_response(response)
         response_text = (
-            extracted_text.strip()
-            if isinstance(extracted_text, str)
-            else response.strip()
-            if isinstance(response, str)
-            else str(response)
+            extracted_text.strip() if isinstance(extracted_text, str) else response.strip()
         )
         if not response_text:
             self._print("[dim](no response text)[/dim]")

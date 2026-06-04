@@ -6,11 +6,16 @@ envelopes used by the organization memory controls. The SDK exposes them so
 consumers can type-check responses without duplicating field declarations.
 """
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal, TypeAlias
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, JsonValue
+
+# MARK: Types
+
+JsonObject: TypeAlias = dict[str, JsonValue]
 
 MemoryPersistenceCeiling = Literal["persist_none", "vector_only", "vector_plus_graph"]
 """Maximum persistence tier permitted for memory writes in an organization."""
@@ -37,6 +42,9 @@ MemoryResourceStatus = Literal["registered", "superseded", "deleted", "error"]
 """Registration state of a memory resource."""
 
 
+# MARK: Organization Models
+
+
 class OrganizationMemoryPolicy(BaseModel):
     """Organization-wide ceiling and retention policy for memory persistence."""
 
@@ -55,6 +63,9 @@ class OrganizationMemoryPurgeResult(BaseModel):
     tables: list[str] = Field(default_factory=list)
 
 
+# MARK: Skill Models
+
+
 class MemorySkill(BaseModel):
     """A reusable, scoped procedural memory ("skill") tracked by the server.
 
@@ -71,9 +82,9 @@ class MemorySkill(BaseModel):
     sharing_scope: MemorySharingScope
     name: str
     description: str
-    steps: list[dict[str, Any]] = Field(default_factory=list)
-    preconditions: dict[str, Any] = Field(default_factory=dict)
-    postconditions: dict[str, Any] = Field(default_factory=dict)
+    steps: list[JsonObject] = Field(default_factory=list)
+    preconditions: JsonObject = Field(default_factory=dict)
+    postconditions: JsonObject = Field(default_factory=dict)
     version: int
     confidence: float
     application_count: int
@@ -82,6 +93,9 @@ class MemorySkill(BaseModel):
     status: MemorySkillStatus
     created_at: str | None = None
     updated_at: str | None = None
+
+
+# MARK: Insight Models
 
 
 class MemoryInsight(BaseModel):
@@ -109,6 +123,9 @@ class MemoryInsight(BaseModel):
     expires_at: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+
+
+# MARK: Resource Models
 
 
 class MemoryResource(BaseModel):
@@ -156,12 +173,12 @@ class MemoryResourceDetail(MemoryResource):
     content_hash: str
     storage_bucket: str
     storage_path: str
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: JsonObject = Field(default_factory=dict)
     superseded_by: str | None = None
     replaces_resource_id: str | None = None
     extractor_version: str
-    version_chain: list[dict[str, Any]] = Field(default_factory=list)
-    extraction_stats: dict[str, Any] = Field(default_factory=dict)
+    version_chain: list[JsonObject] = Field(default_factory=list)
+    extraction_stats: JsonObject = Field(default_factory=dict)
 
 
 class MemoryUnboundResourceCandidate(BaseModel):
@@ -192,6 +209,8 @@ class ProjectMemoryResources(BaseModel):
     insights: list[MemoryInsight] = Field(default_factory=list)
     resources: list[MemoryResource] = Field(default_factory=list)
 
+
+# MARK: Exports
 
 __all__ = [
     "MemoryInsight",

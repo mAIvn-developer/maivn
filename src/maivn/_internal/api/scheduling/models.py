@@ -1,12 +1,15 @@
 """Public dataclasses for scheduled invocation."""
 
+# pyright: strict
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Literal
+from typing import Literal, TypeAlias
 
-RunStatus = Literal[
+# MARK: Run Status
+
+RunStatus: TypeAlias = Literal[
     "pending",
     "running",
     "succeeded",
@@ -16,6 +19,9 @@ RunStatus = Literal[
     "skipped_overlap",
     "cancelled",
 ]
+
+
+# MARK: Run Records
 
 
 @dataclass
@@ -29,9 +35,9 @@ class RunRecord:
     jitter_offset: timedelta = timedelta(0)
     attempt: int = 1
     status: RunStatus = "pending"
-    result: Any = None
+    result: object | None = None
     error: BaseException | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, object] = field(default_factory=dict)
 
     @property
     def duration(self) -> timedelta | None:
@@ -39,5 +45,7 @@ class RunRecord:
             return None
         return self.finished_at - self.fired_at
 
+
+# MARK: Exports
 
 __all__ = ["RunRecord", "RunStatus"]

@@ -1,12 +1,14 @@
+# pyright: strict
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TypeVar
 
 from .helpers import build_fallback_id, fingerprint_mapping, normalize_key_part, normalize_text
 
 ToolBaseSignature = tuple[str, str, str | None, str | None]
 ToolFullSignature = tuple[str, str, str | None, str | None, str | None]
+_KeyT = TypeVar("_KeyT")
 
 
 # MARK: Identity State
@@ -58,7 +60,7 @@ class ToolIdentityResolver:
         tool_type: str | None,
         agent_name: str | None,
         swarm_name: str | None,
-        args: dict[str, Any] | None,
+        args: dict[str, object] | None,
     ) -> ToolFullSignature:
         base_signature = self._tool_base_signature(
             tool_name=tool_name,
@@ -69,13 +71,17 @@ class ToolIdentityResolver:
         return (*base_signature, fingerprint_mapping(args))
 
     @staticmethod
-    def _append_unique(mapping: dict[Any, list[str]], key: Any, value: str) -> None:
+    def _append_unique(mapping: dict[_KeyT, list[str]], key: _KeyT, value: str) -> None:
         existing = mapping.setdefault(key, [])
         if value not in existing:
             existing.append(value)
 
     @staticmethod
-    def _remove_from_mapping(mapping: dict[Any, list[str]], key: Any, value: str) -> None:
+    def _remove_from_mapping(
+        mapping: dict[_KeyT, list[str]],
+        key: _KeyT,
+        value: str,
+    ) -> None:
         existing = mapping.get(key)
         if not existing:
             return
@@ -145,7 +151,7 @@ class ToolIdentityResolver:
         tool_name: str,
         tool_id: str,
         status: str,
-        args: dict[str, Any] | None,
+        args: dict[str, object] | None,
         agent_name: str | None,
         swarm_name: str | None,
         tool_type: str | None,

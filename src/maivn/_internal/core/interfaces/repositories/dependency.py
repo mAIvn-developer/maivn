@@ -1,3 +1,4 @@
+# pyright: strict
 """Dependency repository interface.
 Defines abstract methods for storing and retrieving tool dependencies.
 """

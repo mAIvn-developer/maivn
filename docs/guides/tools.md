@@ -1,66 +1,53 @@
-# Tools Guide
+# Tools and Dependencies
 
-Tools are the primary way agents interact with the world. This guide covers all aspects of tool definition.
+Tools are how an agent acts in the world, and dependencies are how those actions
+compose into a workflow. This guide walks from the simplest idea — "a tool is just
+your function the agent can call" — up to declaring that some tools need the output
+of others, and letting the system work out the order and what can run at the same time.
 
-## Execution Security
+If you are new to the SDK, read this top to bottom. If you already know the basics,
+jump to [Declaring Dependencies](#declaring-dependencies) or
+[DAG Execution at a Glance](#dag-execution-at-a-glance).
 
-**All function tools and MCP tools execute locally in your environment.** Your code never leaves your machine and is never transferred to or executed on maivn servers.
+## What a Tool Is
 
-The maivn server only:
-- Receives tool schemas (names, descriptions, parameters)
-- Orchestrates which tools to call and in what order
-- Returns tool call decisions to the SDK
-
-The SDK then executes the actual tool code in your local environment. This architecture ensures:
-- Your business logic and code remain private
-- Sensitive data processed by tools stays local
-- You have full control over what your tools can access
-
-### Hardening stdio MCP Environments
-
-By default, stdio MCP servers inherit the parent environment for compatibility. For tighter control over third-party MCP processes, pass credentials explicitly and disable broad inheritance:
+A tool is one of your Python functions (or a Pydantic model) that the agent is
+allowed to call. You write the function; the agent decides _when_ to call it and
+with _what_ arguments, based on the task it was given.
 
 ```python
-from maivn import MCPServer
+from maivn import Agent
+from maivn.messages import HumanMessage
 
-mcp_server = MCPServer(
-    name='external_tools',
-    transport='stdio',
-    command='python',
-    args=['-m', 'my_mcp_server'],
-    inherit_env_allowlist=['OPENAI_API_KEY'],
-    env={'SERVICE_TOKEN': 'explicit-token'},
-)
+agent = Agent(name='helper', api_key='...')
+
+@agent.toolify(description='Get current weather for a city')
+def get_weather(city: str) -> dict:
+    return {'city': city, 'temp': 72, 'condition': 'sunny'}
+
+response = agent.invoke([HumanMessage(content='What is the weather in Austin?')])
+print(response.response)
 ```
 
-See [MCP Integration](../api/mcp.md) for the full stdio hardening options.
+The agent never sees the body of `get_weather`. It only sees a description of the
+tool — its name, what it does, and what arguments it takes (derived from your type
+hints and docstring). When the agent chooses to call it, **your code runs locally in
+your own environment** and only the result is returned. Your business logic and any
+data it touches stay on your machine.
 
-## Scalable Tool Management
+> **Two kinds of tools.** A tool is either a **function** that does something and
+> returns a value, or a **Pydantic model** that defines a structured shape the agent
+> should fill in. Both are registered the same way; the difference is whether the tool
+> _executes logic_ or _describes output_.
 
-The maivn system is designed for high-performance tool management. Agents and swarms can have **thousands of tools** without degradation in response time or accuracy.
+## The Three Registration Styles
 
-The server handles tool selection and orchestration efficiently regardless of catalog size, so you can:
-- Register large numbers of domain-specific tools
-- Connect multiple MCP servers with extensive tool catalogs
-- Build comprehensive swarms with specialized agents
+There are three ways to register a tool. All three use the same tool registry and
+support the same dependency decorators, so pick whichever reads best for your code.
 
-You don't need to manually limit or partition your tools - the system manages this automatically.
+### 1. Decorator — `@agent.toolify(...)`
 
-## Tool Types
-
-The maivn SDK supports two types of tools:
-
-1. **Function Tools** - Python functions that execute logic
-2. **Model Tools** - Pydantic models for structured output
-
-## Registration Styles
-
-Tools can be registered in three ways. All three styles use the same underlying agent tool
-registry and support the same dependency decorators.
-
-### Decorator Registration
-
-Use `@agent.toolify(...)` when defining the tool next to the agent:
+Best when you define the tool right next to the agent.
 
 ```python
 agent = Agent(name='helper', api_key='...')
@@ -70,10 +57,10 @@ def add_numbers(a: int, b: int) -> dict:
     return {'sum': a + b}
 ```
 
-### Constructor Registration
+### 2. Constructor — `Agent(..., tools=[...])`
 
-Use `Agent(..., tools=[...])` when functions or models are already defined and the agent
-configuration should show the full tool surface:
+Best when functions or models already exist and you want the agent's configuration
+to show the full tool surface in one place.
 
 ```python
 def add_numbers(a: int, b: int) -> dict:
@@ -83,9 +70,9 @@ def add_numbers(a: int, b: int) -> dict:
 agent = Agent(name='helper', api_key='...', tools=[add_numbers])
 ```
 
-### Imperative Registration
+### 3. Imperative — `agent.add_tool(...)`
 
-Use `agent.add_tool(...)` when tools are imported, assembled conditionally, or need options:
+Best when tools are imported, assembled conditionally, or need extra options.
 
 ```python
 agent = Agent(name='helper', api_key='...')
@@ -97,82 +84,77 @@ agent.add_tool(
 )
 ```
 
-For Pydantic final tools, prefer `add_tool(..., final_tool=True)` when using imperative
-registration:
+`add_tool` also accepts `always_execute=True` (pin the tool so it runs at least once),
+`final_tool=True` (mark the structured-output tool — see
+[Structured Output](structured-output.md)), and an `override=ToolOverride(...)` to
+reframe a generic tool for one app without editing the provider code.
 
 ```python
-class MathAnswer(BaseModel):
-    """Return the final math answer."""
+from maivn import ToolOverride
 
-    answer: int
-
-agent.add_tool(MathAnswer, name='math_answer', final_tool=True)
+agent.add_tool(
+    search,
+    override=ToolOverride(
+        name='inbox_search',
+        description='Search recent inbox messages for triage.',
+        tags=['email', 'read'],
+        default_args={'max_results': 10},
+    ),
+)
 ```
 
-## Function Tools
+`ToolOverride` fields are optional. Scalars (`name`, `description`, `always_execute`,
+`final_tool`) replace the registered value; `tags` and `dependencies` append;
+`metadata` and `default_args` merge. Model-supplied arguments always win over defaults
+at execution time.
 
-### Basic Function Tool
+## Tool Types
 
-```python
-from maivn import Agent
+### Function Tools
 
-agent = Agent(name='helper', api_key='...')
-
-@agent.toolify(description='Add two numbers together')
-def add_numbers(a: int, b: int) -> dict:
-    return {'sum': a + b}
-```
-
-### Key Requirements
-
-1. **Return a JSON-compatible value**: Tools may return any value that the SDK can
-   serialize — `dict`, `list`, primitive (`str`/`int`/`float`/`bool`/`None`), Pydantic
-   `BaseModel` (serialized via `model_dump(mode='json')`), dataclass (via
-   `dataclasses.asdict`), or `set`/`tuple` (converted to lists). Returning a `dict`
-   with named fields is recommended because the LLM consumes the result as JSON and
-   benefits from explicit field names, but it is not enforced.
-2. **Type hints**: Use type hints for parameters (helps the LLM understand usage)
-3. **Description**: Provide a description via `description=` argument or docstring
-
-### Using Pydantic Field for Parameters
-
-Use `Field()` for detailed parameter documentation:
+A function tool runs logic and returns a value. The SDK serializes the return value
+(dict, list, primitive, Pydantic model, dataclass, set, or tuple) before handing it
+back to the agent.
 
 ```python
-from pydantic import Field
-from typing import Annotated
-
-@agent.toolify(description='Search for products')
-def search_products(
-    query: Annotated[str, Field(description='Search query string')],
-    limit: Annotated[int, Field(default=10, description='Max results to return')],
-) -> dict:
-    return {'results': [...]}
-```
-
-### Docstring Descriptions
-
-If you don't provide a `description` argument, the docstring is used:
-
-```python
-@agent.toolify()
+@agent.toolify(description='Fetch current weather data for any city worldwide')
 def get_weather(city: str) -> dict:
-    """Get current weather for a city.
-
-    Args:
-        city: Name of the city to get weather for.
-
-    Returns:
-        Weather data including temperature and conditions.
-    """
     return {'city': city, 'temp': 72}
 ```
 
-## Model Tools
+Two things make a function a good tool:
 
-Model tools use Pydantic models for structured output.
+- **Type hints.** The JSON schema the agent sees is built from your signature. Use
+  `Annotated[...]` with a short description or a Pydantic `Field(...)` to add
+  constraints the agent can read and that Pydantic enforces at call time.
+- **A clear description.** Pass `description=` or rely on the docstring. Say _when_ to
+  use the tool, what the arguments mean, and what shape it returns.
 
-### Basic Model Tool
+```python
+from typing import Annotated
+from pydantic import Field
+
+@agent.toolify()
+def dispatch_vehicle(
+    vehicle_id: Annotated[
+        str,
+        Field(description="A single vehicle ID like 'VAN-103'.", pattern=r'^VAN-\d+$'),
+    ],
+    estimated_km: Annotated[int, Field(description='Trip distance in km.', gt=0)],
+) -> dict:
+    ...
+```
+
+Async functions work the same way — just declare `async def`.
+
+See the [deep reference below](#deep-references) for return-value conventions, error
+handling, and parameter-documentation guidance.
+
+### Pydantic-Model Tools
+
+A model tool describes a structured shape for the agent to produce. Register the model
+the same way you register a function; the class docstring becomes the description and
+each `Field(description=...)` guides the agent's output.
 
 ```python
 from pydantic import BaseModel, Field
@@ -183,193 +165,109 @@ class WeatherReport(BaseModel):
     city: str = Field(..., description='City name')
     temperature: int = Field(..., description='Temperature in Fahrenheit')
     conditions: str = Field(..., description='Weather conditions')
-    humidity: int = Field(..., description='Humidity percentage')
 ```
 
-### Docstring Descriptions for Models
+Model tools support nested models to any depth, lists of models, and optional fields.
+Marking one with `final_tool=True` makes it the agent's guaranteed typed answer — see
+[Structured Output](structured-output.md).
 
-Like function tools, model tools can use the class docstring instead of the `description` argument:
+### Prebuilt `BaseTool`
+
+If you already hold a prebuilt tool object (a `BaseTool` instance — for example one
+produced by a connected MCP server), pass it to any of the three registration styles
+just like a function or model. The registry treats all three uniformly.
+
+## Toolsets: Register Many Methods at Once
+
+When several related tools share configuration — a database handle, an HTTP client, an
+OAuth token — group them on one class instead of scattering free functions. Decorate
+the class with `@toolset(prefix=...)`, mark each tool method with `@toolify(...)`, then
+register the instance with `agent.add_toolset(instance)`.
 
 ```python
-@agent.toolify()  # No description needed - uses docstring
-class WeatherReport(BaseModel):
-    """Generate a structured weather report for a given location.
+from maivn import Agent, PermissionFlag, PermissionSet, toolify, toolset
 
-    Use this when the user asks for weather information and you want
-    to return data in a consistent format.
-    """
-    city: str = Field(..., description='City name')
-    temperature: int = Field(..., description='Temperature in Fahrenheit')
-    conditions: str = Field(..., description='Weather conditions')
+
+@toolset(prefix='reports')
+class WeeklyReportsToolSet:
+    """Pull weekly KPI reports from an internal warehouse."""
+
+    def __init__(self, db_path: str):
+        self._db_path = db_path
+
+    @toolify(permissions=PermissionSet(PermissionFlag.READ))
+    def weekly_signups(self, week_of: str) -> list[dict]:
+        """Signup counts by source for the week starting ``week_of`` (YYYY-MM-DD)."""
+        ...
+
+    @toolify(permissions=PermissionSet(PermissionFlag.READ))
+    def revenue_per_signup(self, week_of: str) -> float:
+        """Compute revenue per signup for ``week_of``."""
+        ...
+
+
+agent = Agent(name='analyst', api_key='...')
+agent.add_toolset(WeeklyReportsToolSet('/srv/warehouse.db'))
 ```
 
-The docstring becomes the tool description that the LLM sees.
+After `add_toolset` returns, the agent has two new tools: `REPORTS_weekly_signups` and
+`REPORTS_revenue_per_signup`.
 
-### Nested Models
+### Name Prefixing
 
-Model tools fully support nested Pydantic models. The LLM receives the complete schema and generates valid nested structures:
+The `prefix` is uppercased and joined to the method name with an underscore. The
+uppercase form keeps generated names within the provider tool-name regex
+(`^[a-zA-Z0-9_-]{1,64}$`) and makes the namespace boundary readable at a glance in
+logs and traces.
+
+### Filtering with include / exclude and tags
+
+`add_toolset` accepts four optional filters so one class can be narrowed at
+registration time. A method must pass _every_ active filter.
 
 ```python
-class Location(BaseModel):
-    """Geographic location."""
-    city: str = Field(..., description='City name')
-    country: str = Field(..., description='Country name')
-
-class Temperature(BaseModel):
-    """Temperature in multiple units."""
-    fahrenheit: int = Field(..., description='Temperature in Fahrenheit')
-    celsius: int = Field(..., description='Temperature in Celsius')
-
-@agent.toolify(final_tool=True)
-class DetailedWeatherReport(BaseModel):
-    """Comprehensive weather report with nested data."""
-    location: Location
-    temperature: Temperature
-    conditions: str = Field(..., description='Current weather conditions')
-    forecast: list[str] = Field(..., description='Multi-day forecast summaries')
+agent.add_toolset(instance, include_tags=['read'])        # only read-tagged methods
+agent.add_toolset(instance, exclude_tags=['destructive']) # skip destructive methods
+agent.add_toolset(instance, include=['weekly_signups'])   # whitelist method names
+agent.add_toolset(instance, exclude=['revenue_per_signup'])  # skip method names
 ```
 
-**Key points about nested models:**
+Tags are auto-derived from each method's `permissions=` and `destructive=` markers
+(`PermissionSet(PermissionFlag.READ)` adds `"read"`; `PermissionFlag.DELETE` adds both
+`"delete"` and `"destructive"`), and any `tags=` you declare on `@toolset` / `@toolify`
+are merged on top. `include` / `exclude` match the **unprefixed** method name (or a
+`name=` alias from `@toolify`).
 
-- Nested models don't need `@agent.toolify()` - only the top-level model is registered as a tool
-- Field descriptions in nested models are included in the schema the LLM sees
-- You can nest models to any depth
-- Lists of models are supported (e.g., `list[Location]`)
-- Optional nested models work as expected (e.g., `location: Location | None = None`)
-- Nested models are schema definitions, not independently schedulable tools. They do
-  not inherit the parent model's `always_execute` or `final_tool` flags
+### Overrides
 
-**Decorators and nested models:**
-
-Dependency decorators (`@depends_on_tool`, `@depends_on_private_data`, etc.) can be used on nested models as well as top-level model tools. This allows you to inject dependencies at any level of your model hierarchy:
+Toolsets accept `overrides={...}` with the same `ToolOverride` shape used by direct
+tools and MCP tools. Keep provider classes generic, then retarget names, descriptions,
+defaults, dependencies, and tags for the app using them.
 
 ```python
-from maivn import depends_on_tool
+from maivn import ToolOverride
 
-class Location(BaseModel):
-    """Geographic location with enriched data."""
-    city: str
-    country: str
-
-@depends_on_tool(fetch_coordinates, arg_name='coords')
-class EnrichedLocation(Location):
-    """Location with coordinates fetched from external service."""
-    latitude: float
-    longitude: float
-
-@agent.toolify(final_tool=True)
-class WeatherReport(BaseModel):
-    """Weather report using enriched location."""
-    location: EnrichedLocation  # Nested model with its own dependency
-    temperature: int
-    conditions: str
-```
-
-Dependencies are resolved at each level where they are declared, giving you fine-grained control over data injection throughout your model hierarchy.
-
-**Example with lists of nested models:**
-
-```python
-class DailyForecast(BaseModel):
-    """Single day forecast."""
-    date: str = Field(..., description='Date in YYYY-MM-DD format')
-    high: int = Field(..., description='High temperature')
-    low: int = Field(..., description='Low temperature')
-    conditions: str
-
-@agent.toolify(final_tool=True)
-class WeeklyForecast(BaseModel):
-    """Week-long weather forecast."""
-    location: Location
-    days: list[DailyForecast] = Field(..., description='Daily forecasts for the week')
-```
-
-## Tool Options
-
-The `@agent.toolify()` decorator accepts several options:
-
-```python
-@agent.toolify(
-    name='custom_name',           # Override tool name
-    description='Tool description', # Description for LLM
-    always_execute=False,          # Always run this tool
-    final_tool=False,              # Mark as final output tool
-    tags=['category', 'type'],     # Tags for organization
-    before_execute=callback,       # Hook before execution
-    after_execute=callback,        # Hook after execution
+agent.add_toolset(
+    WeeklyReportsToolSet('/srv/warehouse.db'),
+    overrides={
+        'weekly_signups': ToolOverride(
+            description='Fetch weekly signup counts for the KPI dashboard.',
+            default_args={'week_of': '2026-05-11'},
+            tags=['dashboard'],
+        ),
+    },
 )
 ```
 
-### name
+Override keys are the unprefixed Python method name or the `@toolify(name=...)` alias.
+This is the same pattern used by the `maivn-tools` package — see
+[its toolsets guide](https://github.com/mAIvn-developer/maivn-tools/blob/main/docs/toolsets.md)
+for the full filter API and decorator reference.
 
-Override the default name (function/class name):
+## Tool Execution Hooks
 
-```python
-@agent.toolify(name='weather_lookup')
-def get_weather(city: str) -> dict:
-    ...
-```
-
-### description
-
-Provide a clear description for the LLM:
-
-```python
-@agent.toolify(description='Fetch current weather data for any city worldwide')
-def get_weather(city: str) -> dict:
-    ...
-```
-
-### always_execute
-
-Require the registered tool to be scheduled at least once:
-
-```python
-@agent.toolify(always_execute=True)
-def log_request(request: dict) -> dict:
-    return {'logged': True}
-```
-
-**Note**: `always_execute` and `final_tool` are orthogonal — they describe execution
-frequency and output role, respectively, and may be combined on the same tool when
-needed.
-
-`always_execute=True` applies only to the top-level registered tool. The assignment
-planner enforces it for regular agent calls and nested Swarm member calls, so it is
-appropriate for required audits, verification reports, or typed handoff tools. Do not
-use it for every utility function; it increases work and can make simple requests do
-unnecessary tool calls.
-
-### final_tool
-
-Mark as the structured output tool (only one per agent):
-
-```python
-@agent.toolify(final_tool=True)
-class FinalReport(BaseModel):
-    summary: str
-    data: dict
-```
-
-See [Structured Output Guide](structured-output.md) for details.
-
-### tags
-
-Organize tools with tags:
-
-```python
-@agent.toolify(tags=['data', 'fetch'])
-def fetch_data() -> dict:
-    ...
-
-@agent.toolify(tags=['data', 'process'])
-def process_data() -> dict:
-    ...
-```
-
-### Execution Hooks
-
-Add callbacks before/after tool execution:
+Every tool can run a callback _before_ and _after_ it executes — useful for logging,
+auditing, or timing.
 
 ```python
 def log_start(ctx):
@@ -378,208 +276,242 @@ def log_start(ctx):
 def log_end(ctx):
     print(f"Finished: {ctx['tool_id']}, result: {ctx['result']}")
 
-@agent.toolify(
-    before_execute=log_start,
-    after_execute=log_end,
-)
+@agent.toolify(before_execute=log_start, after_execute=log_end)
 def my_tool() -> dict:
     return {'done': True}
 ```
 
-#### Hook firing events
+Hooks never abort execution: if a hook raises, the failure is reported but the tool
+still runs. Each firing emits a normalized `hook_fired` event (carrying the hook name,
+the `before`/`after` stage, a `completed`/`failed` status, and elapsed time) that
+custom frontends can subscribe to via the events API.
 
-Whenever a hook callback runs, the SDK emits a normalized ``hook_fired``
-event through the configured reporter (and any attached
-:class:`~maivn.events.EventBridge`). Each firing carries:
+### Per-tool vs per-scope: `hook_execution_mode`
 
-- ``name`` — the callable's ``__name__``
-- ``stage`` — ``"before"`` or ``"after"``
-- ``status`` — ``"completed"`` or ``"failed"`` (hooks never abort
-  execution; failures are reported, not raised to the agent)
-- ``target_type`` — ``"tool"`` for tool hooks (this section), or
-  ``"agent"`` / ``"swarm"`` for scope hooks
-- ``target_id`` — per-invocation tool event id (correlates to the tool
-  card the frontend renders), or the agent id / swarm name for scope
-  hooks
-- ``target_name`` — display name
-- ``error`` — message string when ``status == "failed"``
-- ``elapsed_ms`` — how long the hook ran
+By default, hooks fire once per tool call. Set `hook_execution_mode` on the `Agent`
+(or `Swarm`) to change that:
 
-Maivn Studio listens for these events and renders the hook's name + status
-as a persistent header (``before`` stage) or footer (``after`` stage) on
-the matching tool card or scope card. Custom frontends can subscribe via
-:func:`~maivn.events.normalize_stream` or the
-:class:`~maivn.events.EventBridge` and route on
-``event.event_name == "hook_fired"`` plus the ``hook`` descriptor.
-
-Set ``hook_execution_mode`` on the Agent or Swarm to control which
-hooks fire per-tool vs once per scope invocation:
+- `'tool'` (default) — fire for each tool execution.
+- `'scope'` — fire once per `invoke()` / `stream()` call.
+- `'agent'` — alias for `'scope'`.
 
 ```python
 agent = Agent(
     name='auditor',
-    before_execute=audit_log,    # fires per-tool by default
-    hook_execution_mode='scope', # fires once per invoke()/stream() call
+    api_key='...',
+    before_execute=audit_log,     # fires per-tool by default
+    hook_execution_mode='scope',  # now fires once per invoke()/stream()
 )
 ```
 
-See [Scope Hooks](agent.md#scope-hooks) for the full matrix.
+## Declaring Dependencies
 
-## Return Values
+So far each tool stands alone. The next step is composition: **some tools need the
+output of other tools.** A report tool needs the data a fetch tool produced; a write
+tool needs to run after a validation tool.
 
-The SDK runs every tool result through `to_jsonable`, which handles dicts, lists,
-primitives, Pydantic models, dataclasses, sets, and tuples. Pick whichever shape
-fits the operation; named fields (dict or model) tend to read more clearly to the
-LLM than positional structures.
+You declare these relationships with decorators. You never write the scheduling code
+yourself — **you describe what each tool needs, and the system derives the execution
+order and what can run concurrently** from those declarations.
 
-### Returning Dictionaries
+```python
+from maivn import Agent, depends_on_tool
+
+agent = Agent(name='data_agent', api_key='...')
+
+@agent.toolify(description='Fetch raw data from source')
+def fetch_data(source: str) -> dict:
+    return {'source': source, 'records': [1, 2, 3]}
+
+@agent.toolify(description='Process fetched data')
+@depends_on_tool(fetch_data, arg_name='raw_data')
+def process_data(raw_data: dict) -> dict:
+    return {'processed': len(raw_data['records'])}
+```
+
+When `process_data` is needed, `fetch_data` runs first and its output is passed into
+the `raw_data` argument. You did not order them — the dependency declaration did.
+
+> **Dependencies are independent of registration style.** The same graph works whether
+> you register with `@agent.toolify`, `Agent(..., tools=[...])`, or `agent.add_tool`.
+
+### `@depends_on_tool` — output from another tool
+
+Inject one tool's result into another tool's argument. Stack the decorator to depend on
+several tools at once; independent ones run in parallel.
 
 ```python
 @agent.toolify()
-def get_data() -> dict:
-    return {
-        'status': 'success',
-        'data': [...],
-        'count': 10,
-    }
-```
-
-### Returning Pydantic Models or Dataclasses
-
-```python
-from pydantic import BaseModel
-
-class GetDataResult(BaseModel):
-    status: str
-    data: list[dict]
-    count: int
+def fetch_users() -> dict:
+    return {'users': [...]}
 
 @agent.toolify()
-def get_data() -> GetDataResult:
-    return GetDataResult(status='success', data=[...], count=10)
-```
-
-### Returning Primitives or Lists
-
-```python
-@agent.toolify()
-def count_items() -> int:
-    return 42
+def fetch_orders() -> dict:
+    return {'orders': [...]}
 
 @agent.toolify()
-def list_active_users() -> list[str]:
-    return ['alice', 'bob']
+@depends_on_tool(fetch_users, arg_name='users')
+@depends_on_tool(fetch_orders, arg_name='orders')
+def generate_report(users: dict, orders: dict) -> dict:
+    return {'report': 'Combined users and orders'}
 ```
 
-### Returning Errors
+`fetch_users` and `fetch_orders` have no dependency on each other, so they run at the
+same time; `generate_report` waits for both.
 
-A common convention is to return a dict with an `'error'` key so the LLM can
-reason about failures. The runtime marks that result as an error. A string return
-that starts with `Error:` is also treated as an error for compatibility with simple
-tools. Raising an exception is still the clearest option when the tool cannot
-produce a valid result.
+### `@depends_on_agent` — output from another agent
+
+In a multi-agent system, a tool can depend on the full output of another agent. The
+dependency agent runs first, and its result is passed into the dependent tool.
 
 ```python
+from maivn import Agent, Swarm, depends_on_agent
+
+researcher = Agent(name='researcher', api_key='...')
+writer = Agent(name='writer', api_key='...')
+
+@researcher.toolify(description='Research a topic')
+def research(topic: str) -> dict:
+    return {'findings': f'Research on {topic}'}
+
+@writer.toolify(description='Write based on research')
+@depends_on_agent(researcher, arg_name='research_result')
+def write_article(research_result: dict) -> dict:
+    return {'article': f'Based on: {research_result}'}
+
+swarm = Swarm(name='team', agents=[researcher, writer])
+```
+
+See the [Multi-Agent Guide](multi-agent.md) for swarm-member dependencies and
+agent-to-agent handoffs.
+
+> **Injecting secrets.** A related decorator, `@depends_on_private_data`, injects
+> private values into a tool argument _at execution time_ — the value is never
+> shown to the model and is redacted from results. It is covered in the
+> [Private Data Guide](private-data.md).
+
+## Gating and Replanning
+
+Two more controls shape _ordering_ and _planning_ without injecting any data. They are
+metadata-only: they affect when a tool runs, not what arguments it receives.
+
+### `@depends_on_await_for` — order without data flow
+
+Use this when a tool must wait for another even though it does not consume that tool's
+return value — ordering, confirmation flows, audit trails, side-effecting tools.
+
+```python
+from maivn import depends_on_await_for
+
+@agent.toolify(description='Fetch latest records')
+def fetch_records() -> dict:
+    return {'records': [...]}
+
+@agent.toolify(description='Write compliance audit entry after fetch')
+@depends_on_await_for(fetch_records, timing='after', instance_control='all')
+def write_audit_log() -> dict:
+    return {'logged': True}
+```
+
+`timing` (`'before'` / `'after'`) and `instance_control` (`'each'` / `'all'`) are
+keyword-only and let you express "after every matching call" versus "after all of them
+complete."
+
+### `@depends_on_reevaluate` — pause, inspect, and replan
+
+Use this when planning should stop at a boundary, look at the results gathered so far,
+and then plan the next step using that real output instead of placeholder arguments.
+
+```python
+from maivn import depends_on_reevaluate
+
+@agent.toolify(description='Fetch document text')
+def fetch_document() -> dict:
+    return {'text': '...'}
+
+@agent.toolify(description='Create final summary after reviewing fetched content')
+@depends_on_reevaluate(fetch_document, timing='after', instance_control='all')
+def summarize_document() -> dict:
+    return {'summary': '...'}
+```
+
+This is a firm boundary, not a hint: the runtime ensures the replanning step happens at
+the declared point so the dependent tool only runs once the earlier result is genuinely
+in scope. When a replanning cycle fires, the SDK surfaces a `reevaluate_accrued`
+enrichment event you can observe in the stream.
+
+## DAG Execution at a Glance
+
+When you stack these decorators you are, in effect, describing a **directed acyclic
+graph** (DAG) — a set of steps where edges point from a tool to the tools that depend
+on it. You declare the edges; the system figures out the rest.
+
+```python
+# Level 1: no dependencies
 @agent.toolify()
-def risky_operation(path: str) -> dict:
-    try:
-        result = do_something(path)
-        return {'result': result}
-    except FileNotFoundError:
-        return {'error': f'File not found: {path}'}
-```
-
-## Async Tools
-
-Async functions are supported:
-
-```python
-@agent.toolify(description='Fetch data asynchronously')
-async def fetch_async(url: str) -> dict:
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url)
-        return {'data': response.json()}
-```
-
-## Tool Listing
-
-List all registered tools:
-
-```python
-tools = agent.list_tools()
-for tool in tools:
-    print(f'{tool.name}: {tool.description}')
-```
-
-## Best Practices
-
-### 1. Clear Descriptions
-
-Write descriptions that help the LLM understand when to use the tool:
-
-```python
-# Good
-@agent.toolify(description='Search product catalog by name, category, or SKU')
-def search_products(query: str) -> dict: ...
-
-# Less helpful
-@agent.toolify(description='Search')
-def search_products(query: str) -> dict: ...
-```
-
-### 2. Typed Parameters
-
-Use specific types, not `Any`:
-
-```python
-# Good
-def process(items: list[str], count: int) -> dict: ...
-
-# Avoid
-def process(items, count) -> dict: ...
-```
-
-### 3. Descriptive Parameter Names
-
-```python
-# Good
-def send_email(recipient_email: str, subject: str, body: str) -> dict: ...
-
-# Less clear
-def send_email(to: str, s: str, b: str) -> dict: ...
-```
-
-### 4. Reasonable Defaults
-
-```python
-@agent.toolify()
-def search(
-    query: str,
-    limit: int = 10,
-    include_archived: bool = False,
-) -> dict:
-    ...
-```
-
-### 5. Keep Tools Focused
-
-One tool should do one thing well:
-
-```python
-# Good: separate tools
-@agent.toolify()
-def fetch_user(user_id: str) -> dict: ...
+def step_a() -> dict:
+    return {'step': 'A'}
 
 @agent.toolify()
-def update_user(user_id: str, data: dict) -> dict: ...
+def step_b() -> dict:
+    return {'step': 'B'}
 
-# Avoid: one tool doing too much
+# Level 2: depends on level 1
 @agent.toolify()
-def manage_user(action: str, user_id: str, data: dict = None) -> dict: ...
+@depends_on_tool(step_a, 'a_result')
+def step_c(a_result: dict) -> dict:
+    return {'step': 'C', 'from': a_result}
+
+@agent.toolify()
+@depends_on_tool(step_b, 'b_result')
+def step_d(b_result: dict) -> dict:
+    return {'step': 'D', 'from': b_result}
+
+# Level 3: depends on level 2
+@agent.toolify(final_tool=True)
+@depends_on_tool(step_c, 'c_result')
+@depends_on_tool(step_d, 'd_result')
+class FinalReport(BaseModel):
+    combined: str
 ```
 
-## See Also
+From those declarations the system derives the schedule:
 
-- [Dependencies Guide](dependencies.md) - Chain tools together
-- [Structured Output Guide](structured-output.md) - Model tools and final_tool
-- [Agent API](../api/agent.md) - `toolify()`, `add_tool(...)`, and `tools=[...]` reference
+1. `step_a` and `step_b` are independent, so they **run concurrently**.
+2. `step_c` and `step_d` each **wait** for their single dependency, then run.
+3. `FinalReport` runs last, once both branches complete.
+
+The two guarantees worth remembering:
+
+- **Independent branches run at the same time.** If two tools share no dependency,
+  there is nothing forcing them to take turns. Three two-second fetches with no edges
+  between them finish in about two seconds, not six.
+- **Dependent steps wait.** A tool never starts until everything it declared a
+  dependency on has produced a result.
+
+You get parallelism for free and correct ordering by construction — without writing any
+orchestration code, threads, or `await` chains yourself. **Circular dependencies are
+detected and rejected**, and the decorators validate at import time that each
+`arg_name` actually exists in the target's signature, so misconfigured graphs fail
+loudly instead of misbehaving at runtime.
+
+## Deep References
+
+This page is the conceptual spine. For the full option-by-option detail, see:
+
+- [Dependencies Guide](dependencies.md) — every dependency and control decorator with
+  validation rules, combined-dependency examples, and execution-timing walkthroughs.
+- [Decorators API](../api/decorators.md) — exact signatures, parameter tables, and the
+  full toolset decorator reference (`@toolset`, `@toolify`, permission helpers,
+  `ProviderMetadata`, `ToolOverride`).
+- [Agent API](../api/agent.md) — `toolify()`, `add_tool(...)`, `add_toolset(...)`,
+  `tools=[...]`, and the scope-hook matrix.
+
+## Next Steps
+
+- [Structured Output](structured-output.md) — turn a Pydantic model into a guaranteed
+  typed answer with `final_tool` and `structured_output()`.
+- [Private Data](private-data.md) — inject secrets into tools without ever exposing
+  them to the model.
+- [Multi-Agent](multi-agent.md) — compose agents into a Swarm and wire dependencies
+  across agent boundaries.

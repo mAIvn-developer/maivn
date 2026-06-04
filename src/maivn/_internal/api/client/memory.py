@@ -1,6 +1,7 @@
+# pyright: strict
 from __future__ import annotations
 
-from typing import Any, Protocol, TypeVar
+from typing import TypeVar
 
 from pydantic import BaseModel
 
@@ -15,42 +16,56 @@ from maivn._internal.api.resource_models import (
     ProjectMemoryResources,
 )
 
+from .http import JsonObject, JsonValue, QueryValue
+
+# MARK: Types
+
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
-class _ClientMemoryProtocol(Protocol):
-    def _get_json(self, path: str) -> Any: ...
-
-    def _post_json(self, path: str, payload: dict[str, Any] | None = None) -> Any: ...
-
-    def _patch_json(self, path: str, payload: dict[str, Any]) -> Any: ...
-
-    def _delete_json(self, path: str) -> Any: ...
-
-    @staticmethod
-    def _with_query(path: str, params: dict[str, Any]) -> str: ...
-
-    @staticmethod
-    def _extract_items(payload: Any) -> list[dict[str, Any]]: ...
-
-    @staticmethod
-    def _validate_model(model_type: type[ModelT], payload: Any) -> ModelT: ...
+# MARK: ClientMemoryMixin
 
 
 class ClientMemoryMixin:
+    # MARK: - HTTP Hooks
+
+    def _get_json(self, _path: str) -> JsonValue:
+        raise NotImplementedError
+
+    def _post_json(self, _path: str, _payload: JsonObject | None = None) -> JsonValue:
+        raise NotImplementedError
+
+    def _patch_json(self, _path: str, _payload: JsonObject) -> JsonValue:
+        raise NotImplementedError
+
+    def _delete_json(self, _path: str) -> JsonValue:
+        raise NotImplementedError
+
+    @staticmethod
+    def _with_query(_path: str, _params: dict[str, QueryValue]) -> str:
+        raise NotImplementedError
+
+    @staticmethod
+    def _extract_items(_payload: JsonValue) -> list[JsonObject]:
+        raise NotImplementedError
+
+    @staticmethod
+    def _validate_model(_model_type: type[ModelT], _payload: object) -> ModelT:
+        raise NotImplementedError
+
     # MARK: - Organization Memory
 
     def get_organization_memory_policy(
-        self: _ClientMemoryProtocol,
+        self,
         org_id: str,
     ) -> OrganizationMemoryPolicy:
         payload = self._get_json(f"/organizations/{org_id}/memory-policy")
         return self._validate_model(OrganizationMemoryPolicy, payload)
 
     def update_organization_memory_policy(
-        self: _ClientMemoryProtocol,
+        self,
         org_id: str,
-        policy: OrganizationMemoryPolicy | dict[str, Any],
+        policy: OrganizationMemoryPolicy | JsonObject,
     ) -> OrganizationMemoryPolicy:
         payload = (
             policy.model_dump(mode="json")
@@ -61,14 +76,14 @@ class ClientMemoryMixin:
         return self._validate_model(OrganizationMemoryPolicy, result)
 
     def purge_organization_memory(
-        self: _ClientMemoryProtocol,
+        self,
         org_id: str,
         *,
         confirm_token: str = "PURGE_MEMORY",
         project_id: str | None = None,
         session_id: str | None = None,
     ) -> OrganizationMemoryPurgeResult:
-        payload: dict[str, Any] = {"confirm_token": confirm_token}
+        payload: JsonObject = {"confirm_token": confirm_token}
         if project_id is not None:
             payload["project_id"] = project_id
         if session_id is not None:
@@ -79,7 +94,7 @@ class ClientMemoryMixin:
     # MARK: - Project Memory Skills
 
     def list_memory_skills(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
         *,
         search: str | None = None,
@@ -104,7 +119,7 @@ class ClientMemoryMixin:
         return [self._validate_model(MemorySkill, item) for item in self._extract_items(payload)]
 
     def get_memory_skill(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
         skill_id: str,
     ) -> MemorySkill:
@@ -112,29 +127,29 @@ class ClientMemoryMixin:
         return self._validate_model(MemorySkill, payload)
 
     def create_memory_skill(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
-        payload: dict[str, Any],
+        payload: JsonObject,
     ) -> MemorySkill:
         result = self._post_json(f"/projects/{project_id}/memory/skills", dict(payload))
         return self._validate_model(MemorySkill, result)
 
     def update_memory_skill(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
         skill_id: str,
-        payload: dict[str, Any],
+        payload: JsonObject,
     ) -> MemorySkill:
         result = self._patch_json(f"/projects/{project_id}/memory/skills/{skill_id}", dict(payload))
         return self._validate_model(MemorySkill, result)
 
-    def delete_memory_skill(self: _ClientMemoryProtocol, project_id: str, skill_id: str) -> None:
-        self._delete_json(f"/projects/{project_id}/memory/skills/{skill_id}")
+    def delete_memory_skill(self, project_id: str, skill_id: str) -> None:
+        _ = self._delete_json(f"/projects/{project_id}/memory/skills/{skill_id}")
 
     # MARK: - Project Memory Insights
 
     def list_memory_insights(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
         *,
         search: str | None = None,
@@ -159,7 +174,7 @@ class ClientMemoryMixin:
         return [self._validate_model(MemoryInsight, item) for item in self._extract_items(payload)]
 
     def get_memory_insight(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
         insight_id: str,
     ) -> MemoryInsight:
@@ -167,18 +182,18 @@ class ClientMemoryMixin:
         return self._validate_model(MemoryInsight, payload)
 
     def create_memory_insight(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
-        payload: dict[str, Any],
+        payload: JsonObject,
     ) -> MemoryInsight:
         result = self._post_json(f"/projects/{project_id}/memory/insights", dict(payload))
         return self._validate_model(MemoryInsight, result)
 
     def update_memory_insight(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
         insight_id: str,
-        payload: dict[str, Any],
+        payload: JsonObject,
     ) -> MemoryInsight:
         result = self._patch_json(
             f"/projects/{project_id}/memory/insights/{insight_id}",
@@ -187,7 +202,7 @@ class ClientMemoryMixin:
         return self._validate_model(MemoryInsight, result)
 
     def promote_memory_insight(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
         insight_id: str,
         *,
@@ -200,16 +215,16 @@ class ClientMemoryMixin:
         return self._validate_model(MemoryInsight, result)
 
     def delete_memory_insight(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
         insight_id: str,
     ) -> None:
-        self._delete_json(f"/projects/{project_id}/memory/insights/{insight_id}")
+        _ = self._delete_json(f"/projects/{project_id}/memory/insights/{insight_id}")
 
     # MARK: - Project Memory Resources
 
     def list_memory_resources(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
         *,
         search: str | None = None,
@@ -225,7 +240,7 @@ class ClientMemoryMixin:
                 "search": search,
                 "binding_type": binding_type,
                 "status": status,
-                "tags": [tag.strip() for tag in tags or [] if isinstance(tag, str) and tag.strip()],
+                "tags": [tag.strip() for tag in tags or [] if tag.strip()],
                 "limit": limit,
                 "offset": offset,
             },
@@ -234,7 +249,7 @@ class ClientMemoryMixin:
         return [self._validate_model(MemoryResource, item) for item in self._extract_items(payload)]
 
     def get_memory_resource(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
         resource_id: str,
     ) -> MemoryResourceDetail:
@@ -242,18 +257,18 @@ class ClientMemoryMixin:
         return self._validate_model(MemoryResourceDetail, payload)
 
     def create_memory_resource(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
-        payload: dict[str, Any],
+        payload: JsonObject,
     ) -> MemoryResourceDetail:
         result = self._post_json(f"/projects/{project_id}/memory/resources", dict(payload))
         return self._validate_model(MemoryResourceDetail, result)
 
     def update_memory_resource(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
         resource_id: str,
-        payload: dict[str, Any],
+        payload: JsonObject,
     ) -> MemoryResourceDetail:
         result = self._patch_json(
             f"/projects/{project_id}/memory/resources/{resource_id}",
@@ -262,10 +277,10 @@ class ClientMemoryMixin:
         return self._validate_model(MemoryResourceDetail, result)
 
     def replace_memory_resource(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
         resource_id: str,
-        payload: dict[str, Any],
+        payload: JsonObject,
     ) -> MemoryResourceDetail:
         result = self._post_json(
             f"/projects/{project_id}/memory/resources/{resource_id}/replace",
@@ -274,14 +289,14 @@ class ClientMemoryMixin:
         return self._validate_model(MemoryResourceDetail, result)
 
     def delete_memory_resource(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
         resource_id: str,
     ) -> None:
-        self._delete_json(f"/projects/{project_id}/memory/resources/{resource_id}")
+        _ = self._delete_json(f"/projects/{project_id}/memory/resources/{resource_id}")
 
     def restore_memory_resource(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
         resource_id: str,
     ) -> MemoryResourceDetail:
@@ -289,7 +304,7 @@ class ClientMemoryMixin:
         return self._validate_model(MemoryResourceDetail, result)
 
     def rebind_memory_resource_to_portal(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
         resource_id: str,
     ) -> MemoryResourceDetail:
@@ -297,7 +312,7 @@ class ClientMemoryMixin:
         return self._validate_model(MemoryResourceDetail, result)
 
     def bind_memory_resource(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
         resource_id: str,
         *,
@@ -311,7 +326,7 @@ class ClientMemoryMixin:
         return self._validate_model(MemoryResourceDetail, result)
 
     def list_unbound_memory_resource_candidates(
-        self: _ClientMemoryProtocol,
+        self,
         project_id: str,
         *,
         min_age_days: int | None = None,
@@ -333,7 +348,7 @@ class ClientMemoryMixin:
         ]
 
     def list_project_memory_resources(
-        self: Any,
+        self,
         project_id: str,
     ) -> ProjectMemoryResources:
         return ProjectMemoryResources(

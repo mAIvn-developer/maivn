@@ -2,13 +2,14 @@
 Coordinates session lifecycle, SSE event streaming, and tool execution.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 import logging
 import time
 import uuid
-from collections.abc import Iterator, Sequence
-from typing import TYPE_CHECKING, Any, Literal
+from collections.abc import Callable, Iterator, Sequence
+from typing import TYPE_CHECKING, Literal, TypeAlias
 
 from maivn_shared import (
     BaseMessage,
@@ -23,9 +24,10 @@ from maivn_shared import (
     SystemToolsConfig,
 )
 from maivn_shared.infrastructure.logging import MetricsLoggerProtocol
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue
 
 from maivn._internal.core import SessionEndpoints, SSEEvent
+from maivn._internal.core.entities.tools.agent_tool import AgentTool
 from maivn._internal.core.services import (
     BackgroundExecutor,
     EventStreamProcessor,
@@ -52,11 +54,11 @@ from .helpers import (
     coerce_tool_list,
 )
 from .initialization import init_orchestrator
+from .protocols import OrchestratedAgent
 from .tooling import ToolIndexCoordinator
 
 if TYPE_CHECKING:
     from maivn._internal.adapters.networking import StreamingSSEClient
-    from maivn._internal.api.agent import Agent
     from maivn._internal.core.services import (
         HttpClientService,
         InterruptHandler,
@@ -65,6 +67,12 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+
+# MARK: Types
+
+JsonObject: TypeAlias = dict[str, JsonValue]
+ProgressTask: TypeAlias = object
 
 
 # MARK: Orchestrator
@@ -81,7 +89,7 @@ class AgentOrchestrator:
     _logger: MetricsLoggerProtocol
     _http_client_service: HttpClientService
     _background_executor: BackgroundExecutor
-    agent: Agent
+    agent: OrchestratedAgent
     _tool_spec_factory: ToolSpecFactory
     _sse_client: StreamingSSEClient
     _state_compiler: StateCompiler
@@ -96,7 +104,7 @@ class AgentOrchestrator:
     _reporter_hooks: OrchestratorReporterHooks
     _event_coordinator: EventConsumptionCoordinator
     _reporter: BaseReporter | None = None
-    _progress_task: Any | None = None
+    _progress_task: ProgressTask | None = None
     _tooling: ToolIndexCoordinator
     _state: SessionRequest | None = None
     _session_id: str | None = None
@@ -105,7 +113,7 @@ class AgentOrchestrator:
 
     def __init__(
         self,
-        agent: Agent,
+        agent: OrchestratedAgent,
         *,
         client: SessionClientProtocol | None = None,
         http_timeout: float | None = None,
@@ -120,7 +128,7 @@ class AgentOrchestrator:
         background_executor: BackgroundExecutor | None = None,
         interrupt_service: InterruptService | None = None,
     ) -> None:
-        init_orchestrator(
+        wiring = init_orchestrator(
             self,
             agent=agent,
             client=client,
@@ -136,6 +144,33 @@ class AgentOrchestrator:
             background_executor=background_executor,
             interrupt_service=interrupt_service,
         )
+        self.agent = wiring.agent
+        self._reporter = wiring.reporter
+        self._progress_task = wiring.progress_task
+        self._logger = wiring.logger
+        self.client = wiring.client
+        self.base_url = wiring.base_url
+        self._config = wiring.config
+        self._tool_spec_factory = wiring.tool_spec_factory
+        self._sse_client = wiring.sse_client
+        self._state_compiler = wiring.state_compiler
+        self._tool_execution = wiring.tool_execution
+        self._tool_exec_orchestrator = wiring.tool_exec_orchestrator
+        self._event_processor = wiring.event_processor
+        self._session_service = wiring.session_service
+        self._background_executor = wiring.background_executor
+        self._interrupt_service = wiring.interrupt_service
+        self._interrupt_manager = wiring.interrupt_manager
+        self._interrupt_handler = wiring.interrupt_handler
+        self._http_client_service = wiring.http_client_service
+        self._tooling = wiring.tooling
+        self._tool_event_dispatcher = wiring.tool_event_dispatcher
+        self._reporter_hooks = wiring.reporter_hooks
+        self._event_coordinator = wiring.event_coordinator
+        self._state = wiring.state
+        self._session_id = wiring.session_id
+        self._client_id = wiring.client_id
+        self._thread_id = wiring.thread_id
 
     # MARK: - Public Properties
 
@@ -157,12 +192,13 @@ class AgentOrchestrator:
         force_final_tool: bool = False,
         targeted_tools: list[str] | None = None,
         structured_output: type[BaseModel] | None = None,
-        model: Literal["fast", "balanced", "max"] | None = None,
+        model: Literal["auto", "fast", "balanced", "max"] | None = None,
+        force_model: str | None = None,
         reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
         stream_response: bool = True,
         status_messages: bool = False,
         thread_id: str | None = None,
-        metadata: dict[str, Any] | None = None,
+        metadata: JsonObject | None = None,
         memory_config: MemoryConfig | None = None,
         system_tools_config: SystemToolsConfig | None = None,
         orchestration_config: SessionOrchestrationConfig | None = None,
@@ -170,10 +206,10 @@ class AgentOrchestrator:
         swarm_config: SwarmConfig | None = None,
     ) -> SessionRequest:
         """Compile agent state without executing."""
-        self.agent.compile_tools()
+        _ = self.agent.compile_tools()
         swarm = self.agent.get_swarm()
         if swarm:
-            swarm.compile_tools()
+            _ = swarm.compile_tools()
 
         tools = list(self.agent.list_tools())
         if swarm:
@@ -182,7 +218,7 @@ class AgentOrchestrator:
         self._tooling.rebuild_tool_index(list(coerce_tool_list(tools)))
 
         timeout = self.agent.timeout if self.agent.timeout is not None else self.timeout
-        timeout_int = int(timeout) if timeout is not None else None
+        timeout_int = int(timeout)
         execution_config = self._build_session_execution_config()
 
         state = self._state_compiler.compile_state(
@@ -194,6 +230,7 @@ class AgentOrchestrator:
             targeted_tools=targeted_tools,
             structured_output=structured_output,
             model=model,
+            force_model=force_model,
             reasoning=reasoning,
             stream_response=stream_response,
             status_messages=status_messages,
@@ -221,12 +258,13 @@ class AgentOrchestrator:
         force_final_tool: bool = False,
         targeted_tools: list[str] | None = None,
         structured_output: type[BaseModel] | None = None,
-        model: Literal["fast", "balanced", "max"] | None = None,
+        model: Literal["auto", "fast", "balanced", "max"] | None = None,
+        force_model: str | None = None,
         reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
         stream_response: bool = True,
         thread_id: str | None = None,
         verbose: bool = False,
-        metadata: dict[str, Any] | None = None,
+        metadata: JsonObject | None = None,
         memory_config: MemoryConfig | None = None,
         system_tools_config: SystemToolsConfig | None = None,
         orchestration_config: SessionOrchestrationConfig | None = None,
@@ -240,6 +278,7 @@ class AgentOrchestrator:
             targeted_tools=targeted_tools,
             structured_output=structured_output,
             model=model,
+            force_model=force_model,
             reasoning=reasoning,
             stream_response=stream_response,
             metadata=metadata,
@@ -262,13 +301,14 @@ class AgentOrchestrator:
         messages: Sequence[BaseMessage],
         force_final_tool: bool = False,
         targeted_tools: list[str] | None = None,
-        model: Literal["fast", "balanced", "max"] | None = None,
+        model: Literal["auto", "fast", "balanced", "max"] | None = None,
+        force_model: str | None = None,
         reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
         stream_response: bool = True,
         status_messages: bool = False,
         thread_id: str | None = None,
         verbose: bool = False,
-        metadata: dict[str, Any] | None = None,
+        metadata: JsonObject | None = None,
         memory_config: MemoryConfig | None = None,
         system_tools_config: SystemToolsConfig | None = None,
         orchestration_config: SessionOrchestrationConfig | None = None,
@@ -282,6 +322,7 @@ class AgentOrchestrator:
             targeted_tools=targeted_tools,
             structured_output=None,
             model=model,
+            force_model=force_model,
             reasoning=reasoning,
             stream_response=stream_response,
             status_messages=status_messages,
@@ -352,12 +393,57 @@ class AgentOrchestrator:
         self._session_id = endpoints.session_id
         return endpoints
 
+    def start_execution_session(self, state: SessionRequest) -> SessionEndpoints:
+        """Start a server session for the execution helpers."""
+        return self._start_session(state)
+
     # MARK: - Tool Registration
 
-    def _register_swarm_agent_tools(self, agent_tools: list) -> None:
+    def register_swarm_agent_tools(self, agent_tools: list[AgentTool]) -> None:
         self._tooling.register_swarm_agent_tools(agent_tools)
 
     # MARK: - Internal Helpers
+
+    def set_execution_reporter(self, reporter: BaseReporter | None) -> None:
+        self._reporter = reporter
+
+    def set_execution_state(self, state: SessionRequest, thread_id: str | None) -> None:
+        self._state = state
+        if thread_id is not None:
+            self._thread_id = thread_id
+
+    def clear_execution_interrupts(self) -> None:
+        self._interrupt_manager.clear_collected_interrupts()
+
+    def clear_execution_progress_task(self) -> None:
+        self._progress_task = None
+
+    def configure_execution_reporter_hooks(
+        self,
+        *,
+        is_nested: bool,
+        allow_nested_response_stream: bool,
+    ) -> None:
+        self._reporter_hooks.configure_execution_context(
+            is_nested=is_nested,
+            allow_nested_response_stream=allow_nested_response_stream,
+        )
+
+    def consume_execution_events(
+        self,
+        endpoints: SessionEndpoints,
+        timeout: float,
+        reporter: BaseReporter | None,
+        progress_task: ProgressTask | None,
+        on_event: Callable[[SSEEvent], None] | None = None,
+    ) -> JsonObject:
+        return self._event_coordinator.consume_events(
+            endpoints,
+            timeout,
+            reporter,
+            progress_task,
+            on_event=on_event,
+        )
 
     def _compile_execution_state(
         self,
@@ -366,12 +452,13 @@ class AgentOrchestrator:
         force_final_tool: bool = False,
         targeted_tools: list[str] | None = None,
         structured_output: type[BaseModel] | None = None,
-        model: Literal["fast", "balanced", "max"] | None = None,
+        model: Literal["auto", "fast", "balanced", "max"] | None = None,
+        force_model: str | None = None,
         reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
         stream_response: bool = True,
         status_messages: bool = False,
         thread_id: str | None = None,
-        metadata: dict[str, Any] | None = None,
+        metadata: JsonObject | None = None,
         memory_config: MemoryConfig | None = None,
         system_tools_config: SystemToolsConfig | None = None,
         orchestration_config: SessionOrchestrationConfig | None = None,
@@ -385,6 +472,7 @@ class AgentOrchestrator:
             targeted_tools=targeted_tools,
             structured_output=structured_output,
             model=model,
+            force_model=force_model,
             reasoning=reasoning,
             stream_response=stream_response,
             status_messages=status_messages,
@@ -400,12 +488,16 @@ class AgentOrchestrator:
 
     def _build_session_execution_config(self) -> SessionExecutionConfig | None:
         """Build SDK execution context that should travel as typed config."""
-        config = SessionExecutionConfig(**self._build_timezone_metadata())
+        timezone_metadata = self._build_timezone_metadata()
+        config = SessionExecutionConfig(
+            client_timezone=timezone_metadata.get("client_timezone"),
+            sdk_deployment_timezone=timezone_metadata.get("sdk_deployment_timezone"),
+        )
         return config if config.is_configured() else None
 
-    def _build_timezone_metadata(self) -> dict[str, Any]:
+    def _build_timezone_metadata(self) -> dict[str, str]:
         """Build timezone execution config from client configuration."""
-        tz_metadata: dict[str, Any] = {}
+        tz_metadata: dict[str, str] = {}
         client_timezone = getattr(self.client, "client_timezone", None)
         if isinstance(client_timezone, str) and client_timezone.strip():
             tz_metadata["client_timezone"] = client_timezone
@@ -424,30 +516,49 @@ class AgentOrchestrator:
             tz_metadata["sdk_deployment_timezone"] = sdk_deployment_timezone
         return tz_metadata
 
-    def _get_reporter(self) -> BaseReporter | None:
+    def get_execution_reporter(self) -> BaseReporter | None:
         """Return the current reporter instance."""
         return self._reporter
 
-    def _get_progress_task(self) -> Any | None:
+    def _get_reporter(self) -> BaseReporter | None:
+        """Return the current reporter instance."""
+        return self.get_execution_reporter()
+
+    def get_execution_progress_task(self) -> ProgressTask | None:
         """Return the current progress task instance."""
         return self._progress_task
 
-    def _get_swarm_name(self) -> str | None:
+    def _get_progress_task(self) -> ProgressTask | None:
+        """Return the current progress task instance."""
+        return self.get_execution_progress_task()
+
+    def get_execution_swarm_name(self) -> str | None:
         """Return the swarm name if the agent belongs to a swarm."""
         swarm = self.agent.get_swarm()
         if swarm is None:
             return None
         return getattr(swarm, "name", None) or swarm.__class__.__name__
 
-    def _set_reporter_context(
+    def _get_swarm_name(self) -> str | None:
+        """Return the swarm name if the agent belongs to a swarm."""
+        return self.get_execution_swarm_name()
+
+    def set_execution_reporter_context(
         self,
         reporter: BaseReporter | None,
-        progress_task: Any | None,
+        progress_task: ProgressTask | None,
     ) -> None:
         self._reporter = reporter
         self._progress_task = progress_task
 
-    def _post_resume(self, resume_url: str, payload: dict[str, Any]) -> None:
+    def _set_reporter_context(
+        self,
+        reporter: BaseReporter | None,
+        progress_task: ProgressTask | None,
+    ) -> None:
+        self.set_execution_reporter_context(reporter, progress_task)
+
+    def post_execution_resume(self, resume_url: str, payload: JsonObject) -> None:
         """Send resume payload to server via HTTP POST."""
         try:
             self._http_client_service.post_resume(
@@ -455,11 +566,15 @@ class AgentOrchestrator:
                 payload,
                 self.client,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - resume POST failures are logged, not fatal
             self._logger.error(
                 "[POST_RESUME] Failed to post resume payload: %s",
                 exc,
             )
+
+    def _post_resume(self, resume_url: str, payload: JsonObject) -> None:
+        """Send resume payload to server via HTTP POST."""
+        self.post_execution_resume(resume_url, payload)
 
     # MARK: - Cleanup
 

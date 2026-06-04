@@ -5,27 +5,44 @@ The builder mirrors the underlying scope's invocation surface (``invoke``,
 call schedules the job and returns a :class:`ScheduledJob` handle.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 import asyncio
 import inspect
 import threading
-from collections.abc import Iterable
+from collections.abc import AsyncIterable, Awaitable, Callable, Iterable
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal, TypeAlias, cast
 
-from .jitter import JitterSpec
+from .jitter import JitterOffset, JitterSpec
 from .job import ScheduledJob
 from .models import RunRecord
 from .retry import Retry
 from .schedule import Schedule
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from ..base_scope import BaseScope
+    # NOTE: not importing concrete `BaseScope` from `..base_scope` to avoid the
+    # TYPE_CHECKING mutual-reference cycle (`..base_scope.scheduling` imports
+    # `CronInvocationBuilder` + `JitterInput` back from here). The structural
+    # contract the builder needs from a scope is minimal — just enough to be
+    # passed through to the runtime invocation paths. A formal Protocol /
+    # generic-bound break is deferred to post-S11 polish.
+    BaseScope = object  # noqa: N806  - typing alias for cycle-free annotation
 
 
-MisfirePolicy = Literal["skip", "fire_now", "coalesce"]
-OverlapPolicy = Literal["skip", "queue", "replace"]
+# MARK: Types
+
+MisfirePolicy: TypeAlias = Literal["skip", "fire_now", "coalesce"]
+OverlapPolicy: TypeAlias = Literal["skip", "queue", "replace"]
+InvocationMethod: TypeAlias = Literal["invoke", "stream", "batch", "abatch", "ainvoke", "astream"]
+JitterInput: TypeAlias = JitterSpec | JitterOffset | tuple[JitterOffset, JitterOffset] | None
+ScopeMethod: TypeAlias = Callable[..., object]
+AsyncScopeMethod: TypeAlias = Callable[..., Awaitable[object]]
+NotifyFire: TypeAlias = Callable[[RunRecord], Awaitable[None]]
+
+
+# MARK: Builder
 
 
 class CronInvocationBuilder:
@@ -37,7 +54,7 @@ class CronInvocationBuilder:
         schedule: Schedule,
         *,
         name: str | None = None,
-        jitter: JitterSpec | timedelta | float | tuple | None = None,
+        jitter: JitterInput = None,
         misfire: MisfirePolicy = "coalesce",
         max_overlap: int = 1,
         overlap_policy: OverlapPolicy = "skip",
@@ -47,32 +64,40 @@ class CronInvocationBuilder:
         retry: Retry | None = None,
         emit_events: bool = False,
     ) -> None:
-        self._scope = scope
-        self._schedule = schedule
-        self._name = (
+        self._scope: BaseScope = scope
+        self._schedule: Schedule = schedule
+        self._name: str = (
             name
             or f"{type(scope).__name__}-{getattr(scope, 'name', None) or scope.__class__.__name__}"
         )
-        self._jitter = JitterSpec.from_value(jitter)
-        self._misfire = misfire
-        self._max_overlap = max_overlap
+        self._jitter: JitterSpec | None = JitterSpec.from_value(jitter)
+        self._misfire: MisfirePolicy = misfire
+        self._max_overlap: int = max_overlap
         self._overlap_policy: OverlapPolicy = overlap_policy
-        self._start_at = start_at
-        self._end_at = end_at
-        self._max_runs = max_runs
-        self._retry = retry or Retry()
-        self._emit_events = emit_events
+        self._start_at: datetime | None = start_at
+        self._end_at: datetime | None = end_at
+        self._max_runs: int | None = max_runs
+        self._retry: Retry = retry or Retry()
+        self._emit_events: bool = emit_events
 
-        self._inflight_count = 0
-        self._inflight_lock = threading.Lock()
-        self._queue_semaphore: asyncio.Semaphore | None = None
-        self._replace_token = 0
+        self._inflight_count: int = 0
+        self._inflight_lock: threading.Lock = threading.Lock()
+        self._replace_token: int = 0
 
     # MARK: - Mutation helpers
 
-    def with_jitter(
-        self, jitter: JitterSpec | timedelta | float | tuple | None
-    ) -> CronInvocationBuilder:
+    def with_scope(self, scope: BaseScope) -> CronInvocationBuilder:
+        """Re-point the builder at a different scope before a terminal call.
+
+        The runner captures ``self._scope`` when a terminal method
+        (``invoke``/``stream``/...) builds the job, so this must be called
+        before scheduling. Useful for wrapping the original scope (e.g. with
+        ``events()``) while keeping any scope-derived configuration intact.
+        """
+        self._scope = scope
+        return self
+
+    def with_jitter(self, jitter: JitterInput) -> CronInvocationBuilder:
         self._jitter = JitterSpec.from_value(jitter)
         return self
 
@@ -108,64 +133,69 @@ class CronInvocationBuilder:
 
     # MARK: - Terminal methods
 
-    def invoke(self, *args: Any, **kwargs: Any) -> ScheduledJob:
+    def invoke(self, *args: object, **kwargs: object) -> ScheduledJob:
         return self._build_job(method="invoke", args=args, kwargs=kwargs)
 
-    def stream(self, *args: Any, **kwargs: Any) -> ScheduledJob:
+    def stream(self, *args: object, **kwargs: object) -> ScheduledJob:
         return self._build_job(method="stream", args=args, kwargs=kwargs)
 
-    def batch(self, inputs: Iterable[Any], **kwargs: Any) -> ScheduledJob:
+    def batch(self, inputs: Iterable[object], **kwargs: object) -> ScheduledJob:
         return self._build_job(method="batch", args=(list(inputs),), kwargs=kwargs)
 
-    def abatch(self, inputs: Iterable[Any], **kwargs: Any) -> ScheduledJob:
+    def abatch(self, inputs: Iterable[object], **kwargs: object) -> ScheduledJob:
         return self._build_job(method="abatch", args=(list(inputs),), kwargs=kwargs)
 
-    def ainvoke(self, *args: Any, **kwargs: Any) -> ScheduledJob:
+    def ainvoke(self, *args: object, **kwargs: object) -> ScheduledJob:
         return self._build_job(method="ainvoke", args=args, kwargs=kwargs)
 
-    def astream(self, *args: Any, **kwargs: Any) -> ScheduledJob:
+    def astream(self, *args: object, **kwargs: object) -> ScheduledJob:
         return self._build_job(method="astream", args=args, kwargs=kwargs)
 
     # MARK: - Construction
 
     def _build_job(
-        self, *, method: str, args: tuple[Any, ...], kwargs: dict[str, Any]
+        self, *, method: InvocationMethod, args: tuple[object, ...], kwargs: dict[str, object]
     ) -> ScheduledJob:
         if not hasattr(self._scope, method):
             raise AttributeError(f"Scope {type(self._scope).__name__} has no method {method!r}")
 
-        async def _placeholder(record: RunRecord) -> None:  # pragma: no cover
-            return None
+        job: ScheduledJob | None = None
+
+        async def _notify_fire(record: RunRecord) -> None:
+            if job is None:  # pragma: no cover - start happens after assignment below
+                raise RuntimeError("Scheduled job is not initialized")
+            await job.dispatch_fire(record)
+
+        runner = self._make_runner(
+            method=method,
+            args=args,
+            kwargs=kwargs,
+            notify_fire=_notify_fire,
+        )
 
         job = ScheduledJob(
             name=self._name,
             schedule=self._schedule,
-            runner=_placeholder,
+            runner=runner,
             max_runs=self._max_runs,
             end_at=self._end_at,
             emit_events=self._emit_events,
-        )
-        job._runner = self._make_runner(
-            method=method,
-            args=args,
-            kwargs=kwargs,
-            notify_fire=job.dispatch_fire,
         )
 
         from .registry import register_job
 
         register_job(job)
-        job.start()
+        _ = job.start()
         return job
 
     def _make_runner(
         self,
         *,
-        method: str,
-        args: tuple[Any, ...],
-        kwargs: dict[str, Any],
-        notify_fire: Any,
-    ):
+        method: InvocationMethod,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+        notify_fire: NotifyFire,
+    ) -> Callable[[RunRecord], Awaitable[None]]:
         scope = self._scope
         jitter = self._jitter
         retry = self._retry
@@ -174,15 +204,19 @@ class CronInvocationBuilder:
         misfire = self._misfire
         schedule = self._schedule
 
-        async def _invoke_method() -> Any:
-            target = getattr(scope, method)
-            if inspect.iscoroutinefunction(target):
-                return await target(*args, **kwargs)
+        async def _invoke_method() -> object:
+            scope_method = cast(ScopeMethod, getattr(scope, method))
+            if inspect.iscoroutinefunction(scope_method):
+                async_method = cast(AsyncScopeMethod, scope_method)
+                return await async_method(*args, **kwargs)
             if method == "stream":
-                return await asyncio.to_thread(lambda: list(target(*args, **kwargs)))
+                return await asyncio.to_thread(
+                    lambda: list(cast(Iterable[object], scope_method(*args, **kwargs)))
+                )
             if method == "astream":
-                return [event async for event in target(*args, **kwargs)]
-            return await asyncio.to_thread(target, *args, **kwargs)
+                stream = cast(AsyncIterable[object], scope_method(*args, **kwargs))
+                return [event async for event in stream]
+            return await asyncio.to_thread(scope_method, *args, **kwargs)
 
         async def _runner(record: RunRecord) -> None:
             now = datetime.now(tz=timezone.utc)
@@ -221,7 +255,7 @@ class CronInvocationBuilder:
                     record.attempt = attempt
                     try:
                         result = await _invoke_method()
-                    except BaseException as exc:  # noqa: BLE001
+                    except BaseException as exc:  # noqa: BLE001 - user retry policy owns run failures
                         last_exc = exc
                         if not retry.should_retry(exc, attempt):
                             record.status = "failed"
@@ -248,7 +282,7 @@ class CronInvocationBuilder:
 
     async def _claim_slot(
         self,
-        policy: OverlapPolicy,
+        policy: str,
         max_overlap: int,
         record: RunRecord,
     ) -> bool:
@@ -275,8 +309,9 @@ class CronInvocationBuilder:
         if policy == "replace":
             with self._inflight_lock:
                 self._inflight_count += 1
-            self._replace_token += 1
-            record.metadata["replaced_token"] = self._replace_token
+                self._replace_token += 1
+                replace_token = self._replace_token
+            record.metadata["replaced_token"] = replace_token
             return True
         return False
 
@@ -285,5 +320,7 @@ class CronInvocationBuilder:
             if self._inflight_count > 0:
                 self._inflight_count -= 1
 
+
+# MARK: Exports
 
 __all__ = ["CronInvocationBuilder", "MisfirePolicy", "OverlapPolicy"]

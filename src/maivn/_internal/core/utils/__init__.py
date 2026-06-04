@@ -1,3 +1,4 @@
+# pyright: strict
 """Domain utility functions.
 Contains small shared helpers used across the domain layer."""
 

@@ -1,5 +1,6 @@
 """Background execution utilities for orchestrators."""
 
+# pyright: strict
 from __future__ import annotations
 
 import contextvars
@@ -8,7 +9,8 @@ import threading
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
-from typing import Any
+from types import TracebackType
+from typing import ParamSpec, TypeVar
 
 from ..helpers import get_optimal_worker_count
 
@@ -16,6 +18,12 @@ from ..helpers import get_optimal_worker_count
 
 DEFAULT_MAX_QUEUE_SIZE = 1000
 """Default maximum queue size to prevent unbounded memory growth."""
+
+
+# MARK: Types
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 # MARK: - BackgroundExecutor
@@ -44,12 +52,12 @@ class BackgroundExecutor:
             max_queue_size: Maximum pending tasks before saturation (default: 1000)
             run_inline: Execute tasks synchronously without spawning background threads
         """
-        self._max_workers = max_workers or get_optimal_worker_count()
-        self._max_queue_size = max_queue_size or DEFAULT_MAX_QUEUE_SIZE
-        self._run_inline = run_inline
+        self._max_workers: int = max_workers or get_optimal_worker_count()
+        self._max_queue_size: int = max_queue_size or DEFAULT_MAX_QUEUE_SIZE
+        self._run_inline: bool = run_inline
 
-        self._pending_count = 0
-        self._lock = threading.Lock()
+        self._pending_count: int = 0
+        self._lock: threading.Lock = threading.Lock()
 
         # `_executor` is nulled after shutdown() so submit() can lazily
         # re-create a fresh pool on the next call. `_shutdown` is a
@@ -68,10 +76,10 @@ class BackgroundExecutor:
 
     def submit(
         self,
-        fn: Callable[..., Any],
-        *args: Any,
-        **kwargs: Any,
-    ) -> Future[Any]:
+        fn: Callable[_P, _R],
+        *args: _P.args,
+        **kwargs: _P.kwargs,
+    ) -> Future[_R]:
         """Submit a callable to the background executor.
 
         Captures the current context (including contextvars like current_reporter)
@@ -110,30 +118,33 @@ class BackgroundExecutor:
         ctx = contextvars.copy_context()
 
         if self._run_inline:
-            future = Future()
+            future: Future[_R] = Future()
             try:
                 result = ctx.run(fn, *args, **kwargs)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - capture task failure in the Future.
                 future.set_exception(exc)
             else:
                 future.set_result(result)
             finally:
-                self._on_task_complete(future)
+                self._on_task_complete()
             return future
 
         try:
             if self._executor is None:
                 raise RuntimeError("BackgroundExecutor is not initialized")
             future = self._executor.submit(ctx.run, fn, *args, **kwargs)
-        except Exception:  # noqa: BLE001 - decrement pending count then re-raise
+        except Exception:  # noqa: BLE001 - decrement pending count before re-raising.
             with self._lock:
                 self._pending_count = max(0, self._pending_count - 1)
             raise
 
-        future.add_done_callback(self._on_task_complete)
+        def mark_complete(_future: Future[_R]) -> None:
+            self._on_task_complete()
+
+        future.add_done_callback(mark_complete)
         return future
 
-    def _on_task_complete(self, future: Future[Any]) -> None:
+    def _on_task_complete(self) -> None:
         """Callback invoked when a submitted task completes."""
         with self._lock:
             self._pending_count = max(0, self._pending_count - 1)
@@ -191,7 +202,12 @@ class BackgroundExecutor:
         """Enter context manager."""
         return self
 
-    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool:
         """Exit context manager and shutdown executor."""
         self.shutdown(wait=False)
         return False
@@ -200,7 +216,7 @@ class BackgroundExecutor:
 # MARK: - Utility Functions
 
 
-def wait_with_timeout(future: Future[Any], timeout: float | None = None) -> Any:
+def wait_with_timeout(future: Future[_R], timeout: float | None = None) -> _R:
     """Wait for a future result with optional timeout.
 
     This is the correct way to apply timeouts to tasks submitted via

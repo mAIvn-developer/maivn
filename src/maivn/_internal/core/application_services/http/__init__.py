@@ -2,9 +2,11 @@
 Provides network helpers used for session resume and other HTTP operations.
 """
 
+# pyright: strict
 from __future__ import annotations
 
-# MARK: - Exports
 from .http_client_service import HttpClientService
+
+# MARK: Public API
 
 __all__ = ["HttpClientService"]

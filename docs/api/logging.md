@@ -1,6 +1,6 @@
 # Logging
 
-The maivn SDK provides a logging system for debugging and monitoring agent execution.
+The mAIvn SDK provides a logging system for debugging and monitoring agent execution.
 
 ## Import
 
