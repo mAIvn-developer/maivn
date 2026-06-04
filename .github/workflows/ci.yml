@@ -38,8 +38,12 @@ jobs:
       - name: Ruff
         run: uv run --no-sync ruff check .
 
-      - name: Basedpyright
-        run: uv run --no-sync --with basedpyright basedpyright -p .
+      # NOTE: strict type checking is a MONOREPO gate, not a standalone step.
+      # Run it from the maivn-apps superproject: `uv run python scripts/typecheck.py`
+      # (also enforced by scripts/verify.ps1 and `verify.ps1 full-ci`). A standalone
+      # `basedpyright -p .` cannot resolve workspace siblings from source, and the
+      # monorepo-relative venvPath ('../..') overshoots the repo root -> exit 3.
+      # Do NOT re-add a standalone basedpyright step here.
 
       - name: Pytest
         run: uv run --no-sync pytest
