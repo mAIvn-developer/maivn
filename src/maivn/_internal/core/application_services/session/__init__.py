@@ -2,9 +2,11 @@
 Provides helpers for creating sessions and parsing endpoint responses.
 """
 
+# pyright: strict
 from __future__ import annotations
 
-# MARK: - Exports
 from .session_service import SessionService
+
+# MARK: Public API
 
 __all__ = ["SessionService"]

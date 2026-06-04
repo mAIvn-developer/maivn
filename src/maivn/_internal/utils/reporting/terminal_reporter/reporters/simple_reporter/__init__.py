@@ -2,6 +2,8 @@
 Provides ``SimpleReporter`` for basic console output.
 """
 
+# pyright: strict
+
 from __future__ import annotations
 
 from .reporter import SimpleReporter

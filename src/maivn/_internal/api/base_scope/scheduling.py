@@ -1,13 +1,16 @@
 """Scheduling methods for BaseScope."""
 
+# pyright: strict
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 if TYPE_CHECKING:
-    from ..scheduling.builder import CronInvocationBuilder
+    from ..scheduling.builder import CronInvocationBuilder, JitterInput
+    from ..scheduling.retry import Retry
 
 
 # MARK: Scheduling Mixin
@@ -19,7 +22,7 @@ class BaseScopeSchedulingMixin:
         expression: str,
         *,
         tz: str | dt_timezone | None = None,
-        jitter: Any = None,
+        jitter: JitterInput = None,
         name: str | None = None,
         misfire: Literal["skip", "fire_now", "coalesce"] = "coalesce",
         max_overlap: int = 1,
@@ -27,15 +30,16 @@ class BaseScopeSchedulingMixin:
         start_at: datetime | None = None,
         end_at: datetime | None = None,
         max_runs: int | None = None,
-        retry: Any = None,
+        retry: Retry | None = None,
         emit_events: bool = False,
     ) -> CronInvocationBuilder:
         """Build a scheduled invocation driven by a cron expression."""
         from ..scheduling.builder import CronInvocationBuilder
         from ..scheduling.schedule import CronSchedule
 
-        return CronInvocationBuilder(
-            cast(Any, self),
+        builder = cast(Callable[..., CronInvocationBuilder], CronInvocationBuilder)
+        return builder(
+            self,
             CronSchedule(expression, tz=tz),
             name=name,
             jitter=jitter,
@@ -55,14 +59,14 @@ class BaseScopeSchedulingMixin:
         *,
         tz: str | dt_timezone | None = None,
         start: datetime | None = None,
-        jitter: Any = None,
+        jitter: JitterInput = None,
         name: str | None = None,
         misfire: Literal["skip", "fire_now", "coalesce"] = "coalesce",
         max_overlap: int = 1,
         overlap_policy: Literal["skip", "queue", "replace"] = "skip",
         end_at: datetime | None = None,
         max_runs: int | None = None,
-        retry: Any = None,
+        retry: Retry | None = None,
         emit_events: bool = False,
     ) -> CronInvocationBuilder:
         """Build a scheduled invocation that fires every ``interval``."""
@@ -71,8 +75,9 @@ class BaseScopeSchedulingMixin:
 
         if not isinstance(interval, timedelta):
             interval = timedelta(seconds=float(interval))
-        return CronInvocationBuilder(
-            cast(Any, self),
+        builder = cast(Callable[..., CronInvocationBuilder], CronInvocationBuilder)
+        return builder(
+            self,
             IntervalSchedule(interval, start=start, tz=tz),
             name=name,
             jitter=jitter,
@@ -90,17 +95,18 @@ class BaseScopeSchedulingMixin:
         when: datetime,
         *,
         tz: str | dt_timezone | None = None,
-        jitter: Any = None,
+        jitter: JitterInput = None,
         name: str | None = None,
-        retry: Any = None,
+        retry: Retry | None = None,
         emit_events: bool = False,
     ) -> CronInvocationBuilder:
         """Build a one-shot scheduled invocation that fires at ``when``."""
         from ..scheduling.builder import CronInvocationBuilder
         from ..scheduling.schedule import AtSchedule
 
-        return CronInvocationBuilder(
-            cast(Any, self),
+        builder = cast(Callable[..., CronInvocationBuilder], CronInvocationBuilder)
+        return builder(
+            self,
             AtSchedule(when, tz=tz),
             name=name,
             jitter=jitter,

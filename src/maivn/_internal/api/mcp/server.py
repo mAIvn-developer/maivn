@@ -1,12 +1,16 @@
+# pyright: strict
 """MCP server registration and client helpers for the maivn SDK."""
 
 from __future__ import annotations
 
 import time
 import warnings
-from typing import Any, Literal
+from typing import ClassVar, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
+from typing_extensions import override
+
+from maivn._internal.api.tool_override import ToolOverride
 
 from .auto import MCPAutoSetup
 from .clients import McpClientBase, McpHttpClient, McpStdioClient
@@ -16,6 +20,8 @@ from .tools import (
     DEFAULT_CLIENT_TITLE,
     DEFAULT_CLIENT_VERSION,
     DEFAULT_PROTOCOL_VERSION,
+    JsonObject,
+    JsonValue,
     MCPToolDefinition,
     sanitize_identifier,
 )
@@ -31,7 +37,7 @@ class MCPServer(BaseModel):
     and tool invocation.
     """
 
-    model_config = ConfigDict(
+    model_config: ClassVar[ConfigDict] = ConfigDict(
         arbitrary_types_allowed=True,
         validate_assignment=True,
         populate_by_name=True,
@@ -72,13 +78,20 @@ class MCPServer(BaseModel):
         default=None, description="Optional prefix for MCP tool names"
     )
     tool_name_separator: str = Field(default="__", description="Separator for MCP tool names")
-    default_tool_args: dict[str, Any] | None = Field(
+    default_tool_args: dict[str, object] | None = Field(
         default=None,
         description="Default arguments applied to all MCP tools",
     )
-    tool_defaults: dict[str, dict[str, Any]] | None = Field(
+    tool_defaults: dict[str, dict[str, object]] | None = Field(
         default=None,
         description="Per-tool default arguments keyed by MCP tool name",
+    )
+    tool_overrides: dict[str, ToolOverride] | None = Field(
+        default=None,
+        description=(
+            "Per-tool registration overrides keyed by the MCP server's raw tool name. "
+            "Uses the same ToolOverride shape as add_toolset(..., overrides=...)."
+        ),
     )
     max_calls_per_minute: int | None = Field(
         default=None,
@@ -119,7 +132,7 @@ class MCPServer(BaseModel):
     @field_validator("name")
     @classmethod
     def _validate_name(cls, value: str) -> str:
-        if not value or not isinstance(value, str):
+        if not value:
             raise ValueError("MCPServer name must be a non-empty string")
         return value
 
@@ -156,7 +169,7 @@ class MCPServer(BaseModel):
         normalized: list[str] = []
         seen: set[str] = set()
         for item in value:
-            if not isinstance(item, str) or not item.strip():
+            if not item.strip():
                 raise ValueError("inherit_env_allowlist entries must be non-empty strings")
             candidate = item.strip()
             if candidate not in seen:
@@ -166,7 +179,8 @@ class MCPServer(BaseModel):
 
     # MARK: - Initialization
 
-    def model_post_init(self, __context: Any) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         if self.transport == "http" and not self.url:
             raise ValueError("HTTP MCPServer requires a url")
         if self.auto_setup and self.transport != "stdio":
@@ -227,16 +241,22 @@ class MCPServer(BaseModel):
             raw = mcp_tool_name
         return sanitize_identifier(raw)
 
-    def resolve_tool_defaults(self, mcp_tool_name: str) -> dict[str, Any]:
+    def resolve_tool_defaults(self, mcp_tool_name: str) -> JsonObject:
         """Resolve default arguments for a specific tool."""
-        defaults: dict[str, Any] = {}
+        defaults: JsonObject = {}
         if isinstance(self.default_tool_args, dict):
-            defaults.update(self.default_tool_args)
+            defaults.update(cast(JsonObject, self.default_tool_args))
         if isinstance(self.tool_defaults, dict):
             tool_defaults = self.tool_defaults.get(mcp_tool_name)
             if isinstance(tool_defaults, dict):
-                defaults.update(tool_defaults)
+                defaults.update(cast(JsonObject, tool_defaults))
         return defaults
+
+    def resolve_tool_override(self, mcp_tool_name: str) -> ToolOverride | None:
+        """Resolve the registration override for one raw MCP tool name."""
+        if not isinstance(self.tool_overrides, dict):
+            return None
+        return self.tool_overrides.get(mcp_tool_name)
 
     # MARK: - Public Methods
 
@@ -245,7 +265,7 @@ class MCPServer(BaseModel):
         client = self._get_client()
         return client.list_tools()
 
-    def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    def call_tool(self, tool_name: str, arguments: JsonObject) -> JsonObject:
         """Call a tool on this MCP server."""
         client = self._get_client()
 
@@ -256,14 +276,14 @@ class MCPServer(BaseModel):
             max_attempts = 1 + soft_error_cfg.max_retries
 
         backoff_seconds = soft_error_cfg.initial_backoff_seconds if soft_error_cfg else 0.0
-        soft_error_keys = set(soft_error_cfg.keys) if soft_error_cfg else set()
+        soft_error_keys: set[str] = set(soft_error_cfg.keys) if soft_error_cfg else set()
 
         while True:
             self._apply_rate_limits()
             result = client.call_tool(tool_name, arguments)
             normalized = self._normalize_tool_result(result)
 
-            structured = normalized.get("structured_content")
+            structured: JsonValue = normalized.get("structured_content")
             soft_error_message = (
                 find_soft_error_message(structured, soft_error_keys)
                 if soft_error_cfg is not None and soft_error_cfg.enabled
@@ -321,12 +341,12 @@ class MCPServer(BaseModel):
         return self._client
 
     @staticmethod
-    def _normalize_tool_result(result: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_tool_result(result: JsonObject) -> JsonObject:
         is_error = bool(result.get("isError") or result.get("is_error"))
         content = result.get("content")
         structured = result.get("structuredContent") or result.get("structured_content")
 
-        payload: dict[str, Any] = {"is_error": is_error}
+        payload: JsonObject = {"is_error": is_error}
         if content is not None:
             payload["content"] = content
         if structured is not None:

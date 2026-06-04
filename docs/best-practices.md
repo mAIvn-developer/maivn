@@ -1,6 +1,6 @@
 # Best Practices
 
-Recommended patterns for building robust maivn agents in production.
+A scannable set of recommended patterns for building robust mAIvn agents in production, grouped by concern: agent design, tools, dependencies, orchestration, security, errors, performance, testing, logging, and swarms.
 
 ## Agent Design
 
@@ -143,6 +143,67 @@ def delete_user(user_id: str) -> dict: ...
 # Avoid: multi-purpose tool
 @agent.toolify()
 def manage_user(action: str, user_id: str, data: dict = None) -> dict: ...
+```
+
+### Agent-Ready Toolsets
+
+A toolset should be useful when a developer registers it directly and asks the
+agent for a normal workflow:
+
+```python
+agent.add_toolset(MyToolSet(...))
+```
+
+If a toolset only works after custom DAG construction, long prompt
+engineering, or demo-specific wrappers, treat that as an interface problem.
+Move the needed guidance into the tool names, descriptions, parameter schemas,
+defaults, permission markers, and return values.
+
+For provider-style toolsets:
+
+- Use `@toolset` for related operations that share state, credentials, or an
+  HTTP client.
+- Put accurate `permissions=PermissionSet(...)` on every `@toolify` method so
+  callers can use `include_tags=['read']` and `exclude_tags=['destructive']`.
+- Mark irreversible tools with `destructive=True`.
+- Return compact, human-readable summaries by default from broad list/search
+  tools.
+- Hide raw provider IDs by default unless another tool needs them; prefer an
+  opt-in `include_ids=False` argument.
+- Cap broad searches and expensive metadata expansion with small useful
+  defaults.
+- Let write tools accept natural read-tool outputs when the mapping is safe and
+  obvious.
+- Keep provider toolsets generic and use `ToolOverride` for app-specific names,
+  descriptions, default args, dependencies, or final-tool behavior.
+
+### Human-Readable Tool Results
+
+Agent final answers get worse when tool results are mostly internal handles.
+Prefer result shapes like this:
+
+```python
+{
+    'tickets': [
+        {
+            'ticket_ref': 'ticket_1',
+            'title': 'Cannot sign in',
+            'requester': 'Ada Lovelace',
+            'status': 'open',
+            'updated_at': '2026-05-16T13:30:00Z',
+        }
+    ],
+    'next_page_token': '...',
+}
+```
+
+Use raw IDs for follow-up tool calls, not as the main content in final
+responses. If a downstream update tool needs the provider ID, expose it only
+when requested:
+
+```python
+def search_tickets(query: str, *, limit: int = 10, include_ids: bool = False) -> dict:
+    ...
 ```
 
 ### Error Returns
@@ -307,10 +368,10 @@ def build_whitelist(entries: list[PIIWhitelistEntry]) -> PIIWhitelist:
 
 ### Always Provide a Real `justification`
 
-The `justification` is required (≥8 chars) and is recorded in every
-`WHITELIST_SUPPRESSED` audit event for the suppressed span. Auditors
-read it. Write a real reason — "approved by legal", "public address per
-RFC 1234", "B2B research session, no PHI in scope".
+The `justification` is required (≥8 chars) and is recorded as compliance
+evidence for every suppressed span. Auditors read it. Write a real
+reason — "approved by legal", "public address per RFC 1234", "B2B
+research session, no PHI in scope".
 
 ### Match EventBridge Audience to the Frontend
 
@@ -432,7 +493,8 @@ finally:
 
 ## Testing
 
-### Unit Test Tools in Isolation
+Because a tool is just your function, the bulk of your coverage is ordinary Python —
+call the function directly, no agent or network involved:
 
 ```python
 def test_fetch_data():
@@ -441,27 +503,9 @@ def test_fetch_data():
     assert 'data' in result
 ```
 
-### Mock External Services
-
-```python
-from unittest.mock import patch
-
-def test_api_tool():
-    with patch('module.external_api') as mock_api:
-        mock_api.return_value = {'result': 'mocked'}
-        result = call_api(key='test-key')
-        assert result['status'] == 'success'
-```
-
-### Test Dependency Resolution
-
-```python
-def test_dependency_chain():
-    # Verify tool A's output flows to tool B
-    a_result = tool_a()
-    b_result = tool_b(a_result)
-    assert b_result['processed_from'] == a_result
-```
+For inspecting the compiled request offline (`compile_state()`), mocking agent responses
+and streams, and gating live tests behind a marker, see the dedicated
+[Testing & Local Development guide](guides/testing.md).
 
 ## Logging
 

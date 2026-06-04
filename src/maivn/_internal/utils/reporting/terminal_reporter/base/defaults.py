@@ -1,12 +1,13 @@
+# pyright: strict
 """Shared default event implementations for terminal reporters."""
 
 from __future__ import annotations
 
-from abc import abstractmethod
-from typing import Any
+from abc import ABC, abstractmethod
+from typing import cast
 
 
-class ReporterDefaultEventsMixin:
+class ReporterDefaultEventsMixin(ABC):
     """Provide shared default implementations for optional reporter hooks."""
 
     @abstractmethod
@@ -14,7 +15,7 @@ class ReporterDefaultEventsMixin:
         self,
         event_type: str,
         message: str,
-        details: dict[str, Any] | None = None,
+        details: dict[str, object] | None = None,
     ) -> None:
         """Render a reporter event."""
 
@@ -26,9 +27,18 @@ class ReporterDefaultEventsMixin:
         *,
         assistant_id: str | None = None,
         full_text: str | None = None,
+        replace_content: bool = False,
     ) -> None:
-        """Report incremental assistant response text."""
-        _ = (text, assistant_id, full_text)
+        """Report incremental assistant response text.
+
+        ``replace_content`` is set by the normalize-forward layer when the
+        incoming chunk represents a fresh stream that should overwrite the
+        UI bubble (reevaluate cycles, synthesis restarts, divergent streams)
+        rather than append. Reporters that surface chunks to a UI should
+        forward this flag downstream; terminal reporters can safely ignore
+        it (their default rendering already accumulates correctly).
+        """
+        _ = (text, assistant_id, full_text, replace_content)
 
     # MARK: - Status Messages
 
@@ -51,7 +61,7 @@ class ReporterDefaultEventsMixin:
         assignment_id: str,
         swarm_name: str | None = None,
         error: str | None = None,
-        result: Any | None = None,
+        result: object | None = None,
     ) -> None:
         """Report an agent assignment lifecycle event.
 
@@ -156,11 +166,31 @@ class ReporterDefaultEventsMixin:
         scope_id: str | None = None,
         scope_name: str | None = None,
         scope_type: str | None = None,
-        memory: dict[str, Any] | None = None,
-        redaction: dict[str, Any] | None = None,
+        memory: dict[str, object] | None = None,
+        redaction: dict[str, object] | None = None,
+        source: str | None = None,
+        trigger_tool: str | None = None,
+        target_tool: str | None = None,
+        reevaluate_count: int | None = None,
+        collected_count: int | None = None,
     ) -> None:
         """Report an enrichment phase change event."""
-        _ = (scope_id, scope_name, scope_type)
+        _ = (scope_id, scope_name, scope_type, collected_count)
+        if phase == "reevaluate_accrued" and (
+            source or trigger_tool or target_tool or reevaluate_count is not None
+        ):
+            attribution = ""
+            if source == "dependency" and trigger_tool and target_tool:
+                attribution = f"{trigger_tool} -> {target_tool}"
+            elif source:
+                attribution = source
+            cycle_part = f" cycle {reevaluate_count}" if isinstance(reevaluate_count, int) else ""
+            line = f"[REEVAL]{cycle_part}"
+            if attribution:
+                line += f" {attribution}"
+            line += f" - {message}" if message else ""
+            self.print_event("info", line)
+            return
         suffix = ""
         if isinstance(memory, dict):
             metrics: list[str] = []
@@ -182,7 +212,7 @@ class ReporterDefaultEventsMixin:
             redaction_metrics: list[str] = []
             inserted_keys = redaction.get("inserted_keys")
             if isinstance(inserted_keys, list):
-                redaction_metrics.append(f"keys={len(inserted_keys)}")
+                redaction_metrics.append(f"keys={len(cast(list[object], inserted_keys))}")
             for key, label in (
                 ("redacted_message_count", "messages"),
                 ("redacted_value_count", "values"),

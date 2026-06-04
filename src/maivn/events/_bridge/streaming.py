@@ -1,31 +1,66 @@
 """Streaming and lifecycle helpers for EventBridge."""
 
+# pyright: strict
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import ClassVar, Protocol, cast
 
 from .serialization import logger
+from .ui_event import UIEvent
 
-if TYPE_CHECKING:
-    from .bridge import EventBridge
-    from .ui_event import UIEvent
+
+class StreamBridge(Protocol):
+    """EventBridge surface required by streaming helpers."""
+
+    session_id: str
+    TERMINAL_EVENTS: ClassVar[frozenset[str]]
+
+    @property
+    def stream_default_heartbeat_interval(self) -> float: ...
+
+    @property
+    def stream_max_history(self) -> int: ...
+
+    @property
+    def stream_history_evictions(self) -> int: ...
+
+    @property
+    def stream_is_closed(self) -> bool: ...
+
+    def stream_mark_closed(self) -> None: ...
+
+    def stream_history_snapshot(self) -> list[UIEvent]: ...
+
+    def stream_queue_empty(self) -> bool: ...
+
+    def stream_queue_get_nowait(self) -> UIEvent: ...
+
+    def stream_queue_put_nowait(self, event: UIEvent) -> None: ...
+
+    async def stream_queue_get(self) -> UIEvent: ...
+
+    def stream_subscriber_attached(self) -> None: ...
+
+    def stream_subscriber_detached(self) -> None: ...
+
+    def stream_reset_state(self) -> None: ...
 
 
 # MARK: History Replay
 
 
 def _drain_replayed_events(
-    bridge: EventBridge,
+    bridge: StreamBridge,
     replayed_ids: set[str],
 ) -> None:
     drained = 0
     pending_live: list[UIEvent] = []
-    while not bridge._queue.empty():
+    while not bridge.stream_queue_empty():
         try:
-            queued = bridge._queue.get_nowait()
+            queued = bridge.stream_queue_get_nowait()
             if queued.id in replayed_ids:
                 drained += 1
                 continue
@@ -34,7 +69,7 @@ def _drain_replayed_events(
             break
 
     for queued in pending_live:
-        bridge._queue.put_nowait(queued)
+        bridge.stream_queue_put_nowait(queued)
 
     if drained:
         logger.debug(
@@ -45,43 +80,44 @@ def _drain_replayed_events(
 
 
 async def _replay_history(
-    bridge: EventBridge,
+    bridge: StreamBridge,
     *,
     last_event_id: str | None,
     replayed_ids: set[str],
-) -> AsyncGenerator[dict[str, Any], None]:
+) -> AsyncGenerator[dict[str, object], None]:
     # Snapshot up front so concurrent emits during replay don't reorder
     # what the consumer sees. asyncio.Queue.put_nowait into a non-empty
     # queue is sync, so this snapshot is consistent under the single-
     # threaded event-loop model.
-    history: list[UIEvent] = list(bridge._event_history)
+    history: list[UIEvent] = bridge.stream_history_snapshot()
     if not history:
         return
 
-    replay_start = 0
+    replay_start: int = 0
     cursor_resolved = last_event_id is None
     if last_event_id is not None:
-        for index, event in enumerate(history):
-            if event.id == last_event_id:
+        for index in range(len(history)):
+            history_event = history[index]
+            if history_event.id == last_event_id:
                 replay_start = index + 1
                 cursor_resolved = True
                 break
         if not cursor_resolved:
-            evictions = getattr(bridge, "_history_evictions", 0)
+            evictions = bridge.stream_history_evictions
             if evictions:
                 logger.warning(
                     "Replay cursor %s unknown for session %s; %d events have aged out "
-                    "of the %d-event history buffer. Replaying full buffer; client may "
-                    "see duplicates.",
+                    + "of the %d-event history buffer. Replaying full buffer; client may "
+                    + "see duplicates.",
                     last_event_id,
                     bridge.session_id,
                     evictions,
-                    bridge._max_history,
+                    bridge.stream_max_history,
                 )
             else:
                 logger.info(
                     "Replay cursor %s not in history for session %s "
-                    "(possible new turn); replaying full buffer",
+                    + "(possible new turn); replaying full buffer",
                     last_event_id,
                     bridge.session_id,
                 )
@@ -99,7 +135,7 @@ async def _replay_history(
     for event in history[replay_start:]:
         yield event.to_sse()
         if event.type in bridge.TERMINAL_EVENTS:
-            bridge._closed = True
+            bridge.stream_mark_closed()
             return
 
     if replay_start:
@@ -109,29 +145,38 @@ async def _replay_history(
             bridge.session_id,
         )
 
+    # The replay tail can be empty when the cursor resolves to the last
+    # buffered event. If that last event is terminal, the stream is already
+    # complete: there is nothing left to replay and no live events will
+    # arrive, so close immediately rather than hanging open on keepalives.
+    if replay_start >= len(history) and history[-1].type in bridge.TERMINAL_EVENTS:
+        bridge.stream_mark_closed()
+        return
+
     _drain_replayed_events(bridge, replayed_ids)
 
 
 # MARK: Live Streaming
 
 
-def _build_keepalive_frame() -> dict[str, Any]:
+def _build_keepalive_frame() -> dict[str, object]:
     """Yield an SSE comment frame as keep-alive.
 
     Browsers ignore comment frames entirely, so frontends do not need to
     subscribe to or filter a heartbeat event type. Matches sse-starlette's
     built-in ping shape.
     """
-    timestamp = datetime.now(timezone.utc).isoformat()
+    utc_now: datetime = datetime.now(tz=timezone.utc)
+    timestamp: str = utc_now.isoformat()
     return {"comment": f"keepalive {timestamp}"}
 
 
 async def generate_sse_events(
-    bridge: EventBridge,
+    bridge: StreamBridge,
     *,
     last_event_id: str | None = None,
     heartbeat_interval: float | None = None,
-) -> AsyncGenerator[dict[str, Any], None]:
+) -> AsyncGenerator[dict[str, object], None]:
     """Yield SSE-shaped dicts for the lifetime of one client connection.
 
     The generator is structured so that ``GeneratorExit`` /
@@ -143,34 +188,41 @@ async def generate_sse_events(
     specific stream (useful when the client lives behind a proxy with a
     short idle timeout).
     """
-    interval = heartbeat_interval if heartbeat_interval is not None else bridge._heartbeat_interval
+    interval = (
+        heartbeat_interval
+        if heartbeat_interval is not None
+        else bridge.stream_default_heartbeat_interval
+    )
     if interval <= 0:
         raise ValueError("heartbeat_interval must be > 0")
 
-    bridge._subscriber_count += 1
-    bridge._subscriber_connected.set()
+    bridge.stream_subscriber_attached()
     try:
         replayed_ids: set[str] = set()
-        async for event in _replay_history(
+        async for sse_frame in _replay_history(
             bridge,
             last_event_id=last_event_id,
             replayed_ids=replayed_ids,
         ):
-            yield event
-            if bridge._closed:
+            yield sse_frame
+            if bridge.stream_is_closed:
                 return
 
-        while not bridge._closed:
+        while not bridge.stream_is_closed:
             try:
-                event = await asyncio.wait_for(
-                    bridge._queue.get(),
-                    timeout=interval,
-                )
-                if event.id in replayed_ids:
+                queue_wait: Awaitable[UIEvent] = bridge.stream_queue_get()
+                live_event: UIEvent = cast(
+                    UIEvent,
+                    await asyncio.wait_for(
+                        queue_wait,
+                        timeout=interval,
+                    ),
+                )  # pyright: ignore[reportUnnecessaryCast]
+                if live_event.id in replayed_ids:
                     continue
-                yield event.to_sse()
-                if event.type in bridge.TERMINAL_EVENTS:
-                    bridge._closed = True
+                yield live_event.to_sse()
+                if live_event.type in bridge.TERMINAL_EVENTS:
+                    bridge.stream_mark_closed()
                     break
             except TimeoutError:
                 yield _build_keepalive_frame()
@@ -182,21 +234,11 @@ async def generate_sse_events(
         # be swallowed silently in newer Python.
         raise
     finally:
-        bridge._subscriber_count = max(0, bridge._subscriber_count - 1)
-        if bridge._subscriber_count == 0:
-            bridge._subscriber_connected.clear()
+        bridge.stream_subscriber_detached()
 
 
 # MARK: Lifecycle
 
 
-def reopen_bridge(bridge: EventBridge) -> None:
-    bridge._closed = False
-    bridge._subscriber_connected.clear()
-    bridge._subscriber_count = 0
-    bridge._event_history.clear()
-    while not bridge._queue.empty():
-        try:
-            bridge._queue.get_nowait()
-        except asyncio.QueueEmpty:
-            break
+def reopen_bridge(bridge: StreamBridge) -> None:
+    bridge.stream_reset_state()

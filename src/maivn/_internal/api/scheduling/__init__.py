@@ -1,5 +1,6 @@
 """Scheduled invocation API for Agent and Swarm."""
 
+# pyright: strict
 from __future__ import annotations
 
 from .builder import CronInvocationBuilder, MisfirePolicy, OverlapPolicy
@@ -9,6 +10,8 @@ from .models import RunRecord, RunStatus
 from .registry import list_jobs, stop_all_jobs
 from .retry import Retry, RetryBackoff
 from .schedule import AtSchedule, CronSchedule, IntervalSchedule, Schedule
+
+# MARK: Exports
 
 __all__ = [
     "AtSchedule",

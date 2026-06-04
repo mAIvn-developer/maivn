@@ -6,16 +6,19 @@ This module handles resolving various dependency types:
 - Tool dependencies (from execution context)
 """
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Protocol, cast
 
-from maivn_shared import AgentDependency, InterruptDependency, ToolDependency
+from maivn_shared import AgentDependency, BaseDependency, InterruptDependency, ToolDependency
 from maivn_shared.infrastructure.logging import LoggerProtocol
 from maivn_shared.utils.prompt_utils import load_prompt
+from pydantic import JsonValue
 
 from maivn._internal.core.entities import FunctionTool, McpTool, ModelTool
 from maivn._internal.core.entities.execution_context import ExecutionContext
+from maivn._internal.core.entities.tools import MethodTool
 from maivn._internal.core.exceptions import (
     AgentNotFoundError,
     DependencyResolutionError,
@@ -23,8 +26,25 @@ from maivn._internal.core.exceptions import (
 )
 from maivn._internal.core.services.dependency_execution_service import DependencyExecutionService
 
-if TYPE_CHECKING:
-    from ..tool_execution_service import ToolExecutionService
+# MARK: Types
+
+JsonObject = dict[str, JsonValue]
+
+
+class ToolCallExecutor(Protocol):
+    """Execution surface needed for recursive dependency resolution."""
+
+    def execute_tool_call(
+        self,
+        tool_id: str,
+        args: JsonObject,
+        context: ExecutionContext | None = None,
+        *,
+        tool_event_id: str | None = None,
+    ) -> object:
+        """Execute a tool call."""
+        ...
+
 
 _DEFAULT_AGENT_DEPENDENCY_PROMPT = "Execute the requested task based on the current context."
 
@@ -45,11 +65,13 @@ class DependencyResolver:
             dependency_service: Service for executing dependencies
         """
         self._logger: LoggerProtocol | None = logger
-        self._dependency_service = dependency_service or DependencyExecutionService()
+        self._dependency_service: DependencyExecutionService = (
+            dependency_service or DependencyExecutionService()
+        )
 
     # MARK: - Public API
 
-    def needs_resolution(self, dependencies: list[Any], args: dict[str, Any]) -> bool:
+    def needs_resolution(self, dependencies: list[BaseDependency], args: dict[str, object]) -> bool:
         """Check if dependencies need to be resolved or if args already have values.
 
         If all dependency arg_names are already present in args with non-None values,
@@ -66,7 +88,7 @@ class DependencyResolver:
         for dependency in dependencies:
             if isinstance(dependency, AgentDependency):
                 return True
-            arg_name = getattr(dependency, "arg_name", None)
+            arg_name = dependency.arg_name
             if arg_name:
                 # If arg is missing or None, we need to resolve it
                 if arg_name not in args or args[arg_name] is None:
@@ -76,12 +98,12 @@ class DependencyResolver:
 
     def resolve_all(
         self,
-        tool: FunctionTool | ModelTool | McpTool,
-        args: dict[str, Any],
-        dependencies: list[Any],
+        tool: FunctionTool | MethodTool | ModelTool | McpTool,
+        args: dict[str, object],
+        dependencies: list[BaseDependency],
         context: ExecutionContext,
-        executor: ToolExecutionService,
-    ) -> dict[str, Any]:
+        executor: ToolCallExecutor,
+    ) -> dict[str, object]:
         """Resolve all tool dependencies and inject them into arguments.
 
         Args:
@@ -101,7 +123,7 @@ class DependencyResolver:
 
         for dependency in dependencies:
             tool_identifier = self._get_tool_identifier(tool)
-            arg_name = getattr(dependency, "arg_name", None)
+            arg_name = dependency.arg_name
             try:
                 # Handle each dependency type
                 result = self._resolve_single_dependency(dependency, context, executor)
@@ -117,7 +139,7 @@ class DependencyResolver:
                             str(result)[:100],  # Truncate for logging
                         )
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - non-domain failures are wrapped with dependency context
                 if self._logger:
                     self._logger.error(
                         "Failed to resolve dependency %s for tool %s: %s",
@@ -144,10 +166,10 @@ class DependencyResolver:
 
     def _resolve_single_dependency(
         self,
-        dependency: Any,
+        dependency: BaseDependency,
         context: ExecutionContext,
-        executor: ToolExecutionService,
-    ) -> Any:
+        executor: ToolCallExecutor,
+    ) -> object:
         """Resolve a single dependency based on its type.
 
         Args:
@@ -172,8 +194,8 @@ class DependencyResolver:
         self,
         dependency: AgentDependency,
         context: ExecutionContext,
-        executor: ToolExecutionService,
-    ) -> Any:
+        executor: ToolCallExecutor,
+    ) -> object:
         """Resolve agent dependency by calling the dynamic agent invocation tool.
 
         Args:
@@ -189,8 +211,10 @@ class DependencyResolver:
         """
         try:
             metadata = context.metadata or {}
-            default_prompt = metadata.get("agent_prompt")
-            if default_prompt is None:
+            default_prompt_obj = metadata.get("agent_prompt")
+            if isinstance(default_prompt_obj, str):
+                default_prompt = default_prompt_obj
+            else:
                 default_prompt = self._load_default_agent_dependency_prompt()
 
             result = executor.execute_tool_call(
@@ -201,11 +225,10 @@ class DependencyResolver:
 
             return result
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - dynamic agent execution falls back to service
             if self._logger:
                 self._logger.warning(
-                    "Dynamic agent tool execution failed for %s, "
-                    "falling back to dependency service: %s",
+                    "Dynamic agent tool execution failed for %s; using dependency service: %s",
                     dependency.agent_id,
                     e,
                 )
@@ -229,7 +252,7 @@ class DependencyResolver:
         self,
         dependency: ToolDependency,
         context: ExecutionContext,
-    ) -> Any:
+    ) -> object:
         """Resolve tool dependency by looking up the result from context.
 
         Args:
@@ -264,8 +287,8 @@ class DependencyResolver:
         self,
         dependency: InterruptDependency,
         context: ExecutionContext,
-        executor: ToolExecutionService,
-    ) -> Any:
+        _executor: ToolCallExecutor,
+    ) -> object:
         """Resolve user dependency by calling the dynamic user input tool.
 
         Args:
@@ -279,7 +302,7 @@ class DependencyResolver:
         Raises:
             ValueError: If dynamic tool cannot be found or executed
         """
-        prompt_text = getattr(dependency, "prompt", "Please provide input:")
+        prompt_text = dependency.prompt or "Please provide input:"
         if self._logger:
             self._logger.info("Using dependency service for user input: %s", prompt_text)
         return self._dependency_service.execute_dependency(dependency, context)
@@ -287,7 +310,9 @@ class DependencyResolver:
     # MARK: - Utilities
 
     @staticmethod
-    def _get_tool_identifier(tool: FunctionTool | ModelTool | McpTool) -> str:
+    def _get_tool_identifier(
+        tool: FunctionTool | MethodTool | ModelTool | McpTool,
+    ) -> str:
         """Get a string identifier for a tool.
 
         Args:
@@ -296,12 +321,15 @@ class DependencyResolver:
         Returns:
             Tool identifier (name, id, or type)
         """
-        return (
-            getattr(tool, "name", None)
-            or getattr(tool, "id", None)
-            or getattr(tool, "tool_id", None)
-            or type(tool).__name__
-        )
+        if tool.name:
+            return tool.name
+        tool_id = cast(object, getattr(tool, "tool_id", None))
+        if isinstance(tool_id, str) and tool_id:
+            return tool_id
+        tool_identifier = cast(object, getattr(tool, "id", None))
+        if isinstance(tool_identifier, str) and tool_identifier:
+            return tool_identifier
+        return type(tool).__name__
 
 
 __all__ = ["DependencyResolver"]

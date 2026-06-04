@@ -7,26 +7,50 @@ call on the supplied reporter. Reporters that don't implement
 so this only matters for fully-custom reporter implementations).
 """
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import Any
+import inspect
+from typing import Protocol, cast
 
 from ..._models import AppEvent
-from ..payload import mapping_value, normalized_text
+from ..payload import EventPayload, mapping_value, normalized_text
 from ..state import NormalizedEventForwardingState
+
+# MARK: Callback Protocols
+
+
+class HookFiredCallback(Protocol):
+    def __call__(
+        self,
+        *,
+        name: str,
+        stage: str,
+        status: str,
+        target_type: str,
+        target_id: str | None = None,
+        target_name: str | None = None,
+        source: str | None = None,
+        error: str | None = None,
+        elapsed_ms: int | None = None,
+    ) -> None: ...
+
+
+# MARK: Hook Forwarding
 
 
 def forward_hook_fired(
     event: AppEvent,
     *,
-    payload: dict[str, Any],
-    reporter: Any,
+    payload: EventPayload,
+    reporter: object,
     state: NormalizedEventForwardingState,
 ) -> None:
-    _ = state
-    report_hook_fired = getattr(reporter, "report_hook_fired", None)
-    if not callable(report_hook_fired):
+    _ = (event, state)
+    callback = getattr(reporter, "report_hook_fired", None)
+    if not callable(callback):
         return
+    report_hook_fired = cast(HookFiredCallback, callback)
 
     name = normalized_text(payload.get("name")) or normalized_text(
         mapping_value(payload.get("hook"), "name")
@@ -60,25 +84,41 @@ def forward_hook_fired(
     if not name or not stage or not status or not target_type:
         return
 
-    kwargs: dict[str, Any] = {
-        "name": name,
-        "stage": stage,
-        "status": status,
-        "target_type": target_type,
-        "target_id": target_id,
-        "target_name": target_name,
-        "error": error,
-        "elapsed_ms": elapsed_ms,
-    }
-    if source is not None:
-        kwargs["source"] = source
+    if source is not None and _callback_accepts_keyword(report_hook_fired, "source"):
+        report_hook_fired(
+            name=name,
+            stage=stage,
+            status=status,
+            target_type=target_type,
+            target_id=target_id,
+            target_name=target_name,
+            source=source,
+            error=error,
+            elapsed_ms=elapsed_ms,
+        )
+        return
 
+    report_hook_fired(
+        name=name,
+        stage=stage,
+        status=status,
+        target_type=target_type,
+        target_id=target_id,
+        target_name=target_name,
+        error=error,
+        elapsed_ms=elapsed_ms,
+    )
+
+
+def _callback_accepts_keyword(callback: HookFiredCallback, keyword: str) -> bool:
     try:
-        report_hook_fired(**kwargs)
-    except TypeError:
-        # Older reporters predate ``source`` — retry without it.
-        kwargs.pop("source", None)
-        report_hook_fired(**kwargs)
+        params = inspect.signature(callback).parameters
+    except (TypeError, ValueError):
+        return False
+    accepts_var_kwargs = any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in params.values()
+    )
+    return accepts_var_kwargs or keyword in params
 
 
 __all__ = ["forward_hook_fired"]

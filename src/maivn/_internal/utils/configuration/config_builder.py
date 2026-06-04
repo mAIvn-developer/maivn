@@ -1,24 +1,51 @@
 """Configuration builder for convenient configuration creation.
 
 This module provides convenience methods for creating configuration from
-environment variables. The SDK itself remains environment-agnostic, but
-this builder helps consuming applications easily load config from env vars.
+environment variables. ``environment_config`` preserves the SDK's historical
+``.env`` import behavior for the default server URL; this builder centralizes
+the remaining environment-driven configuration.
 """
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import Any
+from typing import TypeAlias, cast
 
 from maivn_shared.utils.env import remove_none_values
+from pydantic import JsonValue
 
-from maivn._internal.utils.env_parsing import (
+from ..env_parsing import (
     coerce_bool_env,
     coerce_float_env,
     coerce_int_env,
-    get_env,
+    coerce_str_env,
+)
+from .environment_config import ConfigMapping, MaivnConfiguration
+from .keys import (
+    FIELD_API_KEY,
+    FIELD_DEFAULT_TIMEOUT_SECONDS,
+    FIELD_DEPENDENCY_WAIT_TIMEOUT_SECONDS,
+    FIELD_DEPLOYMENT_TIMEZONE,
+    FIELD_ENABLE_BACKGROUND_EXECUTION,
+    FIELD_ENABLE_TIMING_LOGS,
+    FIELD_FORMAT_STRING,
+    FIELD_LOG_LEVEL,
+    FIELD_MAX_PARALLEL_TOOLS,
+    FIELD_MAX_RETRIES,
+    FIELD_PENDING_EVENT_TIMEOUT_SECONDS,
+    FIELD_TIMEOUT_SECONDS,
+    FIELD_TOOL_EXECUTION_TIMEOUT_SECONDS,
+    FIELD_TOTAL_EXECUTION_TIMEOUT_SECONDS,
+    SECTION_EXECUTION,
+    SECTION_LOGGING,
+    SECTION_SECURITY,
+    SECTION_SERVER,
 )
 
-from .environment_config import MaivnConfiguration
+# MARK: - Types
+
+RawConfigValue: TypeAlias = JsonValue
+RawConfigDict: TypeAlias = dict[str, RawConfigValue]
 
 # MARK: - Environment Variable Names
 
@@ -31,8 +58,6 @@ _ENV_ENABLE_BACKGROUND_EXECUTION = "MAIVN_ENABLE_BACKGROUND_EXECUTION"
 _ENV_TOOL_EXECUTION_TIMEOUT = "MAIVN_TOOL_EXECUTION_TIMEOUT"
 _ENV_DEPENDENCY_WAIT_TIMEOUT = "MAIVN_DEPENDENCY_WAIT_TIMEOUT"
 _ENV_TOTAL_EXECUTION_TIMEOUT = "MAIVN_TOTAL_EXECUTION_TIMEOUT"
-_ENV_MAX_PROMPT_LENGTH = "MAIVN_MAX_PROMPT_LENGTH"
-_ENV_TOOL_NAME_HASH_MODULO = "MAIVN_TOOL_NAME_HASH_MODULO"
 _ENV_API_KEY = "MAIVN_API_KEY"
 _ENV_DEPLOYMENT_TIMEZONE = "MAIVN_DEPLOYMENT_TIMEZONE"
 _ENV_LOG_LEVEL = "MAIVN_LOG_LEVEL"
@@ -63,8 +88,6 @@ class ConfigurationBuilder:
         - MAIVN_TOOL_EXECUTION_TIMEOUT: Per-tool execution timeout (seconds)
         - MAIVN_DEPENDENCY_WAIT_TIMEOUT: Dependency resolution timeout (seconds)
         - MAIVN_TOTAL_EXECUTION_TIMEOUT: Total execution timeout (seconds, optional)
-        - MAIVN_MAX_PROMPT_LENGTH: Maximum prompt length for tool naming
-        - MAIVN_TOOL_NAME_HASH_MODULO: Modulo for tool name hash generation
         - MAIVN_API_KEY: API key for authentication
         - MAIVN_LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR)
         - MAIVN_LOG_FORMAT: Custom log format string
@@ -75,63 +98,61 @@ class ConfigurationBuilder:
         """
         config_dict = _build_config_dict_from_environment()
         config_dict = remove_none_values(config_dict)
-        return MaivnConfiguration.from_dict(config_dict)
+        return MaivnConfiguration.from_dict(cast(ConfigMapping, config_dict))
 
 
 # MARK: - Private Helpers
 
 
-def _build_config_dict_from_environment() -> dict[str, Any]:
+def _build_config_dict_from_environment() -> RawConfigDict:
     """Build configuration dictionary from environment variables.
 
     Returns:
         Configuration dictionary with values from environment variables
     """
     return {
-        "server": _build_server_config(),
-        "execution": _build_execution_config(),
-        "security": _build_security_config(),
-        "logging": _build_logging_config(),
+        SECTION_SERVER: _build_server_config(),
+        SECTION_EXECUTION: _build_execution_config(),
+        SECTION_SECURITY: _build_security_config(),
+        SECTION_LOGGING: _build_logging_config(),
     }
 
 
-def _build_server_config() -> dict[str, Any]:
+def _build_server_config() -> RawConfigDict:
     """Build server configuration from environment variables."""
     return {
-        "timeout_seconds": coerce_float_env(_ENV_TIMEOUT),
-        "max_retries": coerce_int_env(_ENV_MAX_RETRIES),
-        "deployment_timezone": get_env(_ENV_DEPLOYMENT_TIMEZONE),
+        FIELD_TIMEOUT_SECONDS: coerce_float_env(_ENV_TIMEOUT),
+        FIELD_MAX_RETRIES: coerce_int_env(_ENV_MAX_RETRIES),
+        FIELD_DEPLOYMENT_TIMEZONE: coerce_str_env(_ENV_DEPLOYMENT_TIMEZONE),
     }
 
 
-def _build_execution_config() -> dict[str, Any]:
+def _build_execution_config() -> RawConfigDict:
     """Build execution configuration from environment variables."""
     return {
-        "default_timeout_seconds": coerce_float_env(_ENV_EXECUTION_TIMEOUT),
-        "pending_event_timeout_seconds": coerce_float_env(_ENV_PENDING_EVENT_TIMEOUT),
-        "max_parallel_tools": coerce_int_env(_ENV_MAX_PARALLEL_TOOLS),
-        "enable_background_execution": coerce_bool_env(_ENV_ENABLE_BACKGROUND_EXECUTION),
-        "tool_execution_timeout_seconds": coerce_float_env(_ENV_TOOL_EXECUTION_TIMEOUT),
-        "dependency_wait_timeout_seconds": coerce_float_env(_ENV_DEPENDENCY_WAIT_TIMEOUT),
-        "total_execution_timeout_seconds": coerce_float_env(_ENV_TOTAL_EXECUTION_TIMEOUT),
-        "max_prompt_length_for_tool_name": coerce_int_env(_ENV_MAX_PROMPT_LENGTH),
-        "tool_name_hash_modulo": coerce_int_env(_ENV_TOOL_NAME_HASH_MODULO),
+        FIELD_DEFAULT_TIMEOUT_SECONDS: coerce_float_env(_ENV_EXECUTION_TIMEOUT),
+        FIELD_PENDING_EVENT_TIMEOUT_SECONDS: coerce_float_env(_ENV_PENDING_EVENT_TIMEOUT),
+        FIELD_MAX_PARALLEL_TOOLS: coerce_int_env(_ENV_MAX_PARALLEL_TOOLS),
+        FIELD_ENABLE_BACKGROUND_EXECUTION: coerce_bool_env(_ENV_ENABLE_BACKGROUND_EXECUTION),
+        FIELD_TOOL_EXECUTION_TIMEOUT_SECONDS: coerce_float_env(_ENV_TOOL_EXECUTION_TIMEOUT),
+        FIELD_DEPENDENCY_WAIT_TIMEOUT_SECONDS: coerce_float_env(_ENV_DEPENDENCY_WAIT_TIMEOUT),
+        FIELD_TOTAL_EXECUTION_TIMEOUT_SECONDS: coerce_float_env(_ENV_TOTAL_EXECUTION_TIMEOUT),
     }
 
 
-def _build_security_config() -> dict[str, Any]:
+def _build_security_config() -> RawConfigDict:
     """Build security configuration from environment variables."""
     return {
-        "api_key": get_env(_ENV_API_KEY),
+        FIELD_API_KEY: coerce_str_env(_ENV_API_KEY),
     }
 
 
-def _build_logging_config() -> dict[str, Any]:
+def _build_logging_config() -> RawConfigDict:
     """Build logging configuration from environment variables."""
     return {
-        "level": get_env(_ENV_LOG_LEVEL),
-        "format_string": get_env(_ENV_LOG_FORMAT),
-        "enable_timing_logs": coerce_bool_env(_ENV_ENABLE_TIMING_LOGS),
+        FIELD_LOG_LEVEL: coerce_str_env(_ENV_LOG_LEVEL),
+        FIELD_FORMAT_STRING: coerce_str_env(_ENV_LOG_FORMAT),
+        FIELD_ENABLE_TIMING_LOGS: coerce_bool_env(_ENV_ENABLE_TIMING_LOGS),
     }
 
 

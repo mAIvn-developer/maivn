@@ -1,3 +1,4 @@
+# pyright: strict
 """Server-sent events client interface.
 Defines the protocol for streaming SSE events from a remote endpoint.
 """
@@ -7,7 +8,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Protocol
 
-from maivn._internal.core.entities.sse_event import SSEEvent
+from ..entities.sse_event import SSEEvent
 
 # MARK: - SSE Client Interface
 

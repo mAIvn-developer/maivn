@@ -1,13 +1,23 @@
 """Helper functions and configuration for AgentOrchestrator."""
 
+# pyright: strict
 from __future__ import annotations
 
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Final, TypeAlias, cast
 
-from maivn._internal.core.entities import FunctionTool, McpTool, ModelTool
+from maivn._internal.core.entities import BaseTool, FunctionTool, McpTool, MethodTool, ModelTool
+
+# MARK: Constants
+
+WINDOWS_PATH_RE: Final[re.Pattern[str]] = re.compile(r"[a-zA-Z]:\\")
+
+
+# MARK: Types
+
+RuntimeTool: TypeAlias = FunctionTool | MethodTool | ModelTool | McpTool
 
 # MARK: Configuration
 
@@ -26,21 +36,22 @@ class OrchestratorConfig:
 # MARK: Helper Functions
 
 
-def extract_latest_response(responses: Any) -> str | None:
+def extract_latest_response(responses: object) -> str | None:
     """Return the last non-empty string from a responses list, or None."""
     if not isinstance(responses, list):
         return None
-    for item in reversed(responses):
+    response_items = cast(list[object], responses)
+    for item in reversed(response_items):
         if isinstance(item, str) and item.strip():
             return item.strip()
     return None
 
 
 def coerce_tool_list(
-    tools: Sequence[Any],
-) -> Sequence[FunctionTool | ModelTool | McpTool]:
+    tools: Sequence[BaseTool],
+) -> Sequence[RuntimeTool]:
     """Coerce a generic tool list to the expected tool union type."""
-    return tools  # type: ignore[return-value]
+    return cast(Sequence[RuntimeTool], tools)
 
 
 def sanitize_user_facing_error_message(message: str) -> str:
@@ -69,7 +80,7 @@ def sanitize_user_facing_error_message(message: str) -> str:
     if any(token in lowered for token in suspicious_substrings):
         return "An internal error occurred. Please try again."
 
-    if re.search(r"[a-zA-Z]:\\", message) is not None:
+    if WINDOWS_PATH_RE.search(message) is not None:
         return "An internal error occurred. Please try again."
 
     return message

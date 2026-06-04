@@ -1,9 +1,10 @@
 """Orchestrator execution constants.
 Centralizes shared limits and defaults used across orchestrator services."""
 
+# pyright: strict
 from __future__ import annotations
 
-# MARK: - Parallel Execution
+# MARK: Parallel Execution
 
 MAX_PARALLEL_WORKERS: int = 16
 """Maximum cap for parallel workers to prevent resource exhaustion.
@@ -13,6 +14,7 @@ excessive resource usage on high-core systems. For dynamic worker count
 based on available CPUs, use get_optimal_worker_count() from helpers.resource_utils.
 """
 
-# MARK: - Public API
+
+# MARK: Public API
 
 __all__ = ["MAX_PARALLEL_WORKERS"]

@@ -1,6 +1,10 @@
+# pyright: strict
 """Dispatch table for event normalization handlers."""
 
 from __future__ import annotations
+
+from collections.abc import Callable
+from typing import TypeAlias
 
 from maivn_shared.core.events import (
     ENRICHMENT_EVENT_NAME,
@@ -18,11 +22,13 @@ from maivn_shared.core.events import (
     UPDATE_EVENT_NAME,
 )
 
+from .._models import JsonObject, NormalizedStreamState
 from .assistant_events import (
     handle_progress_update_event,
     handle_status_message_event,
     handle_update_event,
 )
+from .context import NormalizationOptions
 from .lifecycle_events import (
     handle_enrichment_event,
     handle_error_event,
@@ -38,10 +44,20 @@ from .system_events import (
 )
 from .tool_events import handle_model_tool_complete_event, handle_tool_event
 
+# MARK: Configuration
+
+_SESSION_START_EVENT_NAME = "session_start"
+
+
 # MARK: Dispatch
 
 
-EVENT_HANDLERS = {
+EventHandler: TypeAlias = Callable[
+    [JsonObject, NormalizedStreamState, NormalizationOptions],
+    list[JsonObject],
+]
+
+EVENT_HANDLERS: dict[str, EventHandler] = {
     UPDATE_EVENT_NAME: handle_update_event,
     PROGRESS_UPDATE_EVENT_NAME: handle_progress_update_event,
     TOOL_EVENT_NAME: handle_tool_event,
@@ -55,5 +71,5 @@ EVENT_HANDLERS = {
     INTERRUPT_REQUIRED_EVENT_NAME: handle_interrupt_required_event,
     FINAL_EVENT_NAME: handle_final_event,
     ERROR_EVENT_NAME: handle_error_event,
-    "session_start": handle_session_start_event,
+    _SESSION_START_EVENT_NAME: handle_session_start_event,
 }

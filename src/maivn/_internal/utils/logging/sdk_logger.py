@@ -9,11 +9,15 @@ Features:
 - Structured logging with context
 """
 
+# pyright: strict
 from __future__ import annotations
 
+import threading
 import uuid
+import warnings
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Final, Literal, cast
 
 from maivn_shared.infrastructure.logging import MaivnLogger
 from maivn_shared.infrastructure.logging.config import (
@@ -21,6 +25,19 @@ from maivn_shared.infrastructure.logging.config import (
     DEFAULT_HUMAN_READABLE_CONSOLE,
     DEFAULT_USE_COLORS,
     LogLevel,
+)
+from typing_extensions import override
+
+# MARK: Constants
+
+_COMPONENT_PREFIX: Final[str] = "MAIVN"
+_SESSION_COMPONENT: Final[str] = "SESSION"
+_ORCHESTRATION_COMPONENT: Final[str] = "ORCHESTRATION"
+_EVENT_STREAM_COMPONENT: Final[str] = "EVENT_STREAM"
+_LOG_FILE_PATH_WARNING: Final[str] = (
+    "Maivn SDK logger is already configured for {configured}; ignoring late "
+    "log_file_path={requested}. Call configure_logging() before importing other "
+    "maivn modules to choose the SDK log file."
 )
 
 # MARK: Maivn SDK Logger
@@ -39,14 +56,15 @@ class MaivnSDKLogger(MaivnLogger):
     path to enable file logging.
     """
 
-    _COMPONENT_PREFIX = "MAIVN"
+    _COMPONENT_PREFIX: str = _COMPONENT_PREFIX
 
+    @override
     def _write_structured_log(
         self,
         level: LogLevel,
         component: str,
         event: str,
-        data: dict[str, Any],
+        data: dict[str, object],
     ) -> None:
         """Override to add MAIVN prefix and correlation ID."""
         prefixed_component = (
@@ -62,7 +80,7 @@ class MaivnSDKLogger(MaivnLogger):
             data=enriched_data,
         )
 
-    def _enrich_with_correlation_id(self, data: dict[str, Any]) -> dict[str, Any]:
+    def _enrich_with_correlation_id(self, data: dict[str, object]) -> dict[str, object]:
         """Add correlation_id to data if not present."""
         if "correlation_id" in data:
             return data
@@ -97,13 +115,13 @@ class MaivnSDKLogger(MaivnLogger):
         session_id: str,
         assistant_id: str,
         thread_id: str,
-        **metadata: Any,
+        **metadata: object,
     ) -> None:
         """Log session start event."""
         self.set_context(session_id=session_id, thread_id=thread_id)
         self._write_structured_log(
             level="INFO",
-            component="SESSION",
+            component=_SESSION_COMPONENT,
             event="session_start",
             data={
                 "session_id": session_id,
@@ -117,12 +135,12 @@ class MaivnSDKLogger(MaivnLogger):
         self,
         session_id: str,
         duration_ms: int | None = None,
-        **metadata: Any,
+        **metadata: object,
     ) -> None:
         """Log session end event."""
         self._write_structured_log(
             level="INFO",
-            component="SESSION",
+            component=_SESSION_COMPONENT,
             event="session_end",
             data={
                 "session_id": session_id,
@@ -138,13 +156,13 @@ class MaivnSDKLogger(MaivnLogger):
         self,
         phase: Literal["start", "completed", "failed"],
         operation: str,
-        **metadata: Any,
+        **metadata: object,
     ) -> None:
         """Log orchestration events."""
         level: LogLevel = "ERROR" if phase == "failed" else "INFO"
         self._write_structured_log(
             level=level,
-            component="ORCHESTRATION",
+            component=_ORCHESTRATION_COMPONENT,
             event=f"orchestration_{phase}",
             data={"operation": operation, **metadata},
         )
@@ -154,14 +172,18 @@ class MaivnSDKLogger(MaivnLogger):
     def log_event_stream(
         self,
         event_type: str,
-        event_data: dict[str, Any],
-        **metadata: Any,
+        event_data: object,
+        **metadata: object,
     ) -> None:
         """Log SSE event stream events."""
-        event_keys = list(event_data.keys()) if isinstance(event_data, dict) else None
+        event_keys: list[object] | None
+        if isinstance(event_data, Mapping):
+            event_keys = list(cast(Mapping[object, object], event_data).keys())
+        else:
+            event_keys = None
         self._write_structured_log(
             level="DEBUG",
-            component="EVENT_STREAM",
+            component=_EVENT_STREAM_COMPONENT,
             event=f"event_{event_type}",
             data={"event_type": event_type, "event_keys": event_keys, **metadata},
         )
@@ -170,6 +192,8 @@ class MaivnSDKLogger(MaivnLogger):
 # MARK: Global Instance
 
 _logger_instance: MaivnSDKLogger | None = None
+_logger_lock: Final[threading.Lock] = threading.Lock()
+_logger_log_file_path: Path | None = None
 
 
 def _create_logger(log_file_path: Path | str | None = None) -> MaivnSDKLogger:
@@ -182,6 +206,28 @@ def _create_logger(log_file_path: Path | str | None = None) -> MaivnSDKLogger:
     )
 
 
+def _normalize_log_file_path(log_file_path: Path | str | None) -> Path | None:
+    """Return the comparable path value used for singleton path tracking."""
+    return Path(log_file_path) if log_file_path is not None else None
+
+
+def _warn_if_ignoring_log_file_path(log_file_path: Path | str | None) -> None:
+    """Warn when an existing singleton makes a requested log file path inert."""
+    if log_file_path is None:
+        return
+
+    requested_path = _normalize_log_file_path(log_file_path)
+    if requested_path == _logger_log_file_path:
+        return
+
+    configured = str(_logger_log_file_path) if _logger_log_file_path is not None else "no file"
+    warnings.warn(
+        _LOG_FILE_PATH_WARNING.format(configured=configured, requested=str(requested_path)),
+        RuntimeWarning,
+        stacklevel=3,
+    )
+
+
 def get_logger(log_file_path: Path | str | None = None) -> MaivnSDKLogger:
     """Get the global maivn SDK logger instance.
 
@@ -189,9 +235,14 @@ def get_logger(log_file_path: Path | str | None = None) -> MaivnSDKLogger:
     - Console: OFF by default. Set MAIVN_LOG_LEVEL=INFO for console output.
     - File: All messages (DEBUG, INFO, WARNING, ERROR) if log_file_path provided
     """
-    global _logger_instance
-    if _logger_instance is None:
-        _logger_instance = _create_logger(log_file_path)
+    global _logger_instance, _logger_log_file_path
+    with _logger_lock:
+        if _logger_instance is None:
+            _logger_log_file_path = _normalize_log_file_path(log_file_path)
+            _logger_instance = _create_logger(log_file_path)
+            return _logger_instance
+
+        _warn_if_ignoring_log_file_path(log_file_path)
     return _logger_instance
 
 
@@ -199,7 +250,7 @@ def get_optional_logger() -> MaivnSDKLogger:
     """Get maivn SDK logger if available, creates default if not."""
     try:
         return get_logger()
-    except Exception:  # pragma: no cover
+    except Exception:  # noqa: BLE001 - logger fallback must never break SDK import paths  # pragma: no cover
         return _create_logger()
 
 
@@ -214,3 +265,11 @@ def configure_logging(log_file_path: Path | str | None = None) -> MaivnSDKLogger
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
     return get_logger(log_file_path=log_file_path)
+
+
+def reset_for_tests() -> None:
+    """Reset the process-global SDK logger singleton for tests."""
+    global _logger_instance, _logger_log_file_path
+    with _logger_lock:
+        _logger_instance = None
+        _logger_log_file_path = None

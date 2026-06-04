@@ -1,6 +1,11 @@
 # API Keys and Webhooks
 
-This guide covers secure key management and webhook operations in the portal.
+API keys are the credentials your software uses to talk to mAIvn, and
+webhooks are how mAIvn talks back to your software when something happens.
+This guide covers both: creating and safeguarding keys, and setting up
+webhook endpoints to receive event callbacks — all from the portal.
+
+> **See also:** [Authentication & API Keys](authentication.md) — how to use a key from the SDK (`api_key` / `Client`), key scopes, and handling rejected keys in Python.
 
 ## API Keys
 
@@ -51,3 +56,11 @@ Each webhook includes:
 - Scope keys to least privilege.
 - Rotate keys on schedule and incident response.
 - Use HTTPS-only webhook endpoints.
+
+## Next steps
+
+- [Authentication & API Keys](authentication.md) — use a key from the
+  SDK (`api_key` / `Client`), understand key scopes, and handle rejected
+  keys in Python.
+- [Workspace Operations](workspace-operations.md) — organize keys and
+  webhooks across organizations and projects.

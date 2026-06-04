@@ -2,10 +2,11 @@
 Wraps rich Progress/Live for spinners and status updates.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
@@ -30,15 +31,15 @@ class ProgressManager:
         Args:
             console: Rich console instance
         """
-        self.console = console
-        self.progress = Progress(
+        self.console: Console = console
+        self.progress: Progress = Progress(
             SpinnerColumn(),
             TextColumn("[bold blue]{task.description}"),
             console=console,
             transient=True,
         )
         self._live: Live | None = None
-        self._suspend_live_count = 0
+        self._suspend_live_count: int = 0
 
     @property
     def live(self) -> Live | None:
@@ -46,7 +47,10 @@ class ProgressManager:
         return self._live
 
     @contextmanager
-    def live_progress(self, description: str = "Processing...") -> Iterator[TaskID | None]:
+    def live_progress(
+        self,
+        description: str = "Processing...",
+    ) -> Generator[TaskID | None, None, None]:
         """Context manager for live progress display.
 
         Args:
@@ -73,7 +77,7 @@ class ProgressManager:
                 # Print a newline to ensure the spinner line is fully cleared
                 self.console.print()
 
-    def update_progress(self, task_id: TaskID, description: str | None = None) -> None:
+    def update_progress(self, task_id: TaskID | None, description: str | None = None) -> None:
         """Update progress description.
 
         Args:
@@ -87,7 +91,7 @@ class ProgressManager:
             self.progress.update(task_id, description=description)
 
     @contextmanager
-    def prepare_for_user_input(self) -> Iterator[None]:
+    def prepare_for_user_input(self) -> Generator[None, None, None]:
         """Pause live rendering so terminal input can be collected."""
         live = self._live
         if live is None:

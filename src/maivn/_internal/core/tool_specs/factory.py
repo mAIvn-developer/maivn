@@ -4,14 +4,21 @@ Flattens nested Pydantic models into separate ToolSpec instances with dependenci
 Includes deduplication to avoid duplicate ToolSpec creation.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 from maivn_shared import ToolSpec
+from pydantic import JsonValue
 
-from maivn._internal.core.entities.tools import FunctionTool, McpTool, ModelTool
+from maivn._internal.core.entities.tools import (
+    FunctionTool,
+    McpTool,
+    MethodTool,
+    ModelTool,
+)
 
 from .flattener import ToolFlattener
 
@@ -19,6 +26,15 @@ if TYPE_CHECKING:
     from maivn_shared import BaseDependency
 
     from maivn._internal.core.entities import BaseTool
+
+JsonObject = dict[str, JsonValue]
+
+
+# MARK: Exceptions
+
+
+class _UnsupportedToolTypeError(TypeError, ValueError):
+    """Unsupported tool error that preserves the legacy ValueError catch path."""
 
 
 # MARK: ToolSpecFactory
@@ -36,9 +52,9 @@ class ToolSpecFactory:
 
     def __init__(self) -> None:
         """Initialize the factory."""
-        self._tool_flattener = ToolFlattener()
+        self._tool_flattener: ToolFlattener = ToolFlattener()
         self._created_specs: dict[str, ToolSpec] = {}
-        self._function_tool_registry: list[Callable] = []
+        self._function_tool_registry: list[Callable[..., object]] = []
 
     def reset_cache(self) -> None:
         """Reset per-instance caches.
@@ -53,7 +69,7 @@ class ToolSpecFactory:
 
     # MARK: - Internal Helpers
 
-    def _register_function_tool(self, func: Callable) -> None:
+    def _register_function_tool(self, func: Callable[..., object]) -> None:
         """Register a function tool for dependency detection within this factory instance."""
         if func not in self._function_tool_registry:
             self._function_tool_registry.append(func)
@@ -134,7 +150,14 @@ class ToolSpecFactory:
         if dependencies is not None:
             tool.dependencies = dependencies
 
-        if isinstance(tool, FunctionTool):
+        if isinstance(tool, MethodTool):
+            specs = self._create_method_tool_specs(
+                tool=tool,
+                agent_id=agent_id,
+                always_execute=always_execute,
+                final_tool=final_tool,
+            )
+        elif isinstance(tool, FunctionTool):
             specs = self._create_function_tool_specs(
                 tool=tool,
                 agent_id=agent_id,
@@ -156,7 +179,7 @@ class ToolSpecFactory:
                 final_tool=final_tool,
             )
         else:
-            raise ValueError(f"Unsupported tool type: {type(tool)}")
+            raise _UnsupportedToolTypeError(f"Unsupported tool type: {type(tool).__name__}")
 
         return self._deduplicate_specs(specs)
 
@@ -190,6 +213,39 @@ class ToolSpecFactory:
             target_agent_id=target_agent_id,
         )
 
+    def _create_method_tool_specs(
+        self,
+        *,
+        tool: MethodTool,
+        agent_id: str,
+        always_execute: bool,
+        final_tool: bool,
+    ) -> list[ToolSpec]:
+        """Create ToolSpecs for a method tool.
+
+        Structurally identical to function-tool spec creation: the bound
+        method is a regular callable, so the flattener / spec generator
+        path applies unchanged. The owner reference on
+        :class:`MethodTool` is intentionally not surfaced in the spec —
+        it's runtime-only state used for audit and lifecycle, not part
+        of the LLM-facing tool definition.
+        """
+        self._register_function_tool(tool.func)
+
+        return self._tool_flattener.flatten_function_tool(
+            func=tool.func,
+            agent_id=agent_id,
+            name=tool.name,
+            description=tool.description,
+            always_execute=always_execute or tool.always_execute,
+            final_tool=final_tool or tool.final_tool,
+            metadata=tool.metadata,
+            tags=tool.tags,
+            tool_id=tool.tool_id,
+            target_agent_id=None,
+            tool_type_override="method",
+        )
+
     def _create_model_tool_specs(
         self,
         *,
@@ -219,11 +275,15 @@ class ToolSpecFactory:
         final_tool: bool,
     ) -> list[ToolSpec]:
         """Create ToolSpecs for an MCP tool."""
-        args_schema = tool.args_schema or {"type": "object", "properties": {}}
-        metadata: dict[str, Any] = {
-            "mcp_server": tool.server_name,
-            "mcp_tool_name": tool.mcp_tool_name,
-        }
+        args_schema = tool.args_schema or cast(JsonObject, {"type": "object", "properties": {}})
+        # BaseTool metadata is typed as object-valued; MCP ToolSpecs require JSON-shaped metadata.
+        metadata = cast(JsonObject, dict(tool.metadata or {}))
+        metadata.update(
+            {
+                "mcp_server": tool.server_name,
+                "mcp_tool_name": tool.mcp_tool_name,
+            }
+        )
         if tool.default_args:
             metadata["default_args"] = tool.default_args
         if tool.output_schema:

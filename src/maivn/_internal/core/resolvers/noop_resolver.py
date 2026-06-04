@@ -1,14 +1,14 @@
+# pyright: strict
 """No-op scope resolver.
 Default resolver that returns dependencies unchanged.
 """
 
 from __future__ import annotations
 
-from typing import Any
-
 from maivn_shared import BaseDependency
+from typing_extensions import override
 
-from maivn._internal.core.interfaces.resolvers import ScopeResolverInterface
+from ..interfaces.resolvers import ScopeResolverInterface
 
 # MARK: - No-Op Resolver
 
@@ -16,13 +16,15 @@ from maivn._internal.core.interfaces.resolvers import ScopeResolverInterface
 class NoOpScopeResolver(ScopeResolverInterface):
     """Resolver that returns dependencies unchanged.
 
-    Useful as a default to keep compile_tools() behavior consistent
-    before wiring a real resolver implementation.
+    Useful as a default to keep state-compilation dependency resolution
+    behavior consistent before wiring a real resolver implementation.
     """
 
-    def set_context(self, *, scope: Any) -> None:
+    @override
+    def set_context(self, *, scope: object) -> None:
         """No context required for no-op behavior."""
 
+    @override
     def resolve(self, dep: BaseDependency) -> BaseDependency:
         """Return the dependency unchanged."""
         return dep

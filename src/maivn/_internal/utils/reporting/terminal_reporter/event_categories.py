@@ -1,9 +1,10 @@
+# pyright: strict
 """Event category configuration and normalization for EventRouterReporter."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .base import BaseReporter
@@ -56,7 +57,7 @@ EVENT_TOKEN_ALIASES: dict[str, set[str]] = {
 
 
 def normalize_event_categories(
-    values: Iterable[str] | str | None,
+    values: Iterable[object] | str | None,
 ) -> set[str] | None:
     """Expand user-provided event category tokens into canonical categories."""
     if values is None:
@@ -125,6 +126,19 @@ _ENRICHMENT_KWARG_TOKENS = (
     "scope_type",
     "memory",
     "redaction",
+    "source",
+    "trigger_tool",
+    "target_tool",
+    "reevaluate_count",
+    "collected_count",
+)
+
+_REEVALUATE_KWARGS = (
+    "source",
+    "trigger_tool",
+    "target_tool",
+    "reevaluate_count",
+    "collected_count",
 )
 
 
@@ -144,13 +158,20 @@ def forward_enrichment_with_fallback(
     scope_id: str | None,
     scope_name: str | None,
     scope_type: str | None,
-    memory: dict[str, Any] | None,
-    redaction: dict[str, Any] | None,
+    memory: dict[str, object] | None,
+    redaction: dict[str, object] | None,
+    source: str | None = None,
+    trigger_tool: str | None = None,
+    target_tool: str | None = None,
+    reevaluate_count: int | None = None,
+    collected_count: int | None = None,
 ) -> None:
     """Forward enrichment event with backward-compatible fallback.
 
     Tries the full signature first, then progressively drops newer kwargs
-    if the underlying reporter does not accept them.
+    if the underlying reporter does not accept them. The reevaluate group is
+    dropped first (it's only meaningful for ``reevaluate_accrued`` phases),
+    then redaction, then memory.
     """
     try:
         reporter.report_enrichment(
@@ -161,12 +182,35 @@ def forward_enrichment_with_fallback(
             scope_type=scope_type,
             memory=memory,
             redaction=redaction,
+            source=source,
+            trigger_tool=trigger_tool,
+            target_tool=target_tool,
+            reevaluate_count=reevaluate_count,
+            collected_count=collected_count,
         )
         return
     except TypeError as exc:
         if not _is_enrichment_kwarg_error(exc):
             raise
         error_message = str(exc)
+
+    # Drop the reevaluate group if the reporter doesn't accept it
+    if any(token in error_message for token in _REEVALUATE_KWARGS):
+        try:
+            reporter.report_enrichment(
+                phase=phase,
+                message=message,
+                scope_id=scope_id,
+                scope_name=scope_name,
+                scope_type=scope_type,
+                memory=memory,
+                redaction=redaction,
+            )
+            return
+        except TypeError as legacy_exc:
+            if not _is_enrichment_kwarg_error(legacy_exc):
+                raise
+            error_message = str(legacy_exc)
 
     # Try without redaction
     if "redaction" in error_message:

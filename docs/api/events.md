@@ -2,7 +2,7 @@
 
 Public event contract for streaming SDK execution state into your backend and frontend.
 
-> **Looking for a step-by-step guide with frontend client examples in JavaScript, TypeScript, Swift, Kotlin, Go, Python, Rust, and more?** See [`guides/frontend-events.md`](../guides/frontend-events.md). This page is the API reference; the guide is the recipe book.
+> **Building a frontend?** See the [Frontend Events guide](../guides/frontend-events.md) for a step-by-step walkthrough of streaming events into a web or mobile client, including a browser `EventSource` example. This page is the API reference for the event types and payloads; the guide is the recipe book.
 
 ## Quick Start
 
@@ -52,7 +52,7 @@ async for sse in bridge.generate_sse(last_event_id=request_last_event_id):
     yield sse
 ```
 
-Use the lower-level path when your framework isn't FastAPI (Flask, raw ASGI, aiohttp, Django, …) — see the guide's [Other frameworks](../guides/frontend-events.md#other-frameworks) section.
+Use the lower-level path when your framework isn't FastAPI (Flask, raw ASGI, aiohttp, Django, …) — see the guide's [Sending events to a browser](../guides/frontend-events.md#sending-events-to-a-browser) section.
 
 ## Overview
 
@@ -271,7 +271,7 @@ class HookDescriptor(BaseModel):
     target_name: str | None     # display name of the target card
 ```
 
-Maivn Studio uses this to render the hook's name and status as a
+mAIvn Studio uses this to render the hook's name and status as a
 persistent header (`stage == "before"`) or footer (`stage == "after"`)
 on the matching scope or tool card. Custom frontends can subscribe and
 route events on `event.event_name == "hook_fired"`.
@@ -421,7 +421,7 @@ payload = build_hook_fired_payload(
 
 Frontends consume `hook_fired` events via `normalize_stream()` and route
 them onto the matching scope card (`target_type` is `"agent"` /
-`"swarm"`) or tool card (`target_type == "tool"`). Maivn Studio renders
+`"swarm"`) or tool card (`target_type == "tool"`). mAIvn Studio renders
 the firing as a persistent header (`stage == "before"`) or footer
 (`stage == "after"`).
 
@@ -489,7 +489,7 @@ async def stream(session_id: str, last_event_id: str | None = None):
     return EventSourceResponse(bridge.generate_sse(last_event_id=last_event_id))
 ```
 
-For multi-turn sessions, reconnect the SSE when sending a follow-up message and pass the last seen event ID. Between turns the HTTP connection may go stale (browser timeouts, proxy drops). See the [frontend events guide](../guides/frontend-events.md) for complete frontend integration examples in JavaScript, TypeScript, Swift, Kotlin, Go, Python, Rust, .NET, and more.
+For multi-turn sessions, reconnect the SSE when sending a follow-up message and pass the last seen event ID. Between turns the HTTP connection may go stale (browser timeouts, proxy drops). See the [frontend events guide](../guides/frontend-events.md) for the full frontend integration walkthrough.
 
 Internally, the bridge also deduplicates events that exist in both the history buffer and the live queue during history replay.
 
@@ -508,3 +508,5 @@ APP_EVENT_CONTRACT_VERSION == "v1"
 ```
 
 The payloads intentionally preserve legacy flat fields alongside the normalized nested descriptors so existing consumers can migrate incrementally.
+
+See [Versioning & Stability](../versioning.md) for how the contract version evolves additively, when its value bumps, and how to branch on `contract_version` across independently deployed consumers.

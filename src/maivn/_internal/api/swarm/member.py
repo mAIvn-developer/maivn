@@ -1,9 +1,10 @@
 """Swarm member registration builder."""
 
+# pyright: strict
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Protocol, TypeAlias, TypeGuard, cast
 
 from maivn_shared import AgentDependency, BaseDependency, DataDependency
 from maivn_shared.domain.entities.dependencies import (
@@ -30,8 +31,24 @@ from maivn._internal.utils.decorators import (
 )
 
 if TYPE_CHECKING:
-    from ..agent import Agent
-    from .swarm import Swarm
+    from ..agent.agent import Agent
+
+    TeamControlReference: TypeAlias = str | BaseTool | Callable[..., object] | Agent
+else:
+    TeamControlReference: TypeAlias = str | BaseTool | Callable[..., object]
+
+ToolReference: TypeAlias = str | BaseTool | Callable[..., object]
+
+
+# MARK: Types
+
+
+class _ModelDumpable(Protocol):
+    def model_dump(self, *, mode: str = "python") -> object: ...
+
+
+class _SwarmMemberScope(Protocol):
+    def add_agent(self, agent: Agent) -> None: ...
 
 
 # MARK: Member Builder
@@ -42,8 +59,8 @@ class SwarmMemberDecoratorBuilder:
 
     # MARK: - Initialization
 
-    def __init__(self, swarm: Swarm) -> None:
-        self._swarm = swarm
+    def __init__(self, swarm: _SwarmMemberScope) -> None:
+        self._swarm: _SwarmMemberScope = swarm
         self._dependencies: list[BaseDependency] = []
         self._execution_controls: list[AwaitForDependency | ReevaluateDependency] = []
 
@@ -51,29 +68,29 @@ class SwarmMemberDecoratorBuilder:
 
     def depends_on_tool(
         self,
-        tool_ref: str | BaseTool | Callable[..., Any],
+        tool_ref: str | BaseTool | Callable[..., object],
         arg_name: str,
     ) -> SwarmMemberDecoratorBuilder:
-        depends_on_tool(tool_ref=tool_ref, arg_name=arg_name)(self)
+        _ = depends_on_tool(tool_ref=tool_ref, arg_name=arg_name)(self)
         return self
 
     def depends_on_agent(
         self,
-        agent_ref: str | Any,
+        agent_ref: str | Agent,
         arg_name: str,
     ) -> SwarmMemberDecoratorBuilder:
-        depends_on_agent(agent_ref=agent_ref, arg_name=arg_name)(self)
+        _ = depends_on_agent(agent_ref=agent_ref, arg_name=arg_name)(self)
         return self
 
     def depends_on_await_for(
         self,
-        ref: str | BaseTool | Callable[..., Any] | Any,
+        ref: TeamControlReference,
         *,
         timing: ExecutionTiming = "after",
         instance_control: ExecutionInstanceControl = "each",
     ) -> SwarmMemberDecoratorBuilder:
-        depends_on_await_for(
-            tool_ref=ref,
+        _ = depends_on_await_for(
+            tool_ref=cast(ToolReference, ref),
             timing=timing,
             instance_control=instance_control,
         )(self)
@@ -81,13 +98,13 @@ class SwarmMemberDecoratorBuilder:
 
     def depends_on_reevaluate(
         self,
-        ref: str | BaseTool | Callable[..., Any] | Any,
+        ref: TeamControlReference,
         *,
         timing: ExecutionTiming = "after",
         instance_control: ExecutionInstanceControl = "each",
     ) -> SwarmMemberDecoratorBuilder:
-        depends_on_reevaluate(
-            tool_ref=ref,
+        _ = depends_on_reevaluate(
+            tool_ref=cast(ToolReference, ref),
             timing=timing,
             instance_control=instance_control,
         )(self)
@@ -96,12 +113,12 @@ class SwarmMemberDecoratorBuilder:
     def depends_on_interrupt(
         self,
         arg_name: str,
-        input_handler: Callable[[str], Any],
+        input_handler: Callable[[str], object],
         prompt: str = "",
         input_type: InputType | None = None,
         choices: list[str] | None = None,
     ) -> SwarmMemberDecoratorBuilder:
-        depends_on_interrupt(
+        _ = depends_on_interrupt(
             arg_name=arg_name,
             input_handler=input_handler,
             prompt=prompt,
@@ -128,14 +145,14 @@ class SwarmMemberDecoratorBuilder:
 
     # MARK: - Private Helpers
 
-    def _resolve_agent(self, obj: Agent | Callable[..., Agent]) -> Agent:
-        from ..agent import Agent
+    def _resolve_agent(self, obj: object) -> Agent:
+        from ..agent.agent import Agent
 
         if isinstance(obj, Agent):
             return obj
 
         if callable(obj):
-            agent = obj()
+            agent = cast(Callable[[], object], obj)()
             if isinstance(agent, Agent):
                 return agent
 
@@ -146,8 +163,8 @@ class SwarmMemberDecoratorBuilder:
         if isinstance(dependency, DataDependency):
             raise ValueError(
                 "depends_on_private_data is not supported for Swarm member agents. "
-                "Use depends_on_private_data on a Swarm-level tool, then make the agent "
-                "depend on that tool."
+                + "Use depends_on_private_data on a Swarm-level tool, then make the agent "
+                + "depend on that tool."
             )
         if not _contains_model(self._dependencies, dependency):
             self._dependencies.append(dependency)
@@ -160,15 +177,23 @@ class SwarmMemberDecoratorBuilder:
         if not _contains_model(self._execution_controls, control):
             self._execution_controls.append(control)
 
-    def _resolve_team_control_reference(self, ref: Any) -> tuple[str, str]:
-        return resolve_team_control_reference(self._swarm, ref)
+    def _resolve_team_control_reference(self, ref: object) -> tuple[str, str]:
+        resolver = cast(
+            Callable[[object, object], tuple[str, str]],
+            resolve_team_control_reference,
+        )
+        return resolver(self._swarm, ref)
 
-    def _apply_pending_metadata(self, obj: Any, agent: Agent) -> None:
-        for dependency in list(getattr(obj, "_dependencies", []) or []):
-            add_team_dependency(agent, dependency)
+    def _apply_pending_metadata(self, obj: object, agent: Agent) -> None:
+        pending_dependencies = cast(list[object], getattr(obj, "_dependencies", []) or [])
+        for dependency in list(pending_dependencies):
+            if isinstance(dependency, BaseDependency):
+                add_team_dependency(agent, dependency)
 
-        controls = list(getattr(obj, "__maivn_execution_controls__", []) or [])
-        controls.extend(getattr(obj, "__maivn_pending_execution_controls__", []) or [])
+        controls = list(cast(list[object], getattr(obj, "__maivn_execution_controls__", []) or []))
+        controls.extend(
+            cast(list[object], getattr(obj, "__maivn_pending_execution_controls__", []) or [])
+        )
         for control in controls:
             if isinstance(control, AwaitForDependency | ReevaluateDependency):
                 add_team_execution_control(agent, control)
@@ -186,14 +211,18 @@ class SwarmMemberDecoratorBuilder:
                 raise ValueError("Swarm member agents cannot depend_on_agent themselves.")
 
 
-def _contains_model(items: list[Any], candidate: Any) -> bool:
-    if not hasattr(candidate, "model_dump"):
+def _contains_model(items: Sequence[object], candidate: object) -> bool:
+    if not _is_model_dumpable(candidate):
         return candidate in items
     candidate_payload = candidate.model_dump(mode="json")
     for item in items:
-        if hasattr(item, "model_dump") and item.model_dump(mode="json") == candidate_payload:
+        if _is_model_dumpable(item) and item.model_dump(mode="json") == candidate_payload:
             return True
     return False
+
+
+def _is_model_dumpable(value: object) -> TypeGuard[_ModelDumpable]:
+    return callable(getattr(value, "model_dump", None))
 
 
 __all__ = ["SwarmMemberDecoratorBuilder"]

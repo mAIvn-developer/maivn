@@ -1,8 +1,10 @@
 """Redaction preview support for BaseScope."""
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Protocol, cast
 
 from maivn_shared import (
     REDACTION_PREVIEWED_ENRICHMENT_PHASE,
@@ -11,26 +13,39 @@ from maivn_shared import (
     RedactionPreviewRequest,
     RedactionPreviewResponse,
 )
+from pydantic import JsonValue
 
 from maivn._internal.utils.reporting import get_current_reporter
+
+# MARK: Types
+
+
+class _RedactionClient(Protocol):
+    def preview_redaction(
+        self,
+        *,
+        payload: RedactionPreviewRequest,
+    ) -> RedactionPreviewResponse: ...
+
 
 # MARK: Redaction Preview
 
 
 def preview_redaction(
-    scope: Any,
-    message: RedactedMessage,
+    scope: object,
+    message: object,
     *,
     known_pii_values: list[str | PrivateData] | None = None,
-    private_data: dict[str, Any] | None = None,
+    private_data: dict[str, object] | None = None,
 ) -> RedactionPreviewResponse:
     """Execute a redaction preview against the server."""
-    if not isinstance(message, RedactedMessage):
+    message_obj: object = message
+    if not isinstance(message_obj, RedactedMessage):
         raise TypeError("preview_redaction requires a RedactedMessage")
 
     client = _resolve_client(scope)
     request = RedactionPreviewRequest(
-        message=message,
+        message=message_obj,
         private_data=_resolve_private_data(scope, private_data),
         known_pii_values=known_pii_values,
     )
@@ -42,11 +57,11 @@ def preview_redaction(
 # MARK: Client Resolution
 
 
-def _resolve_client(scope: Any) -> Any:
+def _resolve_client(scope: object) -> _RedactionClient:
     """Resolve a Client instance from the scope or its agents."""
     client = getattr(scope, "client", None)
     if client is not None:
-        return client
+        return cast(_RedactionClient, client)
 
     api_key = getattr(scope, "api_key", None)
     if isinstance(api_key, str) and api_key.strip():
@@ -54,25 +69,26 @@ def _resolve_client(scope: Any) -> Any:
 
         resolved_client = Client(api_key=api_key)
         if hasattr(scope, "client"):
-            scope.client = resolved_client
-        return resolved_client
+            setattr(scope, "client", resolved_client)  # noqa: B010 - Pydantic field.
+        return cast(_RedactionClient, resolved_client)
 
-    for agent in getattr(scope, "agents", []) or []:
+    agents = getattr(scope, "agents", []) or []
+    for agent in cast(Sequence[object], agents):
         client = getattr(agent, "client", None)
         if client is not None:
-            return client
+            return cast(_RedactionClient, client)
         api_key = getattr(agent, "api_key", None)
         if isinstance(api_key, str) and api_key.strip():
             from ..client import Client
 
             resolved_client = Client(api_key=api_key)
             if hasattr(agent, "client"):
-                agent.client = resolved_client
-            return resolved_client
+                setattr(agent, "client", resolved_client)  # noqa: B010 - Pydantic field.
+            return cast(_RedactionClient, resolved_client)
 
     raise ValueError(
         "preview_redaction requires a configured Client or api_key "
-        "on the Agent or Swarm entry agent"
+        + "on the Agent or Swarm entry agent"
     )
 
 
@@ -80,18 +96,20 @@ def _resolve_client(scope: Any) -> Any:
 
 
 def _resolve_private_data(
-    scope: Any,
-    private_data: dict[str, Any] | None,
-) -> dict[str, Any] | None:
+    scope: object,
+    private_data: object,
+) -> dict[str, JsonValue] | None:
     """Merge scope-level and call-level private data."""
-    if private_data is not None and not isinstance(private_data, dict):
+    private_data_obj: object = private_data
+    if private_data_obj is not None and not isinstance(private_data_obj, dict):
         raise TypeError("private_data must be a dictionary or None")
 
-    merged: dict[str, Any] = {}
-    if isinstance(scope.private_data, dict):
-        merged.update(scope.private_data)
-    if isinstance(private_data, dict):
-        merged.update(private_data)
+    merged: dict[str, JsonValue] = {}
+    scope_private_data = getattr(scope, "private_data", None)
+    if isinstance(scope_private_data, dict):
+        merged.update(cast(Mapping[str, JsonValue], scope_private_data))
+    if isinstance(private_data_obj, dict):
+        merged.update(cast(Mapping[str, JsonValue], private_data_obj))
     return merged or None
 
 
@@ -99,7 +117,7 @@ def _resolve_private_data(
 
 
 def _emit_enrichment(
-    scope: Any,
+    scope: object,
     response: RedactionPreviewResponse,
 ) -> None:
     """Report redaction preview results to the current reporter."""
@@ -111,8 +129,8 @@ def _emit_enrichment(
         reporter.report_enrichment(
             phase=REDACTION_PREVIEWED_ENRICHMENT_PHASE,
             message="Redaction preview completed.",
-            scope_id=scope.id,
-            scope_name=scope.name,
+            scope_id=str(getattr(scope, "id", "")),
+            scope_name=cast(str | None, getattr(scope, "name", None)),
             scope_type="swarm" if hasattr(scope, "agents") else "agent",
             redaction={
                 "inserted_keys": list(response.inserted_keys),

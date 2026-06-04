@@ -1,14 +1,15 @@
 """Execution flow for AgentOrchestrator (invoke and stream)."""
 
+# pyright: strict
 from __future__ import annotations
 
 import queue
 import threading
 from collections.abc import Callable, Iterator
-from typing import TYPE_CHECKING, Any, cast
+from typing import Literal, Protocol, TypeAlias, cast
 
-from maivn_shared import SessionExecutionConfig, SessionResponse
-from pydantic import ValidationError
+from maivn_shared import SessionExecutionConfig, SessionRequest, SessionResponse
+from pydantic import JsonValue, ValidationError
 
 from maivn._internal.core import SessionEndpoints, SSEEvent
 from maivn._internal.utils.reporting.terminal_reporter import BaseReporter
@@ -18,16 +19,64 @@ from .helpers import (
     sanitize_user_facing_error_message,
 )
 
-if TYPE_CHECKING:
-    from .core import AgentOrchestrator
+# MARK: Types
+
+JsonObject: TypeAlias = dict[str, JsonValue]
+ProgressTask: TypeAlias = object
+DeliveryMode: TypeAlias = Literal["invoke", "stream"]
+
+
+class _AgentForExecution(Protocol):
+    @property
+    def name(self) -> str | None: ...
+
+    @property
+    def description(self) -> str | None: ...
+
+    @property
+    def timeout(self) -> float | None: ...
+
+
+class _OrchestratorForExecution(Protocol):
+    @property
+    def agent(self) -> _AgentForExecution: ...
+
+    @property
+    def timeout(self) -> float: ...
+
+    def set_execution_reporter(self, reporter: BaseReporter | None) -> None: ...
+
+    def set_execution_state(self, state: SessionRequest, thread_id: str | None) -> None: ...
+
+    def clear_execution_interrupts(self) -> None: ...
+
+    def start_execution_session(self, state: SessionRequest) -> SessionEndpoints: ...
+
+    def clear_execution_progress_task(self) -> None: ...
+
+    def configure_execution_reporter_hooks(
+        self,
+        *,
+        is_nested: bool,
+        allow_nested_response_stream: bool,
+    ) -> None: ...
+
+    def consume_execution_events(
+        self,
+        endpoints: SessionEndpoints,
+        timeout: float,
+        reporter: BaseReporter | None,
+        progress_task: ProgressTask | None,
+        on_event: Callable[[SSEEvent], None] | None = None,
+    ) -> JsonObject: ...
 
 
 # MARK: Invoke Execution
 
 
 def execute_invoke(
-    orch: AgentOrchestrator,
-    state: Any,
+    orch: _OrchestratorForExecution,
+    state: SessionRequest,
     *,
     thread_id: str | None = None,
     verbose: bool = False,
@@ -48,25 +97,23 @@ def execute_invoke(
         inside_orchestrator.get(),
     )
 
-    orch._reporter = reporter
+    orch.set_execution_reporter(reporter)
     _set_state_delivery_mode(state, "invoke")
     delivery_token = current_sdk_delivery_mode.set("invoke")
     token = current_reporter.set(reporter) if reporter else None
     orch_token = inside_orchestrator.set(True)
 
-    orch._state = state
-    if thread_id is not None:
-        orch._thread_id = thread_id
+    orch.set_execution_state(state, thread_id)
 
-    orch._interrupt_manager.clear_collected_interrupts()
+    orch.clear_execution_interrupts()
 
     if reporter and not is_nested:
         reporter.print_section("Starting Execution")
 
-    endpoints = orch._start_session(state)
+    endpoints = orch.start_execution_session(state)
     resolved_timeout = orch.agent.timeout if orch.agent.timeout is not None else orch.timeout
 
-    final_payload: dict[str, Any] | None = None
+    final_payload: JsonObject | None = None
     try:
         final_payload = _execute_session_with_reporter(
             orch,
@@ -79,6 +126,11 @@ def execute_invoke(
             raise RuntimeError("Received no payload from event stream.")
         response = SessionResponse.model_validate(final_payload)
         _report_completion(reporter, response, is_nested)
+        # Surface server-side errors (e.g. ModelNotAvailableError from the
+        # graph-entry validator) as RuntimeError so callers receive a clear
+        # exception rather than a SessionResponse with result=None.
+        if response.error:
+            raise RuntimeError(response.error)
         return response
     except ValidationError as exc:
         raise RuntimeError(f"Failed to validate final session payload: {final_payload}") from exc
@@ -87,7 +139,7 @@ def execute_invoke(
         current_sdk_delivery_mode.reset(delivery_token)
         if token is not None:
             current_reporter.reset(token)
-        orch._progress_task = None
+        orch.clear_execution_progress_task()
         _ = compilation_elapsed_s
 
 
@@ -95,8 +147,8 @@ def execute_invoke(
 
 
 def execute_stream(
-    orch: AgentOrchestrator,
-    state: Any,
+    orch: _OrchestratorForExecution,
+    state: SessionRequest,
     *,
     thread_id: str | None = None,
     verbose: bool = False,
@@ -116,29 +168,25 @@ def execute_stream(
         inside_orchestrator.get(),
     )
 
-    orch._reporter = reporter
+    orch.set_execution_reporter(reporter)
     _set_state_delivery_mode(state, "stream")
-    orch._state = state
-    if thread_id is not None:
-        orch._thread_id = thread_id
+    orch.set_execution_state(state, thread_id)
 
-    orch._interrupt_manager.clear_collected_interrupts()
+    orch.clear_execution_interrupts()
 
     if reporter and not is_nested:
         reporter.print_section("Starting Execution")
 
-    endpoints = orch._start_session(state)
+    endpoints = orch.start_execution_session(state)
     resolved_timeout = orch.agent.timeout if orch.agent.timeout is not None else orch.timeout
 
-    stream_queue: queue.Queue[SSEEvent | object] = queue.Queue()
+    stream_queue: queue.Queue[SSEEvent | BaseException | object] = queue.Queue()
     stream_done = object()
-    stream_error: BaseException | None = None
 
     def _on_event(event: SSEEvent) -> None:
         stream_queue.put(event)
 
     def _run_stream() -> None:
-        nonlocal stream_error
         token = None
         delivery_token = None
         orch_token = None
@@ -163,8 +211,8 @@ def execute_stream(
 
             response = SessionResponse.model_validate(final_payload)
             _report_completion(reporter, response, is_nested)
-        except BaseException as exc:  # noqa: BLE001
-            stream_error = exc
+        except BaseException as exc:  # noqa: BLE001 - propagate worker failures through iterator
+            stream_queue.put(exc)
         finally:
             if orch_token is not None:
                 inside_orchestrator.reset(orch_token)
@@ -174,7 +222,7 @@ def execute_stream(
                 from maivn._internal.utils.reporting.context import current_reporter
 
                 current_reporter.reset(token)
-            orch._progress_task = None
+            orch.clear_execution_progress_task()
             stream_queue.put(stream_done)
 
     worker = threading.Thread(target=_run_stream, name="maivn-orchestrator-stream", daemon=True)
@@ -185,19 +233,19 @@ def execute_stream(
             queued_item = stream_queue.get()
             if queued_item is stream_done:
                 break
+            if isinstance(queued_item, BaseException):
+                raise queued_item
             yield cast(SSEEvent, queued_item)
     finally:
         worker.join()
         _ = compilation_elapsed_s
-        if stream_error is not None:
-            raise stream_error
 
 
 # MARK: Reporter Resolution
 
 
 def _resolve_reporter(
-    orch: AgentOrchestrator,
+    orch: _OrchestratorForExecution,
     verbose: bool,
     parent_reporter: BaseReporter | None,
     already_inside: bool,
@@ -232,23 +280,24 @@ def _resolve_reporter(
 
 
 def _execute_session_with_reporter(
-    orch: AgentOrchestrator,
+    orch: _OrchestratorForExecution,
     endpoints: SessionEndpoints,
     timeout: float,
     reporter: BaseReporter | None,
     is_nested: bool,
     on_event: Callable[[SSEEvent], None] | None = None,
-) -> dict[str, Any] | None:
+) -> JsonObject | None:
     """Execute session and consume events, managing progress context."""
     from maivn._internal.utils.reporting.context import allow_nested_response_stream
 
-    orch._reporter_hooks._is_nested = is_nested
-    orch._reporter_hooks._allow_nested_response_stream = allow_nested_response_stream.get()
+    orch.configure_execution_reporter_hooks(
+        is_nested=is_nested,
+        allow_nested_response_stream=allow_nested_response_stream.get(),
+    )
 
     if reporter and not is_nested:
         with reporter.live_progress("Processing events...") as task:
-            orch._progress_task = task
-            return orch._event_coordinator.consume_events(
+            return orch.consume_execution_events(
                 endpoints,
                 timeout,
                 reporter,
@@ -256,7 +305,7 @@ def _execute_session_with_reporter(
                 on_event=on_event,
             )
 
-    return orch._event_coordinator.consume_events(
+    return orch.consume_execution_events(
         endpoints,
         timeout,
         reporter,
@@ -300,21 +349,16 @@ def _report_error(reporter: BaseReporter, response: SessionResponse) -> None:
         )
 
     safe_message = sanitize_user_facing_error_message(error_message)
-    session_suffix = (
-        f" (Session ID: {response.session_id})" if getattr(response, "session_id", None) else ""
-    )
+    session_suffix = f" (Session ID: {response.session_id})" if response.session_id else ""
     error_display = (
         f"Agent execution failed: {safe_message}{session_suffix}. Contact support if this persists."
     )
     reporter.print_event("error", error_display)
 
 
-def _set_state_delivery_mode(state: Any, delivery_mode: str) -> None:
+def _set_state_delivery_mode(state: SessionRequest, delivery_mode: DeliveryMode) -> None:
     """Persist the SDK delivery mode in typed execution config for server routing."""
-    if not hasattr(state, "execution_config"):
-        return
-
-    execution_config = getattr(state, "execution_config", None)
+    execution_config = state.execution_config
     if isinstance(execution_config, SessionExecutionConfig):
         state.execution_config = execution_config.model_copy(
             update={"sdk_delivery_mode": delivery_mode}

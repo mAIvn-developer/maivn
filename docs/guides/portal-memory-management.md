@@ -1,6 +1,8 @@
 # Portal Memory Management
 
-This guide covers memory operations in the mAIvn Developer Portal.
+As your agents run, they accumulate memory: things they have learned, reusable procedures, and supporting documents. The Developer Portal is where you govern and curate all of that from a web UI: setting how much gets kept, cleaning up what is stale, and promoting the most valuable lessons so more of your agents can benefit.
+
+This guide covers those memory operations in the mAIvn Developer Portal.
 
 ## Scope
 
@@ -32,7 +34,7 @@ Controls:
   - vector retention days
   - graph retention days
 
-These controls set server-side ceilings.
+These controls set ceilings enforced by the mAIvn service at runtime.
 SDK `memory_config` can only request equal or lower behavior than the org ceiling.
 
 ## Organization Memory Purge

@@ -1,17 +1,19 @@
 """Shared SSE event processing utilities for orchestrators."""
 
+# pyright: strict
 from __future__ import annotations
 
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Any
+from typing import ClassVar
 
 from maivn_shared import (
     ASSIGNMENT_COMPLETED_EVENT_NAME,
     ASSIGNMENT_RECEIVED_EVENT_NAME,
 )
 from maivn_shared.infrastructure.logging import LoggerProtocol
+from pydantic import JsonValue
 
 from maivn._internal.core import SSEEvent, ToolEventPayload, ToolEventValue
 from maivn._internal.utils.logging import get_optional_logger
@@ -19,6 +21,7 @@ from maivn._internal.utils.logging import get_optional_logger
 from .event_handlers import (
     EVENT_HANDLER_MAP,
     EventProcessingState,
+    JsonObject,
     handle_heartbeat,
     handle_interrupt_request,
     handle_interrupt_required,
@@ -48,7 +51,7 @@ class EventStreamHandlers:
     reducing parameter count and improving API clarity.
     """
 
-    coerce_payload: Callable[[Any], dict[str, Any]]
+    coerce_payload: Callable[[JsonValue], JsonObject]
     """Coerce event payload to dictionary."""
 
     process_tool_requests: Callable[[dict[str, ToolEventPayload], str], None]
@@ -57,40 +60,40 @@ class EventStreamHandlers:
     process_tool_batch: Callable[[str, ToolEventValue, str], None]
     """Process a batch of tool calls."""
 
-    submit_tool_call: Callable[[str, dict[str, Any], str], None]
+    submit_tool_call: Callable[[str, JsonObject, str], None]
     """Submit a single tool call for execution."""
 
     acknowledge_barrier: Callable[[str, str], None]
     """Acknowledge a barrier event."""
 
-    handle_user_input_request: Callable[[str, dict[str, Any], str], None] | None = None
+    handle_user_input_request: Callable[[str, JsonObject, str], None] | None = None
     """Optional handler for user input requests (legacy interrupt_request)."""
 
-    handle_interrupt_required: Callable[[dict[str, Any], str], None] | None = None
+    handle_interrupt_required: Callable[[JsonObject, str], None] | None = None
     """Optional handler for new checkpoint-based interrupts."""
 
-    handle_model_tool_complete: Callable[[dict[str, Any]], None] | None = None
+    handle_model_tool_complete: Callable[[JsonObject], None] | None = None
     """Optional handler for MODEL tool execution completion notifications."""
 
-    handle_system_tool_start: Callable[[dict[str, Any]], None] | None = None
+    handle_system_tool_start: Callable[[JsonObject], None] | None = None
     """Optional handler for system tool start payload."""
 
-    handle_system_tool_chunk: Callable[[dict[str, Any]], None] | None = None
+    handle_system_tool_chunk: Callable[[JsonObject], None] | None = None
     """Optional handler for system tool streaming chunk (progress update)."""
 
-    handle_system_tool_complete: Callable[[dict[str, Any]], None] | None = None
+    handle_system_tool_complete: Callable[[JsonObject], None] | None = None
     """Optional handler for system tool completion payload."""
 
-    handle_system_tool_error: Callable[[dict[str, Any]], None] | None = None
+    handle_system_tool_error: Callable[[JsonObject], None] | None = None
     """Optional handler for system tool error payload."""
 
-    handle_action_update: Callable[[dict[str, Any]], None] | None = None
+    handle_action_update: Callable[[JsonObject], None] | None = None
     """Optional handler for action lifecycle update events."""
 
-    handle_status_message: Callable[[dict[str, Any]], None] | None = None
+    handle_status_message: Callable[[JsonObject], None] | None = None
     """Optional handler for standalone status messages (swarm lifecycle milestones)."""
 
-    handle_enrichment: Callable[[dict[str, Any]], None] | None = None
+    handle_enrichment: Callable[[JsonObject], None] | None = None
     """Optional handler for enrichment phase change events."""
 
 
@@ -104,7 +107,9 @@ class EventStreamProcessor:
     on every event, improving performance for high-volume event streams.
     """
 
-    _IGNORED_EVENTS = frozenset({ASSIGNMENT_RECEIVED_EVENT_NAME, ASSIGNMENT_COMPLETED_EVENT_NAME})
+    _IGNORED_EVENTS: ClassVar[frozenset[str]] = frozenset(
+        {ASSIGNMENT_RECEIVED_EVENT_NAME, ASSIGNMENT_COMPLETED_EVENT_NAME}
+    )
 
     def __init__(
         self, *, logger: LoggerProtocol | None = None, pending_event_timeout_s: float
@@ -116,7 +121,7 @@ class EventStreamProcessor:
             pending_event_timeout_s: Timeout for pending events before forced processing
         """
         self._logger: LoggerProtocol = logger or get_optional_logger()
-        self._pending_event_timeout_s = pending_event_timeout_s
+        self._pending_event_timeout_s: float = pending_event_timeout_s
 
     # MARK: - Public API
 
@@ -127,7 +132,7 @@ class EventStreamProcessor:
         resume_url: str,
         handlers: EventStreamHandlers,
         on_event: Callable[[SSEEvent], None] | None = None,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         """Consume events until a final payload is observed.
 
         Args:
@@ -146,7 +151,7 @@ class EventStreamProcessor:
             if on_event is not None:
                 try:
                     on_event(event)
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001 - observer callbacks are best-effort
                     self._logger.warning("Ignoring stream observer callback failure: %s", exc)
             self._log_first_event(event, t_start, state)
 
@@ -310,7 +315,7 @@ class EventStreamProcessor:
             )
             handlers.process_tool_requests(pending_tool_events, resume_url)
 
-    def _validate_final_payload(self, final_payload: dict[str, Any] | None) -> dict[str, Any]:
+    def _validate_final_payload(self, final_payload: JsonObject | None) -> JsonObject:
         """Validate and return the final payload.
 
         Args:

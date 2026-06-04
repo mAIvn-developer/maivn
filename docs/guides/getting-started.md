@@ -1,6 +1,12 @@
-# Getting Started
+# Quickstart
 
-This guide walks you through creating your first maivn agent with tools.
+By the end of this guide you'll have a running maivn agent: it takes a plain-English question, decides on its own to call a tool you wrote, and hands you back both a readable answer and a typed, structured result your code can rely on. No servers to wire up by hand and no prompt-engineering rabbit holes — just a few lines of Python.
+
+## What You'll Build
+
+You'll create an agent, give it a `get_weather` tool, ask it a question in natural language, and read the response. Then you'll layer on two things production apps want: a guaranteed typed result (so you can `report.temperature` instead of parsing text) and live progress events (so a UI can show what the agent is doing while it works).
+
+The agent does the deciding. You describe what each tool does; the agent figures out when to call it and how to combine the results into an answer.
 
 ## Prerequisites
 
@@ -92,7 +98,7 @@ agent = Agent(
 agent.add_tool(get_weather)
 ```
 
-**Note:** Your tool code executes locally in your environment - it is never transferred to or executed on maivn servers. Only the tool schema (name, description, parameters) is sent to the server for orchestration.
+**Note:** Your tool code executes locally in your environment - it is never transferred to or executed on mAIvn's servers. Only the tool schema (name, description, parameters) is sent to the hosted orchestrator.
 
 ## Step 4: Invoke the Agent
 
@@ -104,6 +110,8 @@ response = agent.invoke([
 
 print(response.response)
 ```
+
+`response.response` holds the final assistant text — the natural-language answer the agent produced after deciding whether to call your tool.
 
 ## Complete Example
 
@@ -137,7 +145,7 @@ print(response.response)
 
 ## Step 5: Add Structured Output
 
-For predictable, typed responses, use a Pydantic model as a final tool:
+When your code needs to act on the answer — not just print it — you want a guaranteed shape, not prose to parse. Mark a Pydantic model as a final tool and the agent will fill it in:
 
 ```python
 from pydantic import BaseModel, Field
@@ -155,13 +163,18 @@ response = agent.invoke(
     force_final_tool=True,
 )
 
-# Response contains structured data matching WeatherReport
+# response.result is a WeatherReport instance
 print(response.result)
+print(response.result.temperature)
 ```
 
-## Step 6: Inspect Execution Events
+`final_tool=True` designates the Pydantic model as the structured-output tool, and `force_final_tool=True` tells the agent to finish by populating it. The typed value lands on `response.result`, while `response.response` still carries any accompanying text.
 
-For live progress and enrichment/tool events, use the event builder:
+For a deeper look — including the faster `agent.structured_output(MyModel).invoke(...)` builder for one-shot extraction — see the [Structured Output Guide](structured-output.md).
+
+## Step 6: Stream Live Progress
+
+For a responsive UI, you'll want to show what the agent is doing while it works, instead of waiting for the whole turn to finish. The events builder wraps `invoke()` and reports progress as it happens:
 
 ```python
 response = agent.events().invoke(
@@ -169,69 +182,46 @@ response = agent.events().invoke(
 )
 ```
 
-If you are sending execution events to a browser frontend, the easiest path is the FastAPI helper — one line wires `GET /maivn/events/{session_id}` into your app:
+Pass an `on_event` callback to react to each event as it arrives, or filter with `include`/`exclude`:
 
 ```python
-from fastapi import FastAPI
-from maivn.events.fastapi import mount_events, get_event_bridge
+def handle(event: dict) -> None:
+    print(event)
 
-app = FastAPI()
-mount_events(app)  # → GET /maivn/events/{session_id}
-
-@app.post("/start/{session_id}")
-async def start(session_id: str):
-    bridge = get_event_bridge(session_id)
-    await bridge.emit_status_message("orchestrator", "Working...")
-    await bridge.emit_final("Done!")
-    return {"ok": True}
+response = agent.events(on_event=handle).invoke(
+    [HumanMessage(content='What is the weather in Austin?')],
+)
 ```
 
-Install the FastAPI extra:
-
-```bash
-pip install "maivn[fastapi]"
-```
-
-If you build your endpoint by hand (Flask, raw ASGI, aiohttp, …), construct an `EventBridge` directly and pick the audience explicitly:
+If you'd rather pull events yourself, iterate `agent.stream(...)`, which yields events one at a time as the agent executes:
 
 ```python
-from maivn.events import EventBridge
-
-# End-user frontend
-public_bridge = EventBridge("session-1", audience="frontend_safe")
-
-# Internal developer/admin tooling
-internal_bridge = EventBridge("session-1", audience="internal")
+for event in agent.stream([HumanMessage(content='What is the weather in Austin?')]):
+    print(event)
 ```
 
-Use `frontend_safe` for customer-facing browser sessions. Use `internal` for trusted tools such as mAIvn Studio or your own internal debug consoles.
+Between tool calls and the final answer, the agent emits fixed-label phase indicators — things like evaluating the request, planning actions, and synthesizing the response — so a frontend can render a live status indicator without guessing. Status messages are a separate, opt-in channel you can turn on with `agent.stream(..., status_messages=True)`.
 
-Frontend client examples in JavaScript, TypeScript, Swift, Kotlin, Go, Python, Rust, .NET, and more live in the [frontend events guide](frontend-events.md).
+To send these events to a browser frontend, see the [Frontend Events](frontend-events.md) guide, which covers the one-line backend mount and client examples in JavaScript, TypeScript, Swift, Kotlin, Go, Python, Rust, .NET, and more.
 
 ## Built-in Capabilities
 
-The maivn system has several built-in capabilities that don't require custom tools:
+The mAIvn runtime has several built-in capabilities that don't require custom tools:
 
 - **Datetime awareness** - Agents automatically know the current date and time
-- **Web search** - Search for current information (server-side)
-- **Code execution** - Run Python in a sandbox (server-side)
+- **Web search** - Search for current information (runs within the mAIvn runtime)
+- **Code execution** - Run Python in a sandbox (runs within the mAIvn runtime)
 
 See [System Tools Guide](system-tools.md) for details.
 
 ## Next Steps
 
-Now that you have a working agent, explore these topics:
+You now have an agent that calls a tool, returns a typed result, and streams progress. From here, the [Examples](../examples/README.md) tour is the fastest way to see the rest of the SDK in working code. A few core concepts to build on next:
 
-- [Examples](../examples/README.md) - A working tour of the SDK, organized by what you'd want to build
-- [Tools Guide](tools.md) - Learn about different tool types
-- [Dependencies Guide](dependencies.md) - Chain tools together
+- [Core Concepts](../core-concepts.md) - How agents, tools, and responses fit together
+- [Tools Guide](tools.md) - Tool types, schemas, and registration patterns
 - [Structured Output Guide](structured-output.md) - Guaranteed typed responses
-- [Multi-Agent Guide](multi-agent.md) - Coordinate multiple agents
-- [System Tools Guide](system-tools.md) - Built-in server capabilities
-- [Memory and Recall Guide](memory-and-recall.md) - Summarize, retrieve, and index context across turns
-- [mAIvn Studio Guide](maivn-studio.md) - Run apps with UI + API and inspect live event streams
-- [Studio Authoring and Debugging](maivn-studio-authoring-and-debugging.md) - Make apps Studio-ready
-- [Frontend Events](frontend-events.md) - One-line backend mount + frontend client examples in JavaScript, TypeScript, Swift, Kotlin, Go, Python, Rust, .NET, and more
+- [Multi-Agent Guide](multi-agent.md) - Coordinate multiple specialized agents with Swarms
 
 ## Troubleshooting
 
@@ -247,6 +237,6 @@ Check that your tool has a clear description. The LLM uses the description to de
 
 ### Connection errors
 
-Verify the maivn server is running and accessible. Check your network configuration.
+Verify your network can reach the hosted mAIvn orchestrator and that your API key is valid. Check your network configuration and any outbound proxy or firewall rules.
 
 See [Troubleshooting](../troubleshooting.md) for more help.

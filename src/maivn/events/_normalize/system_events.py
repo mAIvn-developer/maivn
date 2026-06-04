@@ -1,15 +1,15 @@
+# pyright: strict
 """System tool normalization handlers."""
 
 from __future__ import annotations
 
 import uuid
-from typing import Any
 
 from ..._internal.utils.reporting.app_event_payloads import (
     build_system_tool_chunk_payload,
     build_tool_event_payload,
 )
-from .._models import NormalizedStreamState
+from .._models import JsonObject, NormalizedStreamState
 from .context import NormalizationOptions
 from .helpers import clean_stream_text, clean_text, coerce_mapping
 
@@ -17,10 +17,10 @@ from .helpers import clean_stream_text, clean_text, coerce_mapping
 
 
 def handle_system_tool_start_event(
-    payload: dict[str, Any],
+    payload: JsonObject,
     state: NormalizedStreamState,
     options: NormalizationOptions,
-) -> list[dict[str, Any]]:
+) -> list[JsonObject]:
     tool_name = clean_text(payload.get("tool_name")) or "system_tool"
     tool_id = (
         clean_text(payload.get("assignment_id"))
@@ -43,10 +43,10 @@ def handle_system_tool_start_event(
 
 
 def handle_system_tool_chunk_event(
-    payload: dict[str, Any],
+    payload: JsonObject,
     _state: NormalizedStreamState,
     _options: NormalizationOptions,
-) -> list[dict[str, Any]]:
+) -> list[JsonObject]:
     tool_id = (
         clean_text(payload.get("assignment_id"))
         or clean_text(payload.get("tool_id"))
@@ -66,10 +66,10 @@ def handle_system_tool_chunk_event(
 
 
 def handle_system_tool_complete_event(
-    payload: dict[str, Any],
+    payload: JsonObject,
     _state: NormalizedStreamState,
     options: NormalizationOptions,
-) -> list[dict[str, Any]]:
+) -> list[JsonObject]:
     tool_name = clean_text(payload.get("tool_name")) or "system_tool"
     tool_id = (
         clean_text(payload.get("assignment_id")) or clean_text(payload.get("tool_id")) or tool_name
@@ -89,10 +89,10 @@ def handle_system_tool_complete_event(
 
 
 def handle_system_tool_error_event(
-    payload: dict[str, Any],
+    payload: JsonObject,
     _state: NormalizedStreamState,
     options: NormalizationOptions,
-) -> list[dict[str, Any]]:
+) -> list[JsonObject]:
     tool_name = clean_text(payload.get("tool_name")) or "system_tool"
     tool_id = (
         clean_text(payload.get("assignment_id")) or clean_text(payload.get("tool_id")) or tool_name

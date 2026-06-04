@@ -1,20 +1,20 @@
 # MCP Integration
 
-The maivn SDK supports [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) servers as external tool providers. This enables integration with a wide ecosystem of MCP-compatible tools.
+The mAIvn SDK supports [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) servers as external tool providers. This enables integration with a wide ecosystem of MCP-compatible tools.
 
 ## Execution Security
 
-**MCP tools execute locally in your environment.** Whether using stdio or HTTP transport, MCP servers run in your environment - code is never transferred to or executed on maivn servers.
+**MCP tools execute locally in your environment.** Whether using stdio or HTTP transport, MCP servers run in your environment - code is never transferred to or executed on mAIvn servers.
 
 - **stdio transport**: Launches a local process on your machine
 - **http transport**: Connects to an HTTP endpoint you control
 
-The maivn server only receives tool schemas and orchestrates which tools to call. All actual tool execution happens locally.
+The mAIvn server only receives tool schemas and orchestrates which tools to call. All actual tool execution happens locally.
 
 ## Import
 
 ```python
-from maivn import MCPAutoSetup, MCPServer, MCPSoftErrorHandling
+from maivn import MCPAutoSetup, MCPServer, MCPSoftErrorHandling, ToolOverride
 ```
 
 ## MCPServer
@@ -41,6 +41,7 @@ MCPServer(
     tool_name_separator: str = '__',
     default_tool_args: dict[str, Any] | None = None,
     tool_defaults: dict[str, dict[str, Any]] | None = None,
+    tool_overrides: dict[str, ToolOverride] | None = None,
     max_calls_per_minute: int | None = None,
     max_calls_per_day: int | None = None,
     request_timeout_seconds: float | None = None,
@@ -73,6 +74,7 @@ MCPServer(
 | `tool_name_separator`     | `str`                          | `'__'`         | Separator between prefix and name                             |
 | `default_tool_args`       | `dict \| None`                 | `None`         | Default args for all tools                                    |
 | `tool_defaults`           | `dict[str, dict] \| None`      | `None`         | Per-tool default arguments                                    |
+| `tool_overrides`          | `dict[str, ToolOverride] \| None` | `None`      | Per-tool registration overrides keyed by raw MCP tool name    |
 | `max_calls_per_minute`    | `int \| None`                  | `None`         | Rate limit (calls/minute)                                     |
 | `max_calls_per_day`       | `int \| None`                  | `None`         | Rate limit (calls/day)                                        |
 | `request_timeout_seconds` | `float \| None`                | `None`         | HTTP timeout override                                         |
@@ -252,7 +254,44 @@ mcp_server = MCPServer(
 )
 ```
 
-Per-tool defaults override global defaults.
+Per-tool defaults override global defaults. Model-supplied arguments still win at
+execution time.
+
+## Tool Overrides
+
+Use `tool_overrides` when a generic MCP tool needs app-specific framing at
+registration time. This uses the same `ToolOverride` shape as
+`agent.add_tool(..., override=...)` and `agent.add_toolset(..., overrides=...)`.
+
+Keys are the raw MCP tool names reported by the server, before maivn applies
+`tool_name_prefix` / `tool_name_separator`. Unknown keys raise `ValueError` so
+typos do not silently create dead configuration.
+
+```python
+from maivn import MCPServer, ToolOverride
+
+mcp_server = MCPServer(
+    name='gmail',
+    transport='http',
+    url='https://mcp.example.com',
+    default_tool_args={'format': 'metadata'},
+    tool_overrides={
+        'search_messages': ToolOverride(
+            name='inbox_search',
+            description='Search recent inbox messages for triage.',
+            tags=['email', 'read'],
+            metadata={'audit_zone': 'mail'},
+            default_args={'max_results': 10},
+            always_execute=False,
+        ),
+    },
+)
+```
+
+`ToolOverride` supports `name`, `description`, `tags`, `metadata`,
+`default_args`, `dependencies`, `always_execute`, `final_tool`,
+`before_execute`, and `after_execute`. Scalar fields replace the MCP-provided
+value; tags/dependencies append; metadata/default args merge.
 
 ## Rate Limiting
 
@@ -384,6 +423,8 @@ agent.close()
 
 ## See Also
 
+- [Connecting MCP Servers](../guides/mcp.md) - Concept guide: the trust boundary, choosing a transport, auth model
+- [MCP Examples](../examples/mcp.md) - Runnable stdio, HTTP, multi-server, and `uvx` setups
 - [Agent](agent.md) - `register_mcp_servers()` method
 - [Tools Guide](../guides/tools.md) - Tool patterns
 - [MCP Specification](https://modelcontextprotocol.io/) - Protocol details

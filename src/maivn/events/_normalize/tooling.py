@@ -1,16 +1,16 @@
+# pyright: strict
 """Tool event normalization helpers."""
 
 from __future__ import annotations
 
-from typing import Any
-
+from .._models import JsonObject
 from .context import NormalizationOptions
 from .helpers import clean_text, coerce_mapping
 
 # MARK: Tool Resolution
 
 
-def extract_tool_identifier(tool_call: dict[str, Any]) -> str:
+def extract_tool_identifier(tool_call: JsonObject) -> str:
     for key in ("tool_id", "id"):
         candidate = clean_text(tool_call.get(key))
         if candidate is not None:
@@ -23,7 +23,7 @@ def extract_tool_identifier(tool_call: dict[str, Any]) -> str:
 
 
 def extract_tool_name(
-    tool_call: dict[str, Any],
+    tool_call: JsonObject,
     tool_id: str,
     options: NormalizationOptions,
 ) -> str:
@@ -51,7 +51,7 @@ def extract_tool_name(
 
 
 def extract_tool_type(
-    tool_call: dict[str, Any],
+    tool_call: JsonObject,
     tool_id: str,
     options: NormalizationOptions,
 ) -> str:
@@ -93,12 +93,12 @@ def extract_tool_scope(
 
 
 def extract_tool_args(
-    tool_call: dict[str, Any],
+    tool_call: JsonObject,
     tool_id: str,
     *,
     tool_type: str,
     options: NormalizationOptions,
-) -> dict[str, Any]:
+) -> JsonObject:
     resolved_args = coerce_mapping(tool_call.get("args"))
     if tool_type != "agent":
         return resolved_args

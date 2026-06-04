@@ -1,3 +1,4 @@
+# pyright: strict
 """Public event contract for streaming SDK execution state into frontends.
 
 Tiered API:
@@ -94,6 +95,8 @@ from ._models import (
     ToolDescriptor,
 )
 from ._normalize import normalize_stream, normalize_stream_event
+
+# MARK: Package API
 
 __all__ = [
     # Tier 1: Stream consumption

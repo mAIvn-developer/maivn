@@ -1,8 +1,10 @@
 """Swarm metadata enrichment and agent roster building."""
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from collections.abc import Sequence
+from typing import Literal, Protocol, TypeAlias, cast
 
 from maivn_shared import (
     AgentDependency,
@@ -15,27 +17,67 @@ from maivn_shared import (
     create_uuid,
 )
 
-if TYPE_CHECKING:
-    from ..agent import Agent
-    from .swarm import Swarm
+from maivn._internal.core.entities.tools import BaseTool
+
+# MARK: Types
+
+ConfigOverride: TypeAlias = dict[str, object]
+
+
+class AgentLike(Protocol):
+    @property
+    def id(self) -> str: ...
+
+    name: str | None
+    description: str | None
+    use_as_final_output: bool
+    included_nested_synthesis: bool | Literal["auto"]
+
+    def list_tools(self) -> list[BaseTool]: ...
+
+    def resolve_memory_config(self, override: object = None) -> MemoryConfig | None: ...
+
+    def build_memory_asset_payloads(
+        self,
+        *,
+        default_agent_id: str | None = None,
+        default_swarm_id: str | None = None,
+    ) -> tuple[list[dict[str, object]], list[dict[str, object]]]: ...
+
+
+class SwarmLike(Protocol):
+    @property
+    def id(self) -> str: ...
+
+    name: str | None
+    description: str | None
+    system_prompt: str | SystemMessage | None
+    agents: Sequence[AgentLike]
+
+    def list_tools(self) -> list[BaseTool]: ...
+
+    def resolve_memory_config(self, override: object = None) -> MemoryConfig | None: ...
+
+    def build_memory_asset_payloads(
+        self,
+        *,
+        default_agent_id: str | None = None,
+        default_swarm_id: str | None = None,
+    ) -> tuple[list[dict[str, object]], list[dict[str, object]]]: ...
 
 
 # MARK: State Metadata Enrichment
 
 
 def enrich_state_metadata(
-    swarm: Swarm,
+    swarm: SwarmLike,
     state: SessionRequest,
     *,
-    memory_config: MemoryConfig | dict[str, Any] | None = None,
+    memory_config: MemoryConfig | ConfigOverride | None = None,
 ) -> None:
     """Enrich state with typed swarm and memory asset configuration."""
     invocation_tool_map = build_invocation_tool_map(swarm)
-    agent_id_to_name = {
-        getattr(agent, "id", ""): getattr(agent, "name", "")
-        for agent in swarm.agents
-        if getattr(agent, "id", None) and getattr(agent, "name", None)
-    }
+    agent_id_to_name = {agent.id: agent.name for agent in swarm.agents if agent.id and agent.name}
     roster: list[SwarmAgentConfig] = [
         build_agent_roster_entry(
             swarm, agent, invocation_tool_map, agent_id_to_name=agent_id_to_name
@@ -61,16 +103,17 @@ def enrich_state_metadata(
     )
 
 
-def _swarm_has_final_tool(swarm: Swarm) -> bool:
+def _swarm_has_final_tool(swarm: SwarmLike) -> bool:
     """True when any swarm-scope tool is marked ``final_tool=True``."""
-    return any(bool(getattr(tool, "final_tool", False)) for tool in swarm.list_tools())
+    return any(tool.final_tool for tool in swarm.list_tools())
 
 
-def _resolve_system_prompt(swarm: Swarm) -> str | None:
+def _resolve_system_prompt(swarm: SwarmLike) -> str | None:
     """Return the swarm system prompt text if present."""
-    system_prompt = getattr(swarm, "system_prompt", None)
+    system_prompt = swarm.system_prompt
     if isinstance(system_prompt, SystemMessage):
-        return system_prompt.content if isinstance(system_prompt.content, str) else None
+        content = cast(object, system_prompt.content)
+        return content if isinstance(content, str) else None
     if isinstance(system_prompt, str) and system_prompt.strip():
         return system_prompt
     return None
@@ -79,7 +122,7 @@ def _resolve_system_prompt(swarm: Swarm) -> str | None:
 # MARK: Config Helpers
 
 
-def _apply_swarm_memory_assets_config(swarm: Swarm, state: SessionRequest) -> None:
+def _apply_swarm_memory_assets_config(swarm: SwarmLike, state: SessionRequest) -> None:
     skills, resources = swarm.build_memory_asset_payloads(default_swarm_id=swarm.id)
     existing = (
         state.memory_assets_config
@@ -101,33 +144,33 @@ def _apply_swarm_memory_assets_config(swarm: Swarm, state: SessionRequest) -> No
 # MARK: Agent Roster
 
 
-def build_invocation_tool_map(swarm: Swarm) -> dict[str, str]:
+def build_invocation_tool_map(swarm: SwarmLike) -> dict[str, str]:
     """Build mapping of agent IDs to invocation tool IDs."""
     tool_map: dict[str, str] = {}
     for agent in swarm.agents:
-        agent_id = getattr(agent, "id", None)
+        agent_id = agent.id
         if agent_id:
             tool_map[agent_id] = create_uuid(f"agent_invoke_{agent_id}")
     return tool_map
 
 
 def build_agent_roster_entry(
-    swarm: Swarm,
-    agent: Agent,
+    swarm: SwarmLike,
+    agent: AgentLike,
     invocation_tool_map: dict[str, str],
     *,
     agent_id_to_name: dict[str, str],
 ) -> SwarmAgentConfig:
     """Build a roster entry for an agent."""
-    agent_id = getattr(agent, "id", None)
-    agent_name = getattr(agent, "name", None)
-    agent_description = getattr(agent, "description", None)
+    agent_id = agent.id
+    agent_name = agent.name
+    agent_description = agent.description
     tools = agent.list_tools()
     tool_count = len(tools)
 
-    has_final_tool = any(bool(getattr(tool, "final_tool", False)) for tool in tools)
+    has_final_tool = any(tool.final_tool for tool in tools)
     included_nested_synthesis = _normalize_included_nested_synthesis(
-        getattr(agent, "included_nested_synthesis", "auto")
+        agent.included_nested_synthesis
     )
     guidance = _build_included_nested_synthesis_guidance(
         agent=agent,
@@ -139,11 +182,11 @@ def build_agent_roster_entry(
         tools, agent_id_to_name=agent_id_to_name
     )
 
-    roster_entry: dict[str, Any] = {
+    roster_entry: dict[str, object] = {
         "agent_id": agent_id,
         "name": agent_name,
         "description": agent_description,
-        "use_as_final_output": bool(getattr(agent, "use_as_final_output", False)),
+        "use_as_final_output": agent.use_as_final_output,
         "included_nested_synthesis": included_nested_synthesis,
         "included_nested_synthesis_guidance": guidance,
         "has_final_tool": has_final_tool,
@@ -157,7 +200,7 @@ def build_agent_roster_entry(
 
 
 def _collect_agent_dependency_targets(
-    tools: list[Any],
+    tools: list[BaseTool],
     *,
     agent_id_to_name: dict[str, str],
 ) -> list[str]:
@@ -177,11 +220,11 @@ def _collect_agent_dependency_targets(
     targets: list[str] = []
     seen: set[str] = set()
     for tool in tools:
-        deps: Any = getattr(tool, "dependencies", None)
+        deps: list[object] = list(tool.dependencies)
         if not deps:
-            deps = getattr(tool, "_dependencies", None)
+            deps = list(cast(list[object], getattr(tool, "_dependencies", []) or []))
         if not deps:
-            deps = getattr(tool, "__maivn_pending_deps__", None)
+            deps = list(cast(list[object], getattr(tool, "__maivn_pending_deps__", []) or []))
         if not deps:
             continue
         for dep in deps:
@@ -202,46 +245,27 @@ def _collect_agent_dependency_targets(
 
 
 def _apply_agent_memory_config(
-    roster_entry: dict[str, Any],
-    agent: Agent,
+    roster_entry: dict[str, object],
+    agent: AgentLike,
 ) -> None:
     """Expose member agent memory defaults to server-side swarm policy checks."""
-    resolver = getattr(agent, "resolve_memory_config", None)
-    if not callable(resolver):
-        return
-    resolved = resolver(None)
+    resolved = agent.resolve_memory_config(None)
     if isinstance(resolved, MemoryConfig) and resolved.is_configured():
         roster_entry["memory_config"] = resolved.model_dump(exclude_none=True)
 
 
 def _apply_agent_memory_assets(
-    roster_entry: dict[str, Any],
-    agent: Agent,
-    swarm: Swarm,
+    roster_entry: dict[str, object],
+    agent: AgentLike,
+    swarm: SwarmLike,
 ) -> None:
     """Expose agent-defined skills/resources in swarm roster metadata."""
-    build_assets = getattr(agent, "build_memory_asset_payloads", None)
-    if not callable(build_assets):
-        return
-
-    raw_assets = build_assets(
-        default_agent_id=getattr(agent, "id", None),
+    raw_skill_payloads, raw_resource_payloads = agent.build_memory_asset_payloads(
+        default_agent_id=agent.id,
         default_swarm_id=swarm.id,
     )
-    if not (isinstance(raw_assets, tuple) and len(raw_assets) == 2):
-        return
-
-    raw_skill_payloads, raw_resource_payloads = raw_assets
-    skill_payloads = (
-        [item for item in raw_skill_payloads if isinstance(item, dict)]
-        if isinstance(raw_skill_payloads, list)
-        else []
-    )
-    resource_payloads = (
-        [item for item in raw_resource_payloads if isinstance(item, dict)]
-        if isinstance(raw_resource_payloads, list)
-        else []
-    )
+    skill_payloads = list(raw_skill_payloads)
+    resource_payloads = list(raw_resource_payloads)
 
     if skill_payloads:
         roster_entry["memory_defined_skills"] = skill_payloads
@@ -249,7 +273,7 @@ def _apply_agent_memory_assets(
         roster_entry["memory_bound_resources"] = resource_payloads
 
 
-def _normalize_included_nested_synthesis(value: Any) -> bool | Literal["auto"]:
+def _normalize_included_nested_synthesis(value: object) -> bool | Literal["auto"]:
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
@@ -265,7 +289,7 @@ def _normalize_included_nested_synthesis(value: Any) -> bool | Literal["auto"]:
 
 def _build_included_nested_synthesis_guidance(
     *,
-    agent: Agent,
+    agent: AgentLike,
     included_nested_synthesis: bool | Literal["auto"],
     has_final_tool: bool,
     tool_count: int,
@@ -275,7 +299,7 @@ def _build_included_nested_synthesis_guidance(
     if included_nested_synthesis is False:
         return "Prefer raw tool results; request synthesis only when explicitly required."
 
-    description = str(getattr(agent, "description", "") or "").lower()
+    description = str(agent.description or "").lower()
     aggregation_terms = (
         "synth",
         "summary",

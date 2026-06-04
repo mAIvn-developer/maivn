@@ -1,3 +1,4 @@
+# pyright: strict
 from __future__ import annotations
 
 import json
@@ -6,17 +7,20 @@ import queue
 import subprocess
 import threading
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Protocol, cast
 
 import httpx
+from typing_extensions import override
 
 from .tools import (
     DEFAULT_PROTOCOL_VERSION,
+    JsonObject,
     MCPToolDefinition,
+    as_json_array,
+    as_json_object,
 )
 
-if TYPE_CHECKING:
-    from .server import MCPServer
+# MARK: Configuration
 
 _ESSENTIAL_PARENT_ENV_KEYS = frozenset(
     {
@@ -38,6 +42,31 @@ _ESSENTIAL_PARENT_ENV_KEYS = frozenset(
 )
 
 
+# MARK: Types
+
+
+class MCPServerLike(Protocol):
+    """Protocol for the MCP server fields used by transport clients."""
+
+    url: str | None
+    command: str | None
+    args: list[str]
+    env: dict[str, str] | None
+    inherit_env: bool
+    inherit_env_allowlist: list[str] | None
+    working_dir: str | None
+    headers: dict[str, str] | None
+    protocol_version: str
+    client_name: str
+    client_title: str
+    client_version: str
+    request_timeout_seconds: float | None
+    stdio_response_timeout_seconds: float | None
+
+
+# MARK: Base Client
+
+
 class McpClientBase:
     """Base class for MCP client implementations.
 
@@ -46,21 +75,23 @@ class McpClientBase:
     ``_send_notification`` for their transport.
     """
 
-    _server: Any
-    _protocol_version: str
-    _request_id: int
-    _initialized: bool
+    def __init__(self, server: MCPServerLike) -> None:
+        self._server: MCPServerLike = server
+        self._protocol_version: str = server.protocol_version or DEFAULT_PROTOCOL_VERSION
+        self._request_id: int = 0
+        self._initialized: bool = False
 
     def _send_request(
         self,
         method: str,
         *,
-        params: dict[str, Any] | None = None,
+        params: JsonObject | None = None,
         allow_uninitialized: bool = False,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
+        _ = (method, params, allow_uninitialized)
         raise NotImplementedError
 
-    def _send_notification(self, method: str) -> None:
+    def _send_notification(self, _method: str) -> None:
         raise NotImplementedError
 
     def close(self) -> None:
@@ -72,27 +103,28 @@ class McpClientBase:
         cursor: str | None = None
 
         while True:
-            params = {"cursor": cursor} if cursor else {}
+            params: JsonObject = {"cursor": cursor} if cursor else {}
             response = self._send_request("tools/list", params=params)
-            result = response.get("result") or {}
-            raw_tools = result.get("tools") or []
+            result = as_json_object(response.get("result")) or {}
+            raw_tools = as_json_array(result.get("tools")) or []
             for tool in raw_tools:
                 tools.append(MCPToolDefinition.model_validate(tool))
-            cursor = result.get("nextCursor")
+            next_cursor = result.get("nextCursor")
+            cursor = next_cursor if isinstance(next_cursor, str) else None
             if not cursor:
                 break
         return tools
 
-    def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    def call_tool(self, tool_name: str, arguments: JsonObject) -> JsonObject:
         self._ensure_initialized()
-        payload = {"name": tool_name, "arguments": arguments}
+        payload: JsonObject = {"name": tool_name, "arguments": arguments}
         response = self._send_request("tools/call", params=payload)
-        return response.get("result") or {}
+        return as_json_object(response.get("result")) or {}
 
     def _ensure_initialized(self) -> None:
         if self._initialized:
             return
-        init_payload = {
+        init_payload: JsonObject = {
             "protocolVersion": self._protocol_version,
             "capabilities": {},
             "clientInfo": {
@@ -102,15 +134,15 @@ class McpClientBase:
             },
         }
         response = self._send_request("initialize", params=init_payload, allow_uninitialized=True)
-        result = response.get("result") or {}
+        result = as_json_object(response.get("result")) or {}
         negotiated_version = result.get("protocolVersion")
-        if negotiated_version:
+        if isinstance(negotiated_version, str) and negotiated_version:
             self._protocol_version = negotiated_version
         self._on_initialized(response)
         self._send_notification("notifications/initialized")
         self._initialized = True
 
-    def _on_initialized(self, response: dict[str, Any]) -> None:
+    def _on_initialized(self, _response: JsonObject) -> None:
         """Hook called after the initialize handshake succeeds.
 
         Subclasses may override to extract transport-specific data from
@@ -118,42 +150,50 @@ class McpClientBase:
         """
 
 
+# MARK: HTTP Client
+
+
 class McpHttpClient(McpClientBase):
     """HTTP-based MCP client implementation."""
 
-    def __init__(self, server: MCPServer) -> None:
-        self._server = server
-        self._client = httpx.Client(
+    def __init__(self, server: MCPServerLike) -> None:
+        super().__init__(server)
+        self._protocol_version: str = server.protocol_version or DEFAULT_PROTOCOL_VERSION
+        self._request_id: int = 0
+        self._initialized: bool = False
+        self._client: httpx.Client = httpx.Client(
             timeout=httpx.Timeout(server.request_timeout_seconds)
             if server.request_timeout_seconds
             else httpx.Timeout(30.0)
         )
         self._session_id: str | None = None
-        self._protocol_version: str = server.protocol_version or DEFAULT_PROTOCOL_VERSION
-        self._request_id = 0
-        self._initialized = False
 
+    @override
     def close(self) -> None:
         self._client.close()
 
-    def _on_initialized(self, response: dict[str, Any]) -> None:
-        self._session_id = response.get("_mcp_session_id") or self._session_id
+    @override
+    def _on_initialized(self, response: JsonObject) -> None:
+        session_id = response.get("_mcp_session_id")
+        self._session_id = session_id if isinstance(session_id, str) else self._session_id
 
+    @override
     def _send_notification(self, method: str) -> None:
-        payload = {"jsonrpc": "2.0", "method": method}
-        self._post_json(payload, expect_response=False, allow_uninitialized=True)
+        payload: JsonObject = {"jsonrpc": "2.0", "method": method}
+        _ = self._post_json(payload, expect_response=False, allow_uninitialized=True)
 
+    @override
     def _send_request(
         self,
         method: str,
         *,
-        params: dict[str, Any] | None = None,
+        params: JsonObject | None = None,
         allow_uninitialized: bool = False,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         if not allow_uninitialized and not self._initialized:
             self._ensure_initialized()
         self._request_id += 1
-        payload = {"jsonrpc": "2.0", "id": self._request_id, "method": method}
+        payload: JsonObject = {"jsonrpc": "2.0", "id": self._request_id, "method": method}
         if params is not None:
             payload["params"] = params
         return self._post_json(
@@ -164,11 +204,11 @@ class McpHttpClient(McpClientBase):
 
     def _post_json(
         self,
-        payload: dict[str, Any],
+        payload: JsonObject,
         *,
         expect_response: bool,
         allow_uninitialized: bool,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         _ = allow_uninitialized
         headers = {
             "Accept": "application/json, text/event-stream",
@@ -181,21 +221,27 @@ class McpHttpClient(McpClientBase):
             headers["MCP-Protocol-Version"] = self._protocol_version
 
         response = self._client.post(self._server.url or "", headers=headers, json=payload)
-        response.raise_for_status()
+        _ = response.raise_for_status()
         if response.status_code == 202 and not response.content:
             return {}
 
-        self._session_id = response.headers.get("Mcp-Session-Id", self._session_id)
+        session_header = cast(str | None, response.headers.get("Mcp-Session-Id"))
+        self._session_id = session_header or self._session_id
 
-        content_type = response.headers.get("Content-Type", "").lower()
+        content_type = cast(str, response.headers.get("Content-Type", "")).lower()
         if "text/event-stream" in content_type:
-            return self._parse_sse_response(response, payload.get("id"), expect_response)
+            request_id = payload.get("id")
+            return self._parse_sse_response(
+                response,
+                request_id if isinstance(request_id, int) else None,
+                expect_response,
+            )
 
         if not response.content:
             return {}
 
-        data = response.json()
-        if isinstance(data, dict):
+        data = as_json_object(cast(object, response.json()))
+        if data is not None:
             data["_mcp_session_id"] = self._session_id
             return data
         raise ValueError("Unexpected MCP response payload")
@@ -205,11 +251,9 @@ class McpHttpClient(McpClientBase):
         response: httpx.Response,
         request_id: int | None,
         expect_response: bool,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         data_lines: list[str] = []
         for raw_line in response.iter_lines():
-            if raw_line is None:
-                continue
             line = raw_line.decode() if isinstance(raw_line, bytes) else raw_line
             if not line:
                 if not data_lines:
@@ -217,10 +261,10 @@ class McpHttpClient(McpClientBase):
                 payload_str = "\n".join(data_lines)
                 data_lines = []
                 try:
-                    payload = json.loads(payload_str)
+                    payload = as_json_object(cast(object, json.loads(payload_str)))
                 except json.JSONDecodeError:
                     continue
-                if not isinstance(payload, dict):
+                if payload is None:
                     continue
                 if not expect_response:
                     return payload
@@ -237,20 +281,29 @@ class McpHttpClient(McpClientBase):
         return {}
 
 
+# MARK: Stdio Client
+
+
 class McpStdioClient(McpClientBase):
     """Stdio-based MCP client implementation."""
 
-    def __init__(self, server: MCPServer) -> None:
-        self._server = server
-        self._process = self._spawn_process()
-        self._lock = threading.Lock()
-        self._request_id = 0
-        self._initialized = False
+    def __init__(self, server: MCPServerLike) -> None:
+        super().__init__(server)
         self._protocol_version: str = server.protocol_version or DEFAULT_PROTOCOL_VERSION
+        self._request_id: int = 0
+        self._initialized: bool = False
+        self._process: subprocess.Popen[str] = self._spawn_process()
+        self._lock: threading.Lock = threading.Lock()
         self._stdout_queue: queue.Queue[str] = queue.Queue()
-        self._stdout_thread = threading.Thread(target=self._drain_stdout, daemon=True)
+        self._stdout_thread: threading.Thread = threading.Thread(
+            target=self._drain_stdout,
+            daemon=True,
+        )
         self._stdout_thread.start()
-        self._stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
+        self._stderr_thread: threading.Thread = threading.Thread(
+            target=self._drain_stderr,
+            daemon=True,
+        )
         self._stderr_thread.start()
 
     def _build_process_env(self) -> dict[str, str]:
@@ -279,7 +332,7 @@ class McpStdioClient(McpClientBase):
         return inherited
 
     def _spawn_process(self) -> subprocess.Popen[str]:
-        return subprocess.Popen(
+        return subprocess.Popen[str](
             [self._server.command or "", *self._server.args],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -306,6 +359,7 @@ class McpStdioClient(McpClientBase):
         finally:
             self._stdout_queue.put("")
 
+    @override
     def close(self) -> None:
         process_exited = self._process.poll() is not None
         try:
@@ -316,7 +370,7 @@ class McpStdioClient(McpClientBase):
         if not process_exited:
             try:
                 self._process.terminate()
-                self._process.wait(timeout=2)
+                _ = self._process.wait(timeout=2)
             except Exception:  # noqa: BLE001 - escalate to SIGKILL on any failure
                 try:
                     self._process.kill()
@@ -333,35 +387,37 @@ class McpStdioClient(McpClientBase):
         except Exception:  # noqa: BLE001 - cleanup must never raise
             pass
 
+    @override
     def _send_notification(self, method: str) -> None:
-        payload = {"jsonrpc": "2.0", "method": method}
+        payload: JsonObject = {"jsonrpc": "2.0", "method": method}
         self._send_payload(payload)
 
+    @override
     def _send_request(
         self,
         method: str,
         *,
-        params: dict[str, Any] | None = None,
+        params: JsonObject | None = None,
         allow_uninitialized: bool = False,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         if not allow_uninitialized and not self._initialized:
             self._ensure_initialized()
         with self._lock:
             self._request_id += 1
-            payload = {"jsonrpc": "2.0", "id": self._request_id, "method": method}
+            payload: JsonObject = {"jsonrpc": "2.0", "id": self._request_id, "method": method}
             if params is not None:
                 payload["params"] = params
             self._send_payload(payload)
             return self._read_response(self._request_id)
 
-    def _send_payload(self, payload: dict[str, Any]) -> None:
+    def _send_payload(self, payload: JsonObject) -> None:
         if not self._process.stdin:
             raise RuntimeError("MCP stdio server has no stdin")
         serialized = json.dumps(payload, ensure_ascii=True)
-        self._process.stdin.write(serialized + "\n")
+        _ = self._process.stdin.write(serialized + "\n")
         self._process.stdin.flush()
 
-    def _read_response(self, request_id: int) -> dict[str, Any]:
+    def _read_response(self, request_id: int) -> JsonObject:
         if not self._process.stdout:
             raise RuntimeError("MCP stdio server has no stdout")
         deadline = None
@@ -381,10 +437,10 @@ class McpStdioClient(McpClientBase):
             if not line:
                 raise RuntimeError("MCP stdio server closed unexpectedly")
             try:
-                payload = json.loads(line.strip())
+                payload = as_json_object(cast(object, json.loads(line.strip())))
             except json.JSONDecodeError:
                 continue
-            if not isinstance(payload, dict):
+            if payload is None:
                 continue
             if payload.get("id") == request_id:
                 return payload

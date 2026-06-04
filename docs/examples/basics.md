@@ -1,7 +1,8 @@
 # Basics
 
-The smallest end-to-end examples — enough to see how `Agent`, tools, and
-final output fit together.
+This page builds up from a one-line agent to tools, tool chaining, private
+data, and structured output — the smallest end-to-end examples that show how
+`Agent`, tools, and final output fit together.
 
 ## Your first agent
 
@@ -136,12 +137,12 @@ actual value is injected at execution time by the runtime, not by the
 model.
 
 See [Private Data](./private-data.md) for redaction patterns,
-placeholder replacement, and tool-result PII protection.
+referencing a private value by its key, and tool-result PII protection.
 
 ## Forcing structured output
 
 If you only care about the final structured answer, use
-`agent.structured_output(model=...)` to bypass the orchestration step entirely:
+`agent.structured_output(model=...)` to force the run to produce that model:
 
 ```python
 response = agent.structured_output(model=LaptopHealthSummary).invoke([
@@ -152,8 +153,8 @@ print(response.result)   # a LaptopHealthSummary instance
 print(response.responses)  # the assistant text trace
 ```
 
-Direct schema extraction is faster for one-shot calls than full
-orchestration; use it when you don't need multi-step reasoning.
+This is the convenient path when you want the answer shaped as a specific
+model and don't need to inspect intermediate steps.
 
 ## Complex types
 

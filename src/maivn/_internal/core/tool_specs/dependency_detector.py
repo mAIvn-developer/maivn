@@ -4,11 +4,28 @@ Identifies and serializes tool dependencies from decorator metadata,
 including interrupt, data, agent, and model tool dependencies.
 """
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Sequence
+from typing import TypeAlias
 
-from maivn_shared import create_uuid
+from maivn_shared import (
+    AgentDependency,
+    AwaitForDependency,
+    BaseDependency,
+    DataDependency,
+    InterruptDependency,
+    ReevaluateDependency,
+    ToolDependency,
+    create_uuid,
+)
+from pydantic import JsonValue
+
+# MARK: Types
+
+JsonObject: TypeAlias = dict[str, JsonValue]
+ToolIdDependency: TypeAlias = ToolDependency | AwaitForDependency | ReevaluateDependency
 
 # MARK: Dependency Detector
 
@@ -25,10 +42,10 @@ class DependencyDetector:
 
     def detect_dependency(
         self,
-        dependencies: list[Any],
+        dependencies: Sequence[BaseDependency],
         arg_name: str,
         context_name: str,
-    ) -> dict[str, Any] | None:
+    ) -> JsonObject | None:
         """Detect if an argument has a dependency decorator.
 
         Args:
@@ -54,7 +71,7 @@ class DependencyDetector:
         tool_id: str,
         model_name: str,
         ref_path: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         """Build schema for a Pydantic model tool dependency.
 
         Args:
@@ -78,26 +95,23 @@ class DependencyDetector:
 
     # MARK: - Dependency Detection
 
-    def _matches_arg(self, dep: Any, arg_name: str) -> bool:
+    def _matches_arg(self, dep: BaseDependency, arg_name: str) -> bool:
         """Check if dependency matches the given argument name."""
-        return hasattr(dep, "arg_name") and dep.arg_name == arg_name
+        return dep.arg_name == arg_name
 
     def _build_dependency_schema(
         self,
-        dep: Any,
+        dep: BaseDependency,
         context_name: str,
-    ) -> dict[str, Any] | None:
+    ) -> JsonObject | None:
         """Build appropriate schema based on dependency type."""
-        dep_type = getattr(dep, "dependency_type", None)
-
-        if dep_type == "user":
+        if isinstance(dep, InterruptDependency):
             return self._build_interrupt_dependency(dep, context_name)
-        if dep_type == "data":
+        if isinstance(dep, DataDependency):
             return self._build_data_dependency(dep)
-        if dep_type == "agent":
+        if isinstance(dep, AgentDependency):
             return self._build_agent_dependency(dep)
-
-        if hasattr(dep, "tool_id"):
+        if isinstance(dep, ToolDependency | AwaitForDependency | ReevaluateDependency):
             return self._build_tool_dependency(dep)
 
         return None
@@ -106,22 +120,21 @@ class DependencyDetector:
 
     def _build_interrupt_dependency(
         self,
-        dep: Any,
+        dep: InterruptDependency,
         context_name: str,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         """Build schema for interrupt dependency (@depends_on_interrupt)."""
         interrupt_id = create_uuid(f"interrupt_{context_name}_{dep.arg_name}")
-        data_key = getattr(dep, "data_key", None) or dep.arg_name
 
         return {
             "type": "interrupt_dependency",
             "interrupt_id": interrupt_id,
             "prompt": dep.prompt,
-            "data_key": data_key,
+            "data_key": dep.arg_name,
             "description": f"User input: {dep.prompt}",
         }
 
-    def _build_data_dependency(self, dep: Any) -> dict[str, Any]:
+    def _build_data_dependency(self, dep: DataDependency) -> JsonObject:
         """Build schema for data dependency (@depends_on_private_data)."""
         return {
             "type": "data_dependency",
@@ -129,7 +142,7 @@ class DependencyDetector:
             "description": f"Data from private_data['{dep.data_key}']",
         }
 
-    def _build_agent_dependency(self, dep: Any) -> dict[str, Any]:
+    def _build_agent_dependency(self, dep: AgentDependency) -> JsonObject:
         """Build schema for agent dependency (@depends_on_agent)."""
         agent_tool_id = create_uuid(f"agent_invoke_{dep.agent_id}")
 
@@ -139,13 +152,11 @@ class DependencyDetector:
             tool_type="agent",
         )
 
-    def _build_tool_dependency(self, dep: Any) -> dict[str, Any]:
+    def _build_tool_dependency(self, dep: ToolIdDependency) -> JsonObject:
         """Build schema for tool dependency (@depends_on_tool)."""
-        tool_name = getattr(dep, "tool_name", dep.tool_id)
-
         return self._create_tool_dependency_schema(
             tool_id=dep.tool_id,
-            tool_name=tool_name,
+            tool_name=_tool_dependency_name(dep),
             tool_type="func",
         )
 
@@ -154,7 +165,7 @@ class DependencyDetector:
         tool_id: str,
         tool_name: str,
         tool_type: str,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         """Create a standardized tool dependency schema."""
         return {
             "type": "tool_dependency",
@@ -164,6 +175,16 @@ class DependencyDetector:
             "description": f"Output from {tool_name}",
             "output_type": "object",
         }
+
+
+# MARK: Helpers
+
+
+def _tool_dependency_name(dep: ToolIdDependency) -> str:
+    """Return the best available display name for a tool-like dependency."""
+    if isinstance(dep, ToolDependency):
+        return dep.tool_id
+    return dep.tool_name or dep.tool_id
 
 
 __all__ = ["DependencyDetector"]

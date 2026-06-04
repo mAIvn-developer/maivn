@@ -1,3 +1,4 @@
+# pyright: strict
 """Payload builders for assistant, status, interrupt, and assignment events.
 
 Each ``build_*_payload`` produces a canonical AppEvent payload dict ready to
@@ -9,9 +10,9 @@ satisfy the v1 stream schema without callers reimplementing the envelope.
 
 from __future__ import annotations
 
-from typing import Any
+from pydantic import JsonValue
 
-from .common import attach_common_fields, build_participant, build_scope, clean_text
+from .common import JsonObject, attach_common_fields, build_participant, build_scope, clean_text
 
 # MARK: Assistant and Status Payloads
 
@@ -23,7 +24,8 @@ def build_assistant_chunk_payload(
     participant_key: str | None = None,
     participant_name: str | None = None,
     participant_role: str | None = None,
-) -> dict[str, Any]:
+    replace_content: bool = False,
+) -> JsonObject:
     """Build the payload for an incremental assistant response chunk.
 
     Args:
@@ -38,17 +40,26 @@ def build_assistant_chunk_payload(
         participant_name=participant_name,
         participant_role=participant_role,
     )
-    payload = {
+    assistant_descriptor: JsonObject = {
+        "id": assistant_id,
+        "delta": text,
+    }
+    if replace_content:
+        # Tells downstream consumers to replace the assistant bubble's
+        # content rather than append. Used when synthesis restarts on a
+        # reevaluate cycle — the next chunk represents fresh content that
+        # should overwrite the prior cycle's text, not extend it.
+        assistant_descriptor["replace_content"] = True
+    payload: JsonObject = {
         "assistant_id": assistant_id,
         "text": text,
         "participant_key": participant.get("key") if participant else None,
         "participant_name": participant.get("name") if participant else None,
         "participant_role": participant.get("role") if participant else None,
-        "assistant": {
-            "id": assistant_id,
-            "delta": text,
-        },
+        "assistant": assistant_descriptor,
     }
+    if replace_content:
+        payload["replace_content"] = True
     return attach_common_fields(
         payload,
         event_name="assistant_chunk",
@@ -58,18 +69,20 @@ def build_assistant_chunk_payload(
     )
 
 
-def build_status_message_payload(*, assistant_id: str, message: str) -> dict[str, Any]:
+def build_status_message_payload(*, assistant_id: str, message: str) -> JsonObject:
     """Build the payload for a standalone, non-streaming status line.
 
     Status messages are short user-facing strings (e.g. "Searching tools…")
     surfaced between deltas; downstream reporters typically render them as a
     single line rather than appending to streamed text.
     """
-    payload = {
+    assistant: JsonObject = {"id": assistant_id}
+    status_payload: JsonObject = {"message": message}
+    payload: JsonObject = {
         "assistant_id": assistant_id,
         "message": message,
-        "assistant": {"id": assistant_id},
-        "status": {"message": message},
+        "assistant": assistant,
+        "status": status_payload,
     }
     return attach_common_fields(
         payload,
@@ -97,7 +110,7 @@ def build_interrupt_required_payload(
     input_type: str | None = None,
     choices: list[str] | None = None,
     timestamp: str | None = None,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Build the payload announcing an execution-pause user-input request.
 
     Args:
@@ -113,8 +126,21 @@ def build_interrupt_required_payload(
         choices: Allowed options when ``input_type == "choice"``.
         timestamp: ISO-8601 emission time, if the caller wants to override.
     """
-    normalized_choices = [str(choice) for choice in choices or []]
-    payload = {
+    normalized_choices: list[JsonValue] = [str(choice) for choice in choices or []]
+    interrupt: JsonObject = {
+        "id": interrupt_id,
+        "checkpoint_id": checkpoint_id or None,
+        "assignment_id": assignment_id or None,
+        "data_key": data_key,
+        "arg_name": arg_name or data_key,
+        "prompt": prompt,
+        "tool_name": tool_name or None,
+        "input_type": input_type or "text",
+        "choices": normalized_choices,
+        "number": interrupt_number or 1,
+        "total": total_interrupts or 1,
+    }
+    payload: JsonObject = {
         "interrupt_id": interrupt_id,
         "checkpoint_id": checkpoint_id or "",
         "data_key": data_key,
@@ -128,19 +154,7 @@ def build_interrupt_required_payload(
         "input_type": input_type or "text",
         "choices": normalized_choices,
         "timestamp": timestamp,
-        "interrupt": {
-            "id": interrupt_id,
-            "checkpoint_id": checkpoint_id or None,
-            "assignment_id": assignment_id or None,
-            "data_key": data_key,
-            "arg_name": arg_name or data_key,
-            "prompt": prompt,
-            "tool_name": tool_name or None,
-            "input_type": input_type or "text",
-            "choices": normalized_choices,
-            "number": interrupt_number or 1,
-            "total": total_interrupts or 1,
-        },
+        "interrupt": interrupt,
     }
     return attach_common_fields(
         payload,
@@ -159,11 +173,11 @@ def build_agent_assignment_payload(
     swarm_name: str | None = None,
     task: str | None = None,
     error: str | None = None,
-    result: Any = None,
+    result: JsonValue = None,
     participant_key: str | None = None,
     participant_name: str | None = None,
     participant_role: str | None = None,
-) -> dict[str, Any]:
+) -> JsonObject:
     """Build the payload for a per-agent lifecycle update inside a swarm.
 
     Emitted whenever an agent transitions through ``in_progress`` /
@@ -179,7 +193,17 @@ def build_agent_assignment_payload(
         participant_name=participant_name,
         participant_role=participant_role,
     )
-    payload = {
+    assignment: JsonObject = {
+        "id": assignment_id,
+        "agent_name": agent_name,
+        "status": status,
+        "task": task,
+        "swarm_name": clean_text(swarm_name),
+        "result": result,
+        "error": error,
+    }
+    lifecycle: JsonObject = {"phase": status}
+    payload: JsonObject = {
         "assignment_id": assignment_id,
         "agent_name": agent_name,
         "status": status,
@@ -190,16 +214,8 @@ def build_agent_assignment_payload(
         "participant_key": participant.get("key") if participant else None,
         "participant_name": participant.get("name") if participant else None,
         "participant_role": participant.get("role") if participant else None,
-        "assignment": {
-            "id": assignment_id,
-            "agent_name": agent_name,
-            "status": status,
-            "task": task,
-            "swarm_name": clean_text(swarm_name),
-            "result": result,
-            "error": error,
-        },
-        "lifecycle": {"phase": status},
+        "assignment": assignment,
+        "lifecycle": lifecycle,
     }
     return attach_common_fields(
         payload,

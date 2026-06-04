@@ -1,6 +1,10 @@
 # Workspace Operations
 
-This guide covers day-to-day use of Organizations, Projects, and navigation inside the portal.
+Organizations and projects are how you keep your mAIvn work organized: an
+organization is your company or team (and who pays the bills), and projects
+are the separate buckets of work inside it — typically one per product or
+service. This guide covers the day-to-day moves: creating these containers,
+inviting people, setting roles, and finding your way around the portal.
 
 ## Organizations
 
@@ -81,3 +85,12 @@ If no prior project exists, the portal falls back to your first accessible proje
 ![Developer Portal docs experience](/developer_portal/maivn_portal_docs__getting_started.png "Use integrated docs during team onboarding and workspace setup")
 
 ![Organization members and invitations management pages](/developer_portal/placeholders/organization-members-invitations.png "Members and invitations management")
+
+## Related
+
+- [API Keys and Webhooks](api-keys-webhooks.md) — manage credentials and
+  event callbacks within a project.
+- [Portal Memory Management](portal-memory-management.md) — full
+  operational guidance for memory policy and project memory pages.
+- [Portal Authentication](portal-authentication.md) — sign-in, sessions,
+  and login troubleshooting.

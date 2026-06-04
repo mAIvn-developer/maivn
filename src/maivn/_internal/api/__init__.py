@@ -2,14 +2,17 @@
 Not part of the public SDK API surface.
 """
 
+# pyright: strict
 from __future__ import annotations
 
-# Import Agent and Swarm after BaseScope to handle dependencies
 from .agent import Agent
 from .base_scope import BaseScope
 from .client import Client, ClientBuilder
 from .mcp import MCPAutoSetup, MCPServer, MCPSoftErrorHandling
 from .swarm import Swarm
+from .tool_override import ToolOverride
+
+# MARK: Exports
 
 __all__ = [
     "Agent",
@@ -20,4 +23,5 @@ __all__ = [
     "MCPServer",
     "MCPSoftErrorHandling",
     "Swarm",
+    "ToolOverride",
 ]

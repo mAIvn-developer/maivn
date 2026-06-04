@@ -2,73 +2,62 @@
 Stores tools by id and maintains a secondary name index for lookup.
 """
 
+# pyright: strict
 from __future__ import annotations
 
-# MARK: In-Memory Tool Repository
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from maivn._internal.core.interfaces.repositories import ToolRepoInterface
+from typing_extensions import override
+
+from ...core.interfaces.repositories import ToolRepoInterface
+from ._base import NameIndexedRepo
 
 if TYPE_CHECKING:
-    from maivn._internal.core.entities.tools import BaseTool
+    from ...core.entities.tools import BaseTool
 
 
-class ToolRepo(ToolRepoInterface):
+# MARK: In-Memory Tool Repository
+
+
+class ToolRepo(NameIndexedRepo[object], ToolRepoInterface):
     """In-memory implementation of ToolRepoInterface.
 
     Performance optimization: Maintains secondary index for O(1) name lookups.
     """
 
     def __init__(self) -> None:
+        super().__init__()
         self.store: dict[str, BaseTool] = {}
-        self._name_index: dict[str, BaseTool] = {}
+
+    # MARK: - Entity Hooks
+
+    @override
+    def _get_entity_id(self, entity: object) -> str | None:
+        identifier = getattr(entity, "tool_id", None) or getattr(entity, "id", None)
+        return cast(str | None, identifier)
 
     # MARK: - Tool methods
 
-    def _get_tool_id(self, tool: BaseTool) -> str | None:
-        return getattr(tool, "tool_id", None) or getattr(tool, "id", None)
-
-    def _get_tool_name(self, tool: BaseTool) -> str | None:
-        return getattr(tool, "name", None)
-
-    def _add_to_name_index(self, tool: BaseTool) -> None:
-        name = self._get_tool_name(tool)
-        if name:
-            self._name_index[name] = tool
-
-    def _remove_from_name_index(self, tool: BaseTool) -> None:
-        name = self._get_tool_name(tool)
-        if name and name in self._name_index:
-            del self._name_index[name]
-
+    @override
     def add_tool(self, tool: BaseTool) -> None:
-        if tool is None:
-            return
-        tool_id = self._get_tool_id(tool)
-        if not tool_id or tool_id in self.store:
-            return
-        self.store[tool_id] = tool
-        self._add_to_name_index(tool)
+        self._add(tool)
 
+    @override
     def get_tool(self, tool_id: str) -> BaseTool | None:
-        return self.store.get(tool_id)
+        return cast("BaseTool | None", self._get(tool_id))
 
+    @override
     def get_tool_by_name(self, name: str) -> BaseTool | None:
-        return self._name_index.get(name)
+        return cast("BaseTool | None", self._get_by_name(name))
 
+    @override
     def list_tools(self) -> list[BaseTool]:
-        return list(self.store.values())
+        return cast("list[BaseTool]", self._list())
 
+    @override
     def remove_tool(self, tool_id: str) -> None:
-        tool = self.store.pop(tool_id, None)
-        if tool:
-            self._remove_from_name_index(tool)
+        self._remove(tool_id)
 
+    @override
     def update_tool(self, tool: BaseTool) -> None:
-        tool_id = self._get_tool_id(tool)
-        if not tool_id:
-            return
-        if tool_id in self.store:
-            self._remove_from_name_index(self.store[tool_id])
-        self.store[tool_id] = tool
-        self._add_to_name_index(tool)
+        self._update(tool)

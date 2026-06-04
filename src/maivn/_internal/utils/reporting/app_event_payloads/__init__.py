@@ -1,3 +1,4 @@
+# pyright: strict
 """AppEvent payload builders and contract exports."""
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ from .tool_events import (
     build_system_tool_start_payload,
     build_tool_event_payload,
 )
+
+# MARK: Public API
 
 __all__ = [
     "APP_EVENT_CONTRACT_VERSION",

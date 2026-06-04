@@ -10,6 +10,7 @@ Submodules:
 - ui_event: UIEvent value object
 """
 
+# pyright: strict
 from __future__ import annotations
 
 from .bridge import (
@@ -22,6 +23,8 @@ from .registry import BridgeRegistry
 from .schema import EventSchemaError, ValidationMode, validate_event
 from .serialization import build_safe_event_payload, safe_json_dumps
 from .ui_event import UIEvent
+
+# MARK: Public Exports
 
 __all__ = [
     "BackpressurePolicy",

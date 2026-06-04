@@ -6,7 +6,9 @@ import re
 import sys
 import urllib.error
 import urllib.request
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Protocol, cast
 
 import tomllib
 from packaging.version import InvalidVersion, Version
@@ -14,16 +16,31 @@ from packaging.version import InvalidVersion, Version
 VERSION_RE = re.compile(r'__version__\s*=\s*"([^"]+)"')
 
 
+class _BinaryHttpResponse(Protocol):
+    def read(self) -> bytes: ...
+
+    def close(self) -> None: ...
+
+
 def read_project_metadata(project_root: Path) -> tuple[str, str]:
-    pyproject = tomllib.loads(project_root.joinpath("pyproject.toml").read_text(encoding="utf-8"))
-    project = pyproject["project"]
+    pyproject = cast(
+        Mapping[str, object],
+        tomllib.loads(project_root.joinpath("pyproject.toml").read_text(encoding="utf-8")),
+    )
+    project = cast(Mapping[str, object], pyproject["project"])
     project_name = project["name"]
+    if not isinstance(project_name, str):
+        raise RuntimeError("pyproject.toml project.name must be a string.")
+
     project_version = project.get("version")
-    if project_version:
+    if isinstance(project_version, str) and project_version:
         return project_name, project_version
 
-    version_path = pyproject.get("tool", {}).get("hatch", {}).get("version", {}).get("path")
-    if not version_path:
+    tool = cast(Mapping[str, object], pyproject.get("tool", {}))
+    hatch = cast(Mapping[str, object], tool.get("hatch", {}))
+    version_config = cast(Mapping[str, object], hatch.get("version", {}))
+    version_path = version_config.get("path")
+    if not isinstance(version_path, str) or not version_path:
         raise RuntimeError("Unable to determine project version from pyproject.toml.")
 
     version_text = project_root.joinpath(version_path).read_text(encoding="utf-8")
@@ -38,18 +55,29 @@ def fetch_published_versions(project_name: str) -> list[Version]:
     request = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
         # Fixed HTTPS PyPI API URL; no user-controlled scheme reaches urlopen.
-        with urllib.request.urlopen(  # noqa: S310  # nosec B310
-            request,
-            timeout=15,
-        ) as response:
-            payload = json.load(response)
+        response = cast(
+            _BinaryHttpResponse,
+            urllib.request.urlopen(request, timeout=15),  # noqa: S310  # nosec B310
+        )
+        try:
+            payload_obj = cast(object, json.loads(response.read().decode("utf-8")))
+        finally:
+            response.close()
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             return []
         raise
 
     versions: list[Version] = []
-    for raw_version in payload.get("releases", {}):
+    payload = cast(Mapping[str, object], payload_obj)
+    releases_obj = payload.get("releases", {})
+    if not isinstance(releases_obj, Mapping):
+        return []
+    releases = cast(Mapping[object, object], releases_obj)
+
+    for raw_version in releases:
+        if not isinstance(raw_version, str):
+            continue
         try:
             versions.append(Version(raw_version))
         except InvalidVersion:

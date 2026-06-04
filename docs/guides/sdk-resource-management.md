@@ -1,6 +1,8 @@
 # SDK Resource Management
 
-This guide covers programmatic memory resource management through the mAIvn SDK.
+The Developer Portal lets you curate memory by hand; the SDK lets you do the same things in code. That makes it the right tool when curation needs to be automated and repeatable: seeding resources from a deploy script, syncing skills on a schedule, or wiring memory governance into your own tooling.
+
+This guide covers that programmatic memory resource management through the mAIvn SDK.
 
 Use the SDK `Client` when you need to curate memory resources outside of an agent invocation flow, such as admin scripts, deployment pipelines, sync jobs, or operational tooling.
 

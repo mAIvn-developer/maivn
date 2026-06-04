@@ -1,27 +1,36 @@
 """Progress and event display methods for ``SimpleReporter``."""
 
+# pyright: strict
+
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator
+from abc import ABC, abstractmethod
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import Any
 
+from typing_extensions import override
+
+from ..._components import EventTracker
 from ..._formatters import format_elapsed_time
+from ...base.defaults import ReporterDefaultEventsMixin
+from ...base.interface import BaseReporterInterface
 from .._shared_helpers import build_error_details, get_tool_prefix, is_reevaluate_system_tool
 from .display_helpers import get_event_label, print_kv_lines, print_tool_child_lines
+from .progress_state import SystemToolProgressState
 
 # MARK: Event Display
 
 
-class SimpleReporterEventMixin:
+class SimpleReporterEventMixin(BaseReporterInterface, ABC):
     enabled: bool
 
+    @override
     def print_event(
         self,
         event_type: str,
         message: str,
-        details: dict[str, Any] | None = None,
+        details: dict[str, object] | None = None,
     ) -> None:
         """Print an event message."""
         if not self.enabled:
@@ -44,34 +53,53 @@ class SimpleReporterEventMixin:
 # MARK: Progress and Tool Display
 
 
-class SimpleReporterProgressMixin:
+class SimpleReporterProgressMixin(ReporterDefaultEventsMixin, BaseReporterInterface, ABC):
     enabled: bool
-    tracker: Any
-    _progress_state: Any
-    _truncate_result: Any
-    print_event: Any
+    tracker: EventTracker
+    _progress_state: SystemToolProgressState
+    _truncate_result: Callable[[str], str]
+
+    @abstractmethod
+    @override
+    def print_event(
+        self,
+        event_type: str,
+        message: str,
+        details: dict[str, object] | None = None,
+    ) -> None: ...
 
     @contextmanager
-    def live_progress(self, description: str = "Processing...") -> Iterator[None]:
+    @override
+    def live_progress(
+        self,
+        description: str = "Processing...",
+    ) -> Generator[object, None, None]:
         """Context manager for progress display."""
         if self.enabled:
             print(f"{description}...")
         yield None
 
-    def update_progress(self, task_id: Any, description: str | None = None) -> None:
+    @override
+    def update_progress(
+        self,
+        task_id: object,
+        description: str | None = None,
+    ) -> None:
         """Update progress (no-op for simple reporter)."""
         _ = (task_id, description)
 
     @contextmanager
-    def prepare_for_user_input(self) -> Iterator[None]:
+    @override
+    def prepare_for_user_input(self) -> Generator[None, None, None]:
         """No-op context manager for user input preparation."""
         yield
 
+    @override
     def report_tool_complete(
         self,
         event_id: str,
         elapsed_ms: int | None = None,
-        result: Any | None = None,
+        result: object | None = None,
     ) -> None:
         """Report tool execution completion."""
         tool_info = self.tracker.get_tool_info(event_id)
@@ -81,8 +109,8 @@ class SimpleReporterProgressMixin:
         if elapsed_ms is None:
             elapsed_ms = self.tracker.calculate_elapsed_ms(event_id)
 
-        tool_type = tool_info.get("tool_type")
-        tool_name = tool_info.get("name", "unknown")
+        tool_type = tool_info["tool_type"]
+        tool_name = tool_info["name"]
 
         if is_reevaluate_system_tool(tool_name, tool_type):
             self.print_event("SYSTEM", "[OK] Reevaluating")
@@ -98,6 +126,7 @@ class SimpleReporterProgressMixin:
         if tool_name.lower() != "reevaluate":
             print_tool_child_lines(result=result, truncate_fn=self._truncate_result)
 
+    @override
     def report_tool_error(
         self,
         tool_name: str,
@@ -109,6 +138,7 @@ class SimpleReporterProgressMixin:
         details = build_error_details(error, event_id, elapsed_ms)
         self.print_event("ERROR", f"Failed: {tool_name}", details)
 
+    @override
     def report_system_tool_progress(
         self,
         event_id: str,

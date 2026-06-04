@@ -1,5 +1,6 @@
 """System tool streaming state management for RichReporter."""
 
+# pyright: strict
 from __future__ import annotations
 
 from dataclasses import dataclass

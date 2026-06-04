@@ -1,11 +1,8 @@
-"""Configuration management for maivn internals.
-Provides centralized configuration objects and access helpers.
-Use ``ConfigurationBuilder`` to build environment-specific configuration.
-"""
+"""Configuration objects and access helpers for maivn internals."""
 
+# pyright: strict
 from __future__ import annotations
 
-# MARK: - Imports
 from .config_builder import ConfigurationBuilder
 from .config_store import (
     get_configuration,
@@ -24,17 +21,14 @@ from .environment_config import (
 # MARK: - Exports
 
 __all__ = [
-    # Configuration classes
+    "ConfigurationBuilder",
     "ExecutionConfiguration",
+    "get_configuration",
     "LoggingConfiguration",
     "MaivnConfiguration",
+    "reset_configuration",
     "SecurityConfiguration",
     "ServerConfiguration",
-    # Configuration functions
-    "get_configuration",
-    "reset_configuration",
     "set_configuration",
     "temporary_configuration",
-    # Builder
-    "ConfigurationBuilder",
 ]

@@ -1,3 +1,4 @@
+# pyright: strict
 """Utility functions for dependency normalization.
 
 This module provides shared dependency normalization logic to eliminate
@@ -6,12 +7,39 @@ DRY violations across the codebase.
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Sequence
+from typing import Final, Literal, Protocol, TypeGuard, cast
 
 from maivn_shared import BaseDependency, InterruptDependency, dumps
+from pydantic import JsonValue
+
+# MARK: Configuration
+
+NAME_IDENTIFIER_ATTRIBUTE: Final = "name"
+DEPENDENCY_IDENTIFIER_ATTRIBUTES: Final[tuple[str, ...]] = (
+    "tool_id",
+    "agent_id",
+    "data_key",
+    NAME_IDENTIFIER_ATTRIBUTE,
+)
+DEPENDENCY_TYPE_KEY: Final = "dependency_type"
+USER_DEPENDENCY_TYPE: Final = "user"
+
+# MARK: - Protocols
 
 
-def normalize_dependencies(dependencies: list[BaseDependency] | list[Any] | None) -> list[str]:
+class _ModelDumpable(Protocol):
+    """Object with a Pydantic-style model_dump method."""
+
+    def model_dump(self, *, mode: Literal["json"]) -> object:
+        """Return a JSON-mode representation."""
+        ...
+
+
+# MARK: - Public API
+
+
+def normalize_dependencies(dependencies: Sequence[object] | None) -> list[str]:
     """Normalize dependencies to string format.
 
     This function handles various dependency types and converts them to
@@ -48,7 +76,7 @@ def normalize_dependencies(dependencies: list[BaseDependency] | list[Any] | None
 # MARK: - Single Dependency Normalization
 
 
-def _normalize_single_dependency(dep: Any) -> str | None:
+def _normalize_single_dependency(dep: object) -> str | None:
     """Normalize a single dependency to string format.
 
     Args:
@@ -65,7 +93,7 @@ def _normalize_single_dependency(dep: Any) -> str | None:
         return _normalize_base_dependency(dep)
 
     # MARK: - Pydantic Model Handling
-    if hasattr(dep, "model_dump"):
+    if _has_model_dump(dep):
         return _normalize_pydantic_model(dep)
 
     # MARK: - Attribute-based Identification
@@ -108,15 +136,15 @@ def _normalize_interrupt_dependency(dep: InterruptDependency) -> str:
     Returns:
         JSON string representation without the input_handler function
     """
-    user_dep_info = {
-        "dependency_type": "user",
+    user_dep_info: dict[str, JsonValue] = {
+        DEPENDENCY_TYPE_KEY: USER_DEPENDENCY_TYPE,
         "arg_name": dep.arg_name,
         "prompt": dep.prompt,
     }
     return dumps(user_dep_info)
 
 
-def _normalize_pydantic_model(dep: Any) -> str:
+def _normalize_pydantic_model(dep: _ModelDumpable) -> str:
     """Normalize a Pydantic model to string format.
 
     Args:
@@ -127,11 +155,11 @@ def _normalize_pydantic_model(dep: Any) -> str:
     """
     try:
         return dumps(dep.model_dump(mode="json"))
-    except Exception:
+    except Exception:  # noqa: BLE001 - legacy fallback stringifies unserializable models.
         return str(dep)
 
 
-def _extract_identifier_from_attributes(dep: Any) -> str | None:
+def _extract_identifier_from_attributes(dep: object) -> str | None:
     """Extract identifier from common dependency attributes.
 
     Args:
@@ -140,13 +168,28 @@ def _extract_identifier_from_attributes(dep: Any) -> str | None:
     Returns:
         String identifier if found, None otherwise
     """
-    identifier = (
-        getattr(dep, "tool_id", None)
-        or getattr(dep, "agent_id", None)
-        or getattr(dep, "data_key", None)
-        or getattr(dep, "name", None)
-    )
-    return str(identifier) if identifier else None
+    for attribute in DEPENDENCY_IDENTIFIER_ATTRIBUTES:
+        identifier = _get_optional_attribute(dep, attribute)
+        if _is_present_identifier(attribute, identifier):
+            return str(identifier)
+    return None
+
+
+def _has_model_dump(dep: object) -> TypeGuard[_ModelDumpable]:
+    """Return whether the object exposes a callable model_dump method."""
+    return callable(getattr(dep, "model_dump", None))
+
+
+def _get_optional_attribute(dep: object, name: str) -> object | None:
+    """Return an optional dynamic attribute value."""
+    return cast(object | None, getattr(dep, name, None))
+
+
+def _is_present_identifier(attribute: str, identifier: object | None) -> bool:
+    """Return whether a dynamic identifier attribute should be treated as present."""
+    if identifier is None:
+        return False
+    return attribute != NAME_IDENTIFIER_ATTRIBUTE or identifier != ""
 
 
 __all__ = [

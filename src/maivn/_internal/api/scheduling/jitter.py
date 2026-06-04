@@ -5,14 +5,19 @@ natural rather than perfectly periodic. Distributions and bounds are explicit
 to keep behaviour predictable; a deterministic seed is supported for tests.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 import random
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Literal, TypeAlias, cast, overload
 
-JitterDistribution = Literal["uniform", "normal", "triangular"]
+# MARK: Types
+
+JitterDistribution: TypeAlias = Literal["uniform", "normal", "triangular"]
+JitterOffset: TypeAlias = timedelta | float | int
 
 
 _ZERO = timedelta(0)
@@ -62,6 +67,7 @@ class JitterSpec:
     seed: int | None = None
 
     _rng: random.Random = field(init=False, repr=False, compare=False)
+    _rng_lock: threading.Lock = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.min > self.max:
@@ -70,13 +76,14 @@ class JitterSpec:
             raise ValueError("JitterSpec.align_to must be a positive timedelta")
         rng = random.Random(self.seed) if self.seed is not None else random.Random()
         object.__setattr__(self, "_rng", rng)
+        object.__setattr__(self, "_rng_lock", threading.Lock())
 
     # MARK: - Construction helpers
 
     @classmethod
     def symmetric(
         cls,
-        amount: timedelta | float | int,
+        amount: JitterOffset,
         *,
         distribution: JitterDistribution = "uniform",
         seed: int | None = None,
@@ -86,9 +93,17 @@ class JitterSpec:
         return cls(min=-delta, max=delta, distribution=distribution, seed=seed)
 
     @classmethod
+    @overload
+    def from_value(cls, value: None) -> None: ...
+
+    @classmethod
+    @overload
     def from_value(
-        cls, value: JitterSpec | timedelta | float | int | tuple | None
-    ) -> JitterSpec | None:
+        cls, value: JitterSpec | JitterOffset | tuple[JitterOffset, JitterOffset]
+    ) -> JitterSpec: ...
+
+    @classmethod
+    def from_value(cls, value: object) -> JitterSpec | None:
         """Coerce shorthand inputs into a :class:`JitterSpec`.
 
         Accepts ``None``, a :class:`JitterSpec`, a positive ``timedelta``/number
@@ -98,8 +113,14 @@ class JitterSpec:
             return None
         if isinstance(value, JitterSpec):
             return value
-        if isinstance(value, tuple) and len(value) == 2:
-            return cls(min=_coerce_offset(value[0]), max=_coerce_offset(value[1]))
+        if isinstance(value, tuple):
+            offsets = cast(tuple[object, ...], value)
+            if (
+                len(offsets) == 2
+                and isinstance(offsets[0], (timedelta, int, float))
+                and isinstance(offsets[1], (timedelta, int, float))
+            ):
+                return cls(min=_coerce_offset(offsets[0]), max=_coerce_offset(offsets[1]))
         if isinstance(value, (timedelta, int, float)):
             return cls.symmetric(value)
         raise TypeError(f"Unsupported jitter shorthand: {value!r}")
@@ -113,12 +134,14 @@ class JitterSpec:
         elif self.distribution == "uniform":
             low = self.min.total_seconds()
             high = self.max.total_seconds()
-            offset = timedelta(seconds=self._rng.uniform(low, high))
+            with self._rng_lock:
+                offset = timedelta(seconds=self._rng.uniform(low, high))
         elif self.distribution == "triangular":
             low = self.min.total_seconds()
             high = self.max.total_seconds()
             mid = (low + high) / 2.0
-            offset = timedelta(seconds=self._rng.triangular(low, high, mid))
+            with self._rng_lock:
+                offset = timedelta(seconds=self._rng.triangular(low, high, mid))
         elif self.distribution == "normal":
             half_range = (self.max - self.min) / 2
             mid = self.min + half_range
@@ -127,7 +150,8 @@ class JitterSpec:
                 if self.sigma is not None
                 else (half_range / 3 if half_range > _ZERO else _ZERO)
             )
-            sampled = self._rng.gauss(mid.total_seconds(), max(sigma.total_seconds(), 0.0))
+            with self._rng_lock:
+                sampled = self._rng.gauss(mid.total_seconds(), max(sigma.total_seconds(), 0.0))
             offset = timedelta(seconds=sampled)
             if offset < self.min:
                 offset = self.min
@@ -165,5 +189,7 @@ class JitterSpec:
             skipped = True
         return fire_at, offset, skipped
 
+
+# MARK: Exports
 
 __all__ = ["JitterDistribution", "JitterSpec"]

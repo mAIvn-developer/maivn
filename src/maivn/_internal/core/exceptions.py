@@ -1,3 +1,4 @@
+# pyright: strict
 """Custom exception hierarchy for the maivn SDK.
 
 This module defines SDK-specific exceptions built on the shared MaivnError base.
@@ -6,11 +7,25 @@ All exceptions inherit from maivn_shared.MaivnError for consistent error handlin
 
 from __future__ import annotations
 
-from typing import Any
-
 from maivn_shared import ConfigurationError as SharedConfigurationError
 from maivn_shared import MaivnError
 from maivn_shared import SerializationError as SharedSerializationError
+
+# MARK: Configuration
+
+AVAILABLE_TOOLS_PREVIEW_LIMIT = 10
+
+
+# MARK: Message Helpers
+
+
+def _join_message_parts(base: str, parts: list[str], *, separator: str = ". ") -> str:
+    """Append present message parts to a base message with the requested separator."""
+    present_parts = [part for part in parts if part]
+    if not present_parts:
+        return base
+    return f"{base}{separator}{separator.join(present_parts)}"
+
 
 # MARK: Tool Execution Errors
 
@@ -24,9 +39,9 @@ class ToolExecutionError(MaivnError):
         reason: str,
         original_error: Exception | None = None,
     ) -> None:
-        self.tool_id = tool_id
-        self.reason = reason
-        self.original_error = original_error
+        self.tool_id: str = tool_id
+        self.reason: str = reason
+        self.original_error: Exception | None = original_error
         super().__init__(f"Tool '{tool_id}' execution failed: {reason}")
 
 
@@ -45,11 +60,11 @@ class ServerAuthenticationError(MaivnError):
         server_message: str | None = None,
         hint: str | None = None,
     ) -> None:
-        self.status_code = status_code
-        self.url = url
-        self.server_error = server_error
-        self.server_message = server_message
-        self.hint = hint
+        self.status_code: int = status_code
+        self.url: str = url
+        self.server_error: str | None = server_error
+        self.server_message: str | None = server_message
+        self.hint: str | None = hint
         super().__init__(self._build_message())
 
     def _build_message(self) -> str:
@@ -59,11 +74,10 @@ class ServerAuthenticationError(MaivnError):
             detail_parts.append(self.server_error)
         if self.server_message:
             detail_parts.append(self.server_message)
-        if detail_parts:
-            base += f": {' - '.join(detail_parts)}"
+        message = _join_message_parts(base, [" - ".join(detail_parts)], separator=": ")
         if self.hint:
-            base += f"\n\nHint: {self.hint}"
-        return base
+            message = _join_message_parts(message, [f"Hint: {self.hint}"], separator="\n\n")
+        return message
 
 
 class ToolNotFoundError(MaivnError):
@@ -74,17 +88,17 @@ class ToolNotFoundError(MaivnError):
         tool_id: str,
         available_tools: list[str] | None = None,
     ) -> None:
-        self.tool_id = tool_id
-        self.available_tools = available_tools or []
+        self.tool_id: str = tool_id
+        self.available_tools: list[str] = available_tools or []
         super().__init__(self._build_message())
 
     def _build_message(self) -> str:
         message = f"Tool '{self.tool_id}' not found"
         if self.available_tools:
-            tools_preview = ", ".join(self.available_tools[:10])
-            message += f". Available tools: {tools_preview}"
-            if len(self.available_tools) > 10:
-                message += f" (and {len(self.available_tools) - 10} more)"
+            tools_preview = ", ".join(self.available_tools[:AVAILABLE_TOOLS_PREVIEW_LIMIT])
+            remaining_count = len(self.available_tools) - AVAILABLE_TOOLS_PREVIEW_LIMIT
+            suffix = f" (and {remaining_count} more)" if remaining_count > 0 else ""
+            message = _join_message_parts(message, [f"Available tools: {tools_preview}{suffix}"])
         return message
 
 
@@ -98,27 +112,27 @@ class ArgumentValidationError(MaivnError):
         provided_params: list[str] | None = None,
         details: str | None = None,
     ) -> None:
-        self.tool_name = tool_name
-        self.expected_params = expected_params or []
-        self.provided_params = provided_params or []
-        self.details = details
+        self.tool_name: str = tool_name
+        self.expected_params: list[str] = expected_params or []
+        self.provided_params: list[str] = provided_params or []
+        self.details: str | None = details
         super().__init__(self._build_message())
 
     def _build_message(self) -> str:
-        message = f"Invalid arguments for tool '{self.tool_name}'"
+        detail_parts: list[str] = []
 
         if self.expected_params and self.provided_params:
             missing = set(self.expected_params) - set(self.provided_params)
             unexpected = set(self.provided_params) - set(self.expected_params)
             if missing:
-                message += f". Missing: {', '.join(missing)}"
+                detail_parts.append(f"Missing: {', '.join(missing)}")
             if unexpected:
-                message += f". Unexpected: {', '.join(unexpected)}"
+                detail_parts.append(f"Unexpected: {', '.join(unexpected)}")
 
         if self.details:
-            message += f". {self.details}"
+            detail_parts.append(self.details)
 
-        return message
+        return _join_message_parts(f"Invalid arguments for tool '{self.tool_name}'", detail_parts)
 
 
 # MARK: Dependency Resolution Errors
@@ -133,9 +147,9 @@ class DependencyResolutionError(MaivnError):
         dependency_name: str,
         details: str,
     ) -> None:
-        self.dependency_type = dependency_type
-        self.dependency_name = dependency_name
-        self.details = details
+        self.dependency_type: str = dependency_type
+        self.dependency_name: str = dependency_name
+        self.details: str = details
         super().__init__(f"Failed to resolve {dependency_type} '{dependency_name}': {details}")
 
 
@@ -147,8 +161,8 @@ class AgentNotFoundError(DependencyResolutionError):
         agent_id: str,
         available_agents: list[str] | None = None,
     ) -> None:
-        self.agent_id = agent_id
-        self.available_agents = available_agents or []
+        self.agent_id: str = agent_id
+        self.available_agents: list[str] = available_agents or []
         super().__init__(
             dependency_type="AgentDependency",
             dependency_name=agent_id,
@@ -156,10 +170,10 @@ class AgentNotFoundError(DependencyResolutionError):
         )
 
     def _build_details(self) -> str:
-        details = "Agent not found in swarm"
+        detail_parts: list[str] = []
         if self.available_agents:
-            details += f". Available: {', '.join(self.available_agents)}"
-        return details
+            detail_parts.append(f"Available: {', '.join(self.available_agents)}")
+        return _join_message_parts("Agent not found in swarm", detail_parts)
 
 
 class ToolDependencyNotFoundError(DependencyResolutionError):
@@ -170,8 +184,8 @@ class ToolDependencyNotFoundError(DependencyResolutionError):
         tool_id: str,
         available_results: list[str] | None = None,
     ) -> None:
-        self.tool_id = tool_id
-        self.available_results = available_results or []
+        self.tool_id: str = tool_id
+        self.available_results: list[str] = available_results or []
         super().__init__(
             dependency_type="ToolDependency",
             dependency_name=tool_id,
@@ -179,10 +193,10 @@ class ToolDependencyNotFoundError(DependencyResolutionError):
         )
 
     def _build_details(self) -> str:
-        details = "Tool result not found in context"
+        detail_parts: list[str] = []
         if self.available_results:
-            details += f". Available: {', '.join(self.available_results)}"
-        return details
+            detail_parts.append(f"Available: {', '.join(self.available_results)}")
+        return _join_message_parts("Tool result not found in context", detail_parts)
 
 
 # MARK: State Compilation Errors
@@ -194,10 +208,10 @@ class StateCompilationError(MaivnError):
     def __init__(
         self,
         reason: str,
-        context: dict[str, Any] | None = None,
+        context: dict[str, object] | None = None,
     ) -> None:
-        self.reason = reason
-        self.context = context or {}
+        self.reason: str = reason
+        self.context: dict[str, object] = context or {}
         super().__init__(self._build_message())
 
     def _build_message(self) -> str:
@@ -217,8 +231,8 @@ class DynamicToolCreationError(StateCompilationError):
         target_id: str,
         reason: str,
     ) -> None:
-        self.tool_type = tool_type
-        self.target_id = target_id
+        self.tool_type: str = tool_type
+        self.target_id: str = target_id
         super().__init__(
             reason=f"Failed to create {tool_type} tool for '{target_id}': {reason}",
             context={"tool_type": tool_type, "target_id": target_id},
@@ -237,13 +251,14 @@ class ConfigurationError(SharedConfigurationError):
         issue: str,
         suggestion: str | None = None,
     ) -> None:
-        self.setting = setting
-        self.issue = issue
-        self.suggestion = suggestion
+        self.setting: str = setting
+        self.issue: str = issue
+        self.suggestion: str | None = suggestion
 
-        message = f"Configuration error for '{setting}': {issue}"
-        if suggestion:
-            message += f". {suggestion}"
+        message = _join_message_parts(
+            f"Configuration error for '{setting}': {issue}",
+            [suggestion] if suggestion else [],
+        )
 
         super().__init__(
             message,
@@ -258,7 +273,7 @@ class SwarmContextError(MaivnError):
     """Raised when agent dependencies are used outside a Swarm context."""
 
     def __init__(self, agent_id: str | None = None) -> None:
-        self.agent_id = agent_id
+        self.agent_id: str | None = agent_id
         super().__init__(self._build_message())
 
     def _build_message(self) -> str:
@@ -283,7 +298,7 @@ class SerializationError(SharedSerializationError):
         operation: str,
         reason: str,
     ) -> None:
-        self.reason = reason
+        self.reason: str = reason
         super().__init__(
             f"Failed to {operation} {data_type}: {reason}",
             data_type=data_type,
@@ -300,8 +315,8 @@ class PydanticDeserializationError(SerializationError):
         reason: str,
         field_name: str | None = None,
     ) -> None:
-        self.model_name = model_name
-        self.field_name = field_name
+        self.model_name: str = model_name
+        self.field_name: str | None = field_name
         super().__init__(
             data_type="Pydantic model",
             operation="deserialize",
@@ -309,9 +324,10 @@ class PydanticDeserializationError(SerializationError):
         )
 
     def _build_reason(self, reason: str) -> str:
-        detailed = f"Model '{self.model_name}'"
+        detail_parts: list[str] = []
         if self.field_name:
-            detailed += f", field '{self.field_name}'"
+            detail_parts.append(f"field '{self.field_name}'")
+        detailed = _join_message_parts(f"Model '{self.model_name}'", detail_parts, separator=", ")
         return f"{detailed}: {reason}"
 
 

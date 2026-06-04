@@ -4,12 +4,20 @@ This service provides default implementations for interrupt handling
 and can be extended for different interaction modes.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 import sys
 import threading
+from _thread import LockType
 from collections.abc import Callable
-from typing import Any
+
+from typing_extensions import override
+
+from maivn._internal.utils.reporting.context import get_current_reporter
+from maivn._internal.utils.reporting.terminal_reporter.base.interface import (
+    BaseReporterInterface,
+)
 
 # MARK: - InterruptService
 
@@ -20,7 +28,7 @@ class InterruptService:
     def __init__(
         self,
         input_handler: Callable[[str], str] | None = None,
-        reporter: Any = None,
+        reporter: BaseReporterInterface | None = None,
     ) -> None:
         """Initialize interrupt service.
 
@@ -28,9 +36,9 @@ class InterruptService:
             input_handler: Optional custom input handler function
             reporter: Optional terminal reporter for coordinated interrupt collection
         """
-        self._input_handler = input_handler or self._default_terminal_input
-        self._reporter = reporter
-        self._input_lock = threading.Lock()
+        self._input_handler: Callable[[str], str] = input_handler or self._default_terminal_input
+        self._reporter: BaseReporterInterface | None = reporter
+        self._input_lock: LockType = threading.Lock()
 
     # MARK: - Public Methods
 
@@ -63,7 +71,7 @@ class InterruptService:
                 # Resolve reporter: first check self._reporter, then context variable
                 reporter = self._resolve_reporter()
 
-                if reporter and hasattr(reporter, "get_input"):
+                if reporter is not None:
                     return self._call_reporter_get_input(
                         prompt,
                         input_type=input_type,
@@ -76,7 +84,7 @@ class InterruptService:
             except (EOFError, KeyboardInterrupt) as e:
                 raise RuntimeError(f"Interrupt request cancelled: {e}") from e
 
-    def _resolve_reporter(self) -> Any:
+    def _resolve_reporter(self) -> BaseReporterInterface | None:
         """Resolve the reporter to use for interrupt collection.
 
         Checks self._reporter first, then falls back to current_reporter context variable.
@@ -88,12 +96,7 @@ class InterruptService:
             return self._reporter
 
         # Fallback to context variable for environments like Studio
-        try:
-            from maivn._internal.utils.reporting.context import get_current_reporter
-
-            return get_current_reporter()
-        except ImportError:
-            return None
+        return get_current_reporter()
 
     def get_user_confirmation(
         self,
@@ -187,7 +190,7 @@ class InterruptService:
             except RuntimeError:
                 return choices[default_index]
 
-    def set_reporter(self, reporter: Any) -> None:
+    def set_reporter(self, reporter: BaseReporterInterface) -> None:
         """Set the terminal reporter for coordinated interrupt collection.
 
         Args:
@@ -248,7 +251,7 @@ class InterruptService:
         choices: list[str] | None,
         data_key: str | None,
         arg_name: str | None,
-        reporter: Any | None = None,
+        reporter: BaseReporterInterface | None = None,
     ) -> str:
         """Call reporter.get_input with optional extended args when supported."""
         resolved_reporter = reporter if reporter is not None else self._reporter
@@ -256,23 +259,17 @@ class InterruptService:
             return self._input_handler(prompt)
 
         try:
-            import inspect
-
-            sig = inspect.signature(resolved_reporter.get_input)
-            params = sig.parameters
-            kwargs: dict[str, Any] = {}
-
-            if "input_type" in params:
-                kwargs["input_type"] = input_type
-            if "choices" in params:
-                kwargs["choices"] = choices or []
-            if "data_key" in params:
-                kwargs["data_key"] = data_key
-            if "arg_name" in params:
-                kwargs["arg_name"] = arg_name
-
-            return resolved_reporter.get_input(prompt, **kwargs)
-        except Exception:
+            return resolved_reporter.get_input(
+                prompt,
+                input_type=input_type,
+                choices=choices or [],
+                data_key=data_key,
+                arg_name=arg_name,
+            )
+        except TypeError as exc:
+            message = str(exc)
+            if "unexpected keyword" not in message and "unexpected keyword argument" not in message:
+                raise
             return resolved_reporter.get_input(prompt)
 
 
@@ -289,9 +286,10 @@ class MockInterruptService(InterruptService):
             responses: List of responses to return in order
         """
         super().__init__()
-        self._responses = responses or []
-        self._response_index = 0
+        self._responses: list[str] = responses or []
+        self._response_index: int = 0
 
+    @override
     def get_user_input(
         self,
         prompt: str,

@@ -1,6 +1,8 @@
 # mAIvn Studio
 
-mAIvn Studio is a local UI plus HTTP/SSE API for discovering apps, running multi-turn sessions, and inspecting execution events in real time.
+mAIvn Studio is a local workbench for your agents: a browser UI where you can find your apps, chat with them across multiple turns, and watch every step of what they do as it happens. Think of it as a cockpit for building and debugging on your own machine before anything ships to users.
+
+Under the hood it is a local UI plus an HTTP/SSE API for discovering apps, running multi-turn sessions, and inspecting execution events in real time.
 
 ## Start Studio
 

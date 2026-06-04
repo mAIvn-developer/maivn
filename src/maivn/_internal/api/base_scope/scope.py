@@ -1,12 +1,10 @@
 """Base scope implementation for maivn SDK internals."""
 
+# pyright: strict, reportUnsafeMultipleInheritance=false
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal
-
-if TYPE_CHECKING:
-    pass
+from collections.abc import Mapping
+from typing import ClassVar, Literal, cast
 
 from maivn_shared import (
     MemoryConfig,
@@ -23,16 +21,17 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from typing_extensions import override
 
 from maivn._internal.api.mcp import MCPServer
-from maivn._internal.core.entities.tools import FunctionTool, McpTool, ModelTool
+from maivn._internal.core.entities.tools import FunctionTool, McpTool, MethodTool, ModelTool
 from maivn._internal.core.interfaces.repositories import (
     DependencyRepoInterface,
     ToolRepoInterface,
 )
 from maivn._internal.core.interfaces.resolvers import ScopeResolverInterface
 from maivn._internal.core.registrars import ToolRegistrar
-from maivn._internal.core.services.toolify import ToolifyService
+from maivn._internal.core.services.toolify.service import ToolHook, ToolifyService
 
 from .batch import BaseScopeBatchMixin
 from .mcp import McpRegistry
@@ -63,7 +62,7 @@ class BaseScope(
 
     # MARK: - Pydantic Config
 
-    model_config = ConfigDict(
+    model_config: ClassVar[ConfigDict] = ConfigDict(
         validate_assignment=True,
         populate_by_name=True,
         arbitrary_types_allowed=True,
@@ -80,7 +79,7 @@ class BaseScope(
         default=None,
         description="Optional system prompt. Converted to SystemMessage if str provided.",
     )
-    private_data: dict[Any, Any] = Field(
+    private_data: dict[object, object] = Field(
         default_factory=dict,
         description=(
             "Private user-specific data. Accepts a key-value dict or a list of PrivateData "
@@ -115,14 +114,14 @@ class BaseScope(
             "(for example reevaluate loop and cycle limits)."
         ),
     )
-    skills: list[dict[str, Any]] = Field(
+    skills: list[dict[str, object]] = Field(
         default_factory=list,
         description=(
             "Optional user-defined skill definitions for this scope. "
             "These are surfaced to retrieval as origin='user_defined'."
         ),
     )
-    resources: list[dict[str, Any]] = Field(
+    resources: list[dict[str, object]] = Field(
         default_factory=list,
         description=(
             "Optional resource bindings for this scope. "
@@ -131,8 +130,8 @@ class BaseScope(
     )
     tags: list[str] = Field(default_factory=list, description="Tags for the scope.")
 
-    before_execute: Callable[[dict[str, Any]], Any] | None = Field(default=None)
-    after_execute: Callable[[dict[str, Any]], Any] | None = Field(default=None)
+    before_execute: ToolHook | None = Field(default=None)
+    after_execute: ToolHook | None = Field(default=None)
 
     hook_execution_mode: Literal["tool", "scope", "agent"] = Field(default="tool")
 
@@ -144,8 +143,8 @@ class BaseScope(
     _resolver: ScopeResolverInterface = PrivateAttr()
     _toolify_service: ToolifyService = PrivateAttr()
     _system_message: SystemMessage | None = PrivateAttr(default=None)
-    _compiled_tools_cache: list[FunctionTool | ModelTool | McpTool] | None = PrivateAttr(
-        default=None
+    _compiled_tools_cache: list[FunctionTool | MethodTool | ModelTool | McpTool] | None = (
+        PrivateAttr(default=None)
     )
     _tools_dirty: bool = PrivateAttr(default=True)
     _mcp_servers: dict[str, MCPServer] = PrivateAttr(default_factory=dict)
@@ -155,34 +154,39 @@ class BaseScope(
 
     @model_validator(mode="before")
     @classmethod
-    def _reject_legacy_memory_settings(cls, value: Any) -> Any:
+    def _reject_legacy_memory_settings(cls, value: object) -> object:
         if isinstance(value, dict) and "memory_settings" in value:
             raise ValueError("memory_settings has been removed; use memory_config instead")
-        return value
+        return cast(object, value)
+
+    @override
+    def model_post_init(self, context: object) -> None:
+        """Initialize BaseScope mixin services after Pydantic construction."""
+        BaseScopeInitializationMixin.model_post_init(self, context)
 
     # MARK: - Validators
 
     @field_validator("name")
     @classmethod
     def _ensure_name_is_valid_string(cls, v: str | None) -> str | None:
-        if v is not None and (not isinstance(v, str) or not v):
+        if v is not None and not v:
             raise ValueError("Name must be a non-empty string.")
         return v
 
     @field_validator("private_data", mode="before")
     @classmethod
-    def _normalize_private_data(cls, v: Any) -> dict[Any, Any]:
+    def _normalize_private_data(cls, v: object) -> dict[object, object]:
         if v is None:
             return {}
         if isinstance(v, dict):
-            return v
+            return cast(dict[object, object], v)
         if isinstance(v, list):
-            return private_data_list_to_dict(v)
+            return cast(dict[object, object], private_data_list_to_dict(cast(list[object], v)))
         raise TypeError("private_data must be a dictionary, list of PrivateData, or None")
 
     @field_validator("memory_config", mode="before")
     @classmethod
-    def _normalize_memory_config(cls, v: Any) -> MemoryConfig:
+    def _normalize_memory_config(cls, v: object) -> MemoryConfig:
         if v is None:
             return MemoryConfig()
         if isinstance(v, MemoryConfig):
@@ -193,7 +197,7 @@ class BaseScope(
 
     @field_validator("system_tools_config", mode="before")
     @classmethod
-    def _normalize_system_tools_config(cls, v: Any) -> SystemToolsConfig:
+    def _normalize_system_tools_config(cls, v: object) -> SystemToolsConfig:
         if v is None:
             return SystemToolsConfig()
         if isinstance(v, SystemToolsConfig):
@@ -204,7 +208,7 @@ class BaseScope(
 
     @field_validator("orchestration_config", mode="before")
     @classmethod
-    def _normalize_orchestration_config(cls, v: Any) -> SessionOrchestrationConfig:
+    def _normalize_orchestration_config(cls, v: object) -> SessionOrchestrationConfig:
         if v is None:
             return SessionOrchestrationConfig()
         if isinstance(v, SessionOrchestrationConfig):
@@ -217,30 +221,30 @@ class BaseScope(
 
     @field_validator("skills", mode="before")
     @classmethod
-    def _normalize_skills(cls, v: Any) -> list[dict[str, Any]]:
+    def _normalize_skills(cls, v: object) -> list[dict[str, object]]:
         if v is None:
             return []
         if not isinstance(v, list):
             raise TypeError("skills must be a list of dictionaries or None")
-        normalized: list[dict[str, Any]] = []
-        for index, item in enumerate(v):
+        normalized: list[dict[str, object]] = []
+        for index, item in enumerate(cast(list[object], v)):
             if not isinstance(item, dict):
                 raise TypeError(f"skills[{index}] must be a dictionary")
-            normalized.append(dict(item))
+            normalized.append(dict(cast(Mapping[str, object], item)))
         return normalized
 
     @field_validator("resources", mode="before")
     @classmethod
-    def _normalize_resources(cls, v: Any) -> list[dict[str, Any]]:
+    def _normalize_resources(cls, v: object) -> list[dict[str, object]]:
         if v is None:
             return []
         if not isinstance(v, list):
             raise TypeError("resources must be a list of dictionaries or None")
-        normalized: list[dict[str, Any]] = []
-        for index, item in enumerate(v):
+        normalized: list[dict[str, object]] = []
+        for index, item in enumerate(cast(list[object], v)):
             if not isinstance(item, dict):
                 raise TypeError(f"resources[{index}] must be a dictionary")
-            normalized.append(dict(item))
+            normalized.append(dict(cast(Mapping[str, object], item)))
         return normalized
 
     # MARK: - Properties
@@ -253,7 +257,7 @@ class BaseScope(
     # MARK: - System Tool Configuration
 
     @staticmethod
-    def coerce_system_tools_config(value: Any) -> SystemToolsConfig | None:
+    def coerce_system_tools_config(value: object) -> SystemToolsConfig | None:
         """Coerce ``None`` / dict / ``SystemToolsConfig`` to a typed config or ``None``."""
         if value is None:
             return None
@@ -265,7 +269,7 @@ class BaseScope(
 
     def resolve_system_tools_config(
         self,
-        override: Any = None,
+        override: object = None,
         *,
         allow_private_in_system_tools: bool | None = None,
     ) -> SystemToolsConfig | None:
@@ -289,7 +293,7 @@ class BaseScope(
     # MARK: - Orchestration Configuration
 
     @staticmethod
-    def coerce_orchestration_config(value: Any) -> SessionOrchestrationConfig | None:
+    def coerce_orchestration_config(value: object) -> SessionOrchestrationConfig | None:
         """Coerce ``None`` / dict / ``SessionOrchestrationConfig`` to a typed config or ``None``."""
         if value is None:
             return None
@@ -303,7 +307,7 @@ class BaseScope(
 
     def resolve_orchestration_config(
         self,
-        override: Any = None,
+        override: object = None,
     ) -> SessionOrchestrationConfig | None:
         """Merge the scope's orchestration config with a per-call ``override``."""
         return SessionOrchestrationConfig.merge(
@@ -316,7 +320,7 @@ class BaseScope(
 
 
 def _rebuild_base_scope_model() -> None:
-    BaseScope.model_rebuild()
+    _ = BaseScope.model_rebuild()
 
 
 _rebuild_base_scope_model()

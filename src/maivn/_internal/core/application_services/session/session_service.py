@@ -1,14 +1,22 @@
 """Session orchestration helpers."""
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import Any
+from typing import TypeAlias, cast
 
 from maivn_shared import SessionClientProtocol, SessionRequest, SessionStartRequest
 from maivn_shared.infrastructure.logging import LoggerProtocol
+from pydantic import JsonValue
 
 from maivn._internal.core import SessionEndpoints
 from maivn._internal.utils.logging import get_optional_logger
+
+# MARK: Types
+
+JsonObject: TypeAlias = dict[str, JsonValue]
+JsonArray: TypeAlias = list[JsonValue]
+
 
 # MARK: - SessionService
 
@@ -25,12 +33,13 @@ class SessionService:
         self,
         *,
         client: SessionClientProtocol,
-        payload: dict[str, Any],
+        payload: JsonObject,
     ) -> SessionEndpoints:
         """Start a session via the provided client and return endpoints."""
         # Tools are nested inside payload.state.tools
-        nested_state = payload.get("state", {})
-        tool_count = len(nested_state.get("tools", []))
+        nested_state = cast(JsonObject, payload.get("state", {}))
+        tools = cast(JsonArray, nested_state.get("tools", []))
+        tool_count = len(tools)
         self._logger.debug(
             "[TIMING] http.start start-session tools=%d",
             tool_count,
@@ -46,18 +55,18 @@ class SessionService:
         state: SessionRequest,
         client_id: str,
         thread_id: str | None,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         """Construct the payload for session start requests."""
         start_request = SessionStartRequest(
             state=state,
             client_id=client_id,
             thread_id=thread_id,
         )
-        return start_request.model_dump(mode="json", exclude_none=True)
+        return cast(JsonObject, start_request.model_dump(mode="json", exclude_none=True))
 
     # MARK: - Private Helpers
 
-    def _parse_session_response(self, response: dict[str, Any]) -> SessionEndpoints:
+    def _parse_session_response(self, response: JsonObject) -> SessionEndpoints:
         """Parse and validate session response from server."""
         session_id = str(response.get("session_id", ""))
         assistant_id = response.get("assistant_id")

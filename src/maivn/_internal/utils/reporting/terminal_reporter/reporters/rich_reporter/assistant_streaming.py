@@ -1,31 +1,57 @@
 """Assistant streaming methods for ``RichReporter``."""
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import Any
+from abc import ABC
+from contextlib import AbstractContextManager
+from typing import TYPE_CHECKING
+
+from typing_extensions import override
 
 from ..._formatters import extract_text_from_response
+from ...base.defaults import ReporterDefaultEventsMixin
+from ...base.interface import BaseReporterInterface
+from .display import DisplayManager
+from .progress import ProgressManager
+
+if TYPE_CHECKING:
+    from rich.console import Console
+
 
 # MARK: Assistant Streaming
 
 
-class RichReporterAssistantStreamingMixin:
-    enabled: bool
-    _terminal_lock: Any
-    _progress_manager: Any
-    _display_manager: Any
-    _assistant_stream_text_by_id: dict[str, str]
-    _assistant_stream_live_suspended: bool
-    console: Any
+class RichReporterAssistantStreamingMixin(ReporterDefaultEventsMixin, ABC):
+    if TYPE_CHECKING:
+        enabled: bool
+        _terminal_lock: AbstractContextManager[bool]
+        _progress_manager: ProgressManager
+        _display_manager: DisplayManager
+        _assistant_stream_text_by_id: dict[str, str]
+        _assistant_stream_live_suspended: bool
+        console: Console
 
+    @override
     def report_response_chunk(
         self,
         text: str,
         *,
         assistant_id: str | None = None,
         full_text: str | None = None,
+        replace_content: bool = False,
     ) -> None:
-        """Render incremental assistant response text."""
+        """Render incremental assistant response text.
+
+        ``replace_content`` is the SDK signal that this chunk represents a
+        fresh stream that should overwrite the displayed bubble (e.g. after
+        a reevaluate cycle or a mid-stream synthesis revision). Terminal
+        scrollback can't be physically erased, so we instead emit a blank-
+        line separator before the replacement chunk so the reader can tell
+        the prior partial block ended and a new block began — without the
+        separator the two cumulative texts mash together onto the same line
+        and look like duplicate output.
+        """
         if not self.enabled:
             return
 
@@ -40,6 +66,7 @@ class RichReporterAssistantStreamingMixin:
         )
 
         with self._terminal_lock:
+            previously_streaming = self._assistant_stream_live_suspended
             if not self._assistant_stream_live_suspended:
                 self._progress_manager.suspend_live()
                 self._assistant_stream_live_suspended = True
@@ -50,6 +77,13 @@ class RichReporterAssistantStreamingMixin:
                 previous = self._assistant_stream_text_by_id.get(stream_id, "")
                 self._assistant_stream_text_by_id[stream_id] = previous + delta
 
+            if replace_content and previously_streaming:
+                self.console.print(
+                    "",
+                    end="\n",
+                    highlight=False,
+                    soft_wrap=True,
+                )
             self.console.print(
                 delta,
                 end="",
@@ -57,6 +91,7 @@ class RichReporterAssistantStreamingMixin:
                 soft_wrap=True,
             )
 
+    @override
     def report_status_message(
         self,
         message: str,
@@ -80,27 +115,24 @@ class RichReporterAssistantStreamingMixin:
 # MARK: Final Output Helpers
 
 
-class RichReporterFinalOutputMixin:
-    enabled: bool
-    _terminal_lock: Any
-    _progress_manager: Any
-    _display_manager: Any
-    _assistant_stream_text_by_id: dict[str, str]
-    _assistant_stream_live_suspended: bool
-    console: Any
+class RichReporterFinalOutputMixin(BaseReporterInterface, ABC):
+    if TYPE_CHECKING:
+        enabled: bool
+        _terminal_lock: AbstractContextManager[bool]
+        _progress_manager: ProgressManager
+        _display_manager: DisplayManager
+        _assistant_stream_text_by_id: dict[str, str]
+        _assistant_stream_live_suspended: bool
+        console: Console
 
+    @override
     def print_final_response(self, response: str) -> None:
         """Print final assistant response text."""
         if not self.enabled:
             return
 
         extracted = extract_text_from_response(response)
-        if isinstance(extracted, str):
-            response_text = extracted.strip()
-        elif isinstance(response, str):
-            response_text = response.strip()
-        else:
-            response_text = str(response)
+        response_text = extracted.strip() if isinstance(extracted, str) else response.strip()
 
         with self._terminal_lock:
             if self._has_matching_streamed_response(response_text):

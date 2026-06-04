@@ -2,7 +2,7 @@
 
 Python SDK for building agentic systems with typed tools and dependencies.
 
-The maivn SDK provides a clean, declarative interface for creating AI agents with:
+The mAIvn SDK provides a clean, declarative interface for creating AI agents with:
 
 - **Typed tool definitions** using decorators and Pydantic models
 - **Dependency injection** between tools, agents, and external data
@@ -205,10 +205,10 @@ from maivn import depends_on_private_data
 @agent.toolify(description='Call external API')
 @depends_on_private_data(data_key='api_secret', arg_name='secret')
 def call_api(query: str, secret: str) -> dict:
-    # 'secret' is injected server-side, never exposed to LLM
+    # 'secret' is injected at execution time, never exposed to LLM
     return {'result': f'Called API with query: {query}'}
 
-# Set private data (stays server-side)
+# Set private data (stays within the runtime)
 agent.private_data = {'api_secret': 'sk-xxx'}
 ```
 
@@ -255,9 +255,9 @@ response = swarm.invoke(
 
 ## Security
 
-**Your code stays local.** All function tools and MCP tools execute in your environment - code is never transferred to or executed on maivn servers.
+**Your code stays local.** All function tools and MCP tools execute in your environment - code is never transferred to or executed on the mAIvn service.
 
-The maivn server only receives tool schemas (names, descriptions, parameters) and orchestrates execution. The actual tool code runs locally in your environment, ensuring:
+The mAIvn service only receives tool schemas (names, descriptions, parameters) and orchestrates execution. The actual tool code runs locally in your environment, ensuring:
 
 - Your business logic remains private
 - Sensitive data processed by tools stays local
@@ -265,7 +265,7 @@ The maivn server only receives tool schemas (names, descriptions, parameters) an
 
 ## Scalability
 
-**Thousands of tools, no problem.** The maivn system provides high-performance tool management for agents and swarms with large tool catalogs. Tool selection and orchestration remain fast and accurate regardless of how many tools you register.
+**Thousands of tools, no problem.** The mAIvn service provides high-performance tool management for agents and swarms with large tool catalogs. Tool selection and orchestration remain fast and accurate regardless of how many tools you register.
 
 ## Core Concepts
 
@@ -276,7 +276,7 @@ The maivn server only receives tool schemas (names, descriptions, parameters) an
 | **Tool**         | Function or Pydantic model exposed to the LLM            |
 | **Dependency**   | Declares data flow between tools/agents                  |
 | **Final Tool**   | Marked tool that produces the structured output          |
-| **Private Data** | Server-side secrets injected at execution time           |
+| **Private Data** | Secrets injected at execution time within the runtime    |
 
 ## Public API
 
@@ -303,7 +303,7 @@ The maivn server only receives tool schemas (names, descriptions, parameters) an
 | `@agent.toolify()`                            | Register a function/model as a tool |
 | `@depends_on_tool(tool, arg)`                 | Inject output from another tool     |
 | `@depends_on_agent(agent, arg)`               | Inject output from another agent    |
-| `@depends_on_private_data(key, arg)`          | Inject server-side secret           |
+| `@depends_on_private_data(key, arg)`          | Inject secret at execution time     |
 | `@depends_on_interrupt(arg, prompt, handler)` | Collect user input                  |
 
 ### Configuration
@@ -351,9 +351,41 @@ execution for more deterministic runs.
 
 ## Documentation
 
-### API Reference
+The docs read top-down as a spine: start at the **Overview**, learn the **Core
+Concepts**, work through the task-focused **Guides**, then reach for the **SDK
+Reference** when you need an exact name. New here? Read the three Getting Started
+pages in order, then jump to whichever guide matches your task.
 
-- [API Reference Index](docs/api/README.md)
+### Getting Started
+
+- [Overview](docs/overview.md) - The front door: what MAIVN is, the one mental model, install, and a first agent
+- [Quickstart](docs/guides/getting-started.md) - Build a running agent with a tool and a typed answer, step by step
+- [Core Concepts](docs/core-concepts.md) - Agents, swarms, tools, dependencies/DAG, sessions, and structured output, in one place
+
+### Guides
+
+- [Tools and Dependencies](docs/guides/tools.md) - Register tools, toolsets, and hooks; chain them into a DAG
+- [Dependencies](docs/guides/dependencies.md) - Every dependency and control decorator, in depth
+- [Multi-Agent Swarms](docs/guides/multi-agent.md) - Coordinate specialist agents with dependency-aware members
+- [Authentication & API Keys](docs/guides/authentication.md) - Authenticate the SDK, key scopes, rejected-key handling, and key hygiene
+- [Sessions, Invocation, and Streaming](docs/guides/sessions-and-streaming.md) - `invoke`/`stream`/`ainvoke`/`astream`, results, thread continuity, batch
+- [Structured Output](docs/guides/structured-output.md) - Guaranteed typed results via `final_tool` and `structured_output()`
+- [Private Data and PII Protection](docs/guides/private-data.md) - Keep secrets and PII out of the model
+- [Interrupts & Human-in-the-Loop](docs/guides/interrupts.md) - Pause a turn for human input with `@depends_on_interrupt`, then resume
+- [Enrichment Events and Streaming to a Frontend](docs/guides/frontend-events.md) - Live progress phases, the enrichment contract, and streaming events to any frontend
+- [Token and Usage Tracking](docs/guides/billing-and-usage.md) - `TokenUsage` per run, plus account usage and plan models
+- [System Tools](docs/guides/system-tools.md) - Built-in `web_search`, `repl`, `think`
+- [Connecting MCP Servers](docs/guides/mcp.md) - Plug in external MCP tool servers over stdio/HTTP, with auth and the trust boundary
+- [Memory and Recall](docs/guides/memory-and-recall.md) - Carry context across turns; skills, resources, and insights
+- [Scheduled Invocation](docs/guides/scheduled-invocation.md) - Cron, jitter, retry, lifecycle
+- [Timeouts, Retries & Reliability](docs/guides/reliability.md) - Bound slow work and retry only the transient failures worth retrying
+- [Testing & Local Development](docs/guides/testing.md) - Compile requests offline, unit-test tools directly, and mock agent responses
+- [mAIvn Studio](docs/guides/maivn-studio.md) - Studio UI + API reference
+
+### SDK Reference
+
+- [SDK Reference](docs/api/README.md) - The complete public surface you import from `maivn`, grouped by area
+- [Shared Data Models](docs/api/data-models.md) - Typed shapes you read off responses and pass in (`SessionResponse`, `TokenUsage`, privacy and billing models, messages)
 - [Agent](docs/api/agent.md) - Agent class reference
 - [Swarm](docs/api/swarm.md) - Swarm class reference
 - [Client](docs/api/client.md) - Client class reference
@@ -363,18 +395,8 @@ execution for more deterministic runs.
 - [Messages](docs/api/messages.md) - Message types
 - [Logging](docs/api/logging.md) - Logging system
 - [Scheduling](docs/api/scheduling.md) - `cron/every/at`, jitter, retry, `ScheduledJob`
-
-### Guides
-
-- [Getting Started](docs/guides/getting-started.md) - First steps
-- [Tools](docs/guides/tools.md) - Tool definition patterns
-- [Dependencies](docs/guides/dependencies.md) - Dependency management
-- [Structured Output](docs/guides/structured-output.md) - Final tool pattern
-- [Multi-Agent](docs/guides/multi-agent.md) - Swarm orchestration
-- [Private Data](docs/guides/private-data.md) - Security and secrets
-- [System Tools](docs/guides/system-tools.md) - Built-in tools
-- [Scheduled Invocation](docs/guides/scheduled-invocation.md) - Cron, jitter, retry, lifecycle
-- [mAIvn Studio](docs/guides/maivn-studio.md) - Studio UI + API reference
+- [Errors & Exceptions](docs/api/errors.md) - Every error the SDK raises, where to import it, and how to handle each
+- [Versioning & Stability](docs/versioning.md) - `__version__`, the `AppEvent` contract version, and which surfaces are stable
 
 ### Examples
 
@@ -393,6 +415,7 @@ A working tour of the SDK organized by what you'd want to build. See the
 
 ### Reference
 
+- [Glossary](docs/glossary.md) - Plain-language A-Z of core concepts and the terms people mix up
 - [Troubleshooting](docs/troubleshooting.md) - Common errors and debugging
 - [Best Practices](docs/best-practices.md) - Production patterns
 

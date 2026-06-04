@@ -2,9 +2,9 @@
 Provides the tool execution orchestrator used by ``AgentOrchestrator``.
 """
 
+# pyright: strict
 from __future__ import annotations
 
-# MARK: - Imports
 from .tool_execution_orchestrator import ToolExecutionOrchestrator
 
 # MARK: - Public API

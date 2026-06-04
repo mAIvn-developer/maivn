@@ -1,5 +1,6 @@
 """Normalized event forwarding internals."""
 
+# pyright: strict
 from __future__ import annotations
 
 from .bridge import forward_to_bridge

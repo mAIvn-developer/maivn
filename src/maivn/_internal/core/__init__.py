@@ -1,7 +1,9 @@
+# pyright: strict
 """Internal Core Package Exports."""
 
 from __future__ import annotations
 
+# MARK: - Entities
 from .entities import (
     AgentTool,
     BaseTool,
@@ -14,10 +16,13 @@ from .entities import (
     ToolCallPayload,
     ToolEventPayload,
     ToolEventValue,
-    ToolSpecRegistry,
     UpdateEventPayload,
 )
+
+# MARK: - Interfaces
 from .interfaces.sse_client import SSEClient
+
+# MARK: - Exports
 
 __all__ = [
     "AgentTool",
@@ -32,6 +37,5 @@ __all__ = [
     "ToolCallPayload",
     "ToolEventPayload",
     "ToolEventValue",
-    "ToolSpecRegistry",
     "UpdateEventPayload",
 ]

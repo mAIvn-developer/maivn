@@ -1,13 +1,14 @@
 # Swarms
 
-Multiple agents working together. A `Swarm` holds a list of `Agent`s and
-routes work between them — the user message goes in, the result of the
-designated final-output agent comes out.
+Runnable examples of multiple agents working together. A `Swarm` holds a list
+of `Agent`s and routes work between them — the user message goes in, the result
+of the designated final-output agent comes out.
 
 ## A three-agent swarm
 
-A realistic investment-analysis swarm: a financial analyst, a risk assessor,
-and a director who synthesizes their findings into a final memo.
+This example builds a realistic investment-analysis swarm: a financial analyst,
+a risk assessor, and a director who synthesizes their findings into a final
+memo.
 
 ```python
 from maivn import Agent, Swarm
@@ -218,14 +219,14 @@ brand_strategist = Agent(
     name='Brand Strategist',
     system_prompt='You know the brand strategy deeply. Answer from BRAND.pdf.',
     api_key='...',
-    memory_resources=[{'path': 'business/BRAND.pdf', 'name': 'Brand Strategy'}],
+    resources=[{'path': 'business/BRAND.pdf', 'name': 'Brand Strategy'}],
 )
 
 valuation_analyst = Agent(
     name='Valuation Analyst',
     system_prompt='You know the financial model deeply. Answer from VALUATION.pdf.',
     api_key='...',
-    memory_resources=[{'path': 'business/VALUATION.pdf', 'name': 'Valuation Model'}],
+    resources=[{'path': 'business/VALUATION.pdf', 'name': 'Valuation Model'}],
 )
 
 bi_swarm = Swarm(

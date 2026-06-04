@@ -1,27 +1,36 @@
 """Progress and input methods for ``RichReporter``."""
 
+# pyright: strict
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
-from typing import Any
+from abc import ABC
+from collections.abc import Generator
+from contextlib import AbstractContextManager, contextmanager
+from typing import TYPE_CHECKING, cast
 
 from rich.progress import TaskID
+from typing_extensions import override
+
+from ...base.interface import BaseReporterInterface
+from .progress import ProgressManager
+from .terminal_setup import InputHandler
 
 # MARK: Progress and Input
 
 
-class RichReporterProgressMixin:
-    enabled: bool
-    _terminal_lock: Any
-    _progress_manager: Any
-    _input_handler: Any
+class RichReporterProgressMixin(BaseReporterInterface, ABC):
+    if TYPE_CHECKING:
+        enabled: bool
+        _terminal_lock: AbstractContextManager[bool]
+        _progress_manager: ProgressManager
+        _input_handler: InputHandler
 
     @contextmanager
+    @override
     def live_progress(
         self,
         description: str = "Processing...",
-    ) -> Iterator[TaskID | None]:
+    ) -> Generator[TaskID | None, None, None]:
         """Context manager for live progress display."""
         if not self.enabled:
             yield None
@@ -34,11 +43,12 @@ class RichReporterProgressMixin:
             yield task
         finally:
             with self._terminal_lock:
-                progress_cm.__exit__(None, None, None)
+                _ = progress_cm.__exit__(None, None, None)
 
+    @override
     def update_progress(
         self,
-        task_id: TaskID,
+        task_id: object,
         description: str | None = None,
     ) -> None:
         """Update progress description."""
@@ -46,10 +56,11 @@ class RichReporterProgressMixin:
             return
 
         with self._terminal_lock:
-            self._progress_manager.update_progress(task_id, description)
+            self._progress_manager.update_progress(cast(TaskID, task_id), description)
 
     @contextmanager
-    def prepare_for_user_input(self) -> Iterator[None]:
+    @override
+    def prepare_for_user_input(self) -> Generator[None, None, None]:
         """Pause live rendering so terminal input can be collected."""
         if not self.enabled:
             yield
@@ -62,8 +73,9 @@ class RichReporterProgressMixin:
             yield
         finally:
             with self._terminal_lock:
-                input_cm.__exit__(None, None, None)
+                _ = input_cm.__exit__(None, None, None)
 
+    @override
     def get_input(
         self,
         prompt: str,

@@ -1,15 +1,25 @@
 """HTTP client service for orchestrator network operations with retry logic."""
 
+# pyright: strict
 from __future__ import annotations
 
 import time
-from typing import Any
+from types import TracebackType
+from typing import TypeAlias
 
 import httpx
 from maivn_shared import SessionClientProtocol
 from maivn_shared.infrastructure.logging import LoggerProtocol
+from pydantic import JsonValue
 
 from maivn._internal.utils.logging import get_optional_logger
+
+# MARK: Types
+
+JsonObject: TypeAlias = dict[str, JsonValue]
+
+
+# MARK: HTTP Client Service
 
 
 class HttpClientService:
@@ -25,11 +35,11 @@ class HttpClientService:
         logger: LoggerProtocol | None = None,
         http_client: httpx.Client | None = None,
     ) -> None:
-        self._timeout = timeout
-        self._max_retries = max_retries
+        self._timeout: float = timeout
+        self._max_retries: int = max_retries
         self._logger: LoggerProtocol = logger or get_optional_logger()
-        self._client = http_client or self._create_http_client(timeout)
-        self._owns_http_client = http_client is None
+        self._client: httpx.Client = http_client or self._create_http_client(timeout)
+        self._owns_http_client: bool = http_client is None
 
     def _create_http_client(self, timeout: float) -> httpx.Client:
         """Create an HTTP client with connection pooling."""
@@ -58,12 +68,12 @@ class HttpClientService:
     def post_resume(
         self,
         url: str,
-        payload: dict[str, Any],
+        payload: JsonObject,
         client: SessionClientProtocol,
     ) -> None:
         """Post resume payload with retries."""
         headers = client.headers()
-        json_payload = {"value": payload}
+        json_payload: JsonObject = {"value": payload}
 
         last_exception = self._execute_with_retries(
             url=url,
@@ -85,7 +95,12 @@ class HttpClientService:
     def __enter__(self) -> HttpClientService:
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         self.close()
 
     # MARK: - Private Methods
@@ -94,7 +109,7 @@ class HttpClientService:
         self,
         *,
         url: str,
-        json_payload: dict[str, Any],
+        json_payload: JsonObject,
         headers: dict[str, str],
         payload_count: int,
     ) -> Exception | None:
@@ -105,7 +120,7 @@ class HttpClientService:
             try:
                 self._log_attempt(url, attempt, payload_count)
                 response = self._client.post(url, json=json_payload, headers=headers)
-                response.raise_for_status()
+                _ = response.raise_for_status()
                 self._log_success(attempt)
                 return None
 
@@ -120,11 +135,9 @@ class HttpClientService:
                     # Continue retry loop
                     last_exception = exc
                     continue
-                if isinstance(result, Exception):
-                    raise result from exc
-                last_exception = exc
+                raise result from exc
 
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 - log and re-raise unexpected client failures.
                 self._logger.error("Unexpected error during resume POST: %s", exc)
                 raise
 
@@ -157,7 +170,7 @@ class HttpClientService:
             return False
 
         if attempt < self._max_retries - 1:
-            delay = 2**attempt
+            delay = 1 << attempt
             self._logger.warning(
                 "Retryable error on attempt %d/%d: %s. Retrying in %ds...",
                 attempt + 1,
@@ -186,10 +199,10 @@ class HttpClientService:
         self,
         exc: httpx.HTTPStatusError,
         attempt: int,
-    ) -> Exception | None:
+    ) -> httpx.HTTPStatusError | None:
         """Handle HTTP status errors. Returns None to continue retrying, Exception to raise."""
         if exc.response.status_code >= 500 and attempt < self._max_retries - 1:
-            delay = 2**attempt
+            delay = 1 << attempt
             self._logger.warning(
                 "Server error %d on attempt %d/%d. Retrying in %ds...",
                 exc.response.status_code,

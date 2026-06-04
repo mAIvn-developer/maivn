@@ -1,13 +1,21 @@
 """Batch invocation helpers for BaseScope."""
 
+# pyright: strict
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Protocol, cast
 
 from maivn_shared import SessionResponse
+
+# MARK: Types
+
+
+class _BatchInvocationScope(Protocol):
+    def invoke(self, input_item: object, **invoke_kwargs: object) -> SessionResponse: ...
+
 
 # MARK: Concurrency
 
@@ -28,10 +36,10 @@ def resolve_max_concurrency(max_concurrency: int | None, input_count: int) -> in
 class BaseScopeBatchMixin:
     def batch(
         self,
-        inputs: Iterable[Any],
+        inputs: Iterable[object],
         *,
         max_concurrency: int | None = None,
-        **invoke_kwargs: Any,
+        **invoke_kwargs: object,
     ) -> list[SessionResponse]:
         """Invoke this scope for multiple inputs concurrently."""
         input_items = list(inputs)
@@ -48,10 +56,10 @@ class BaseScopeBatchMixin:
 
     async def abatch(
         self,
-        inputs: Iterable[Any],
+        inputs: Iterable[object],
         *,
         max_concurrency: int | None = None,
-        **invoke_kwargs: Any,
+        **invoke_kwargs: object,
     ) -> list[SessionResponse]:
         """Asynchronously invoke this scope for multiple inputs concurrently."""
         input_items = list(inputs)
@@ -74,13 +82,11 @@ class BaseScopeBatchMixin:
 
     def _invoke_batch_item(
         self,
-        input_item: Any,
-        invoke_kwargs: dict[str, Any],
+        input_item: object,
+        invoke_kwargs: dict[str, object],
     ) -> SessionResponse:
-        invoke_fn = getattr(self, "invoke", None)
-        if invoke_fn is None:
-            raise AttributeError("Scope does not support invoke().")
-        return invoke_fn(input_item, **invoke_kwargs)
+        scope = cast(_BatchInvocationScope, cast(object, self))
+        return scope.invoke(input_item, **invoke_kwargs)
 
 
 __all__ = [

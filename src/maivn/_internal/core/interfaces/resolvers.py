@@ -1,3 +1,4 @@
+# pyright: strict
 """Dependency resolver interfaces.
 Defines protocols for resolving dependencies within a scope context.
 """
@@ -5,7 +6,6 @@ Defines protocols for resolving dependencies within a scope context.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
 
 from maivn_shared import BaseDependency
 
@@ -35,6 +35,6 @@ class ScopeResolverInterface(DependencyResolverInterface, ABC):
     """A dependency resolver with optional access to the current scope context."""
 
     @abstractmethod
-    def set_context(self, *, scope: Any) -> None:
+    def set_context(self, *, scope: object) -> None:
         """Attach a scope context to the resolver if needed."""
         raise NotImplementedError

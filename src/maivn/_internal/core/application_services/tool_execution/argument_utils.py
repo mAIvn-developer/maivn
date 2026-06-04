@@ -4,14 +4,18 @@ This module provides utilities for argument validation and pruning,
 ensuring tools receive only the arguments they can accept.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 import inspect
-from typing import Any
+from typing import TYPE_CHECKING, cast
 
 from maivn_shared.infrastructure.logging import LoggerProtocol
 
-from maivn._internal.core.entities import BaseTool, FunctionTool, McpTool, ModelTool
+from maivn._internal.core.entities import BaseTool, FunctionTool, McpTool, MethodTool, ModelTool
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
 
 # MARK: Argument Pruning
 
@@ -25,7 +29,7 @@ def get_allowed_parameters(tool: BaseTool) -> set[str] | None:
     Returns:
         Set of allowed parameter names, or None if tool accepts any args
     """
-    if isinstance(tool, FunctionTool):
+    if isinstance(tool, (FunctionTool, MethodTool)):
         return _get_function_parameters(tool)
     if isinstance(tool, ModelTool):
         return _get_model_fields(tool)
@@ -34,7 +38,7 @@ def get_allowed_parameters(tool: BaseTool) -> set[str] | None:
     return None
 
 
-def _get_function_parameters(tool: FunctionTool) -> set[str] | None:
+def _get_function_parameters(tool: FunctionTool | MethodTool) -> set[str] | None:
     """Get allowed parameters from a function tool.
 
     Args:
@@ -74,17 +78,22 @@ def _get_model_fields(tool: ModelTool) -> set[str] | None:
     Returns:
         Set of field names, or None if no model defined
     """
-    model_cls = getattr(tool, "model", None)
+    # Model-field introspection lives here by design: prune_arguments must drop
+    # args a model tool does not declare before the SDK executes it locally via
+    # ModelExecutionStrategy (the live standalone/no-server path through
+    # ToolExecutionService). The entity-level helper removed in S4 was unrelated
+    # dead public surface, not this pruning logic.
+    model_cls = cast("type[BaseModel] | None", getattr(tool, "model", None))
     if model_cls is None:
         return None
-    return set(getattr(model_cls, "model_fields", {}).keys())
+    return set(model_cls.model_fields.keys())
 
 
 def prune_arguments(
     tool: BaseTool,
-    args: dict[str, Any],
+    args: dict[str, object],
     logger: LoggerProtocol | None = None,
-) -> tuple[dict[str, Any], list[str]]:
+) -> tuple[dict[str, object], list[str]]:
     """Remove arguments that the tool doesn't accept.
 
     Args:

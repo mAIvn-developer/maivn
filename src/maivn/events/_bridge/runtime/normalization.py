@@ -1,6 +1,9 @@
+# pyright: strict
 from __future__ import annotations
 
-from typing import Any
+from typing import cast
+
+from pydantic import JsonValue
 
 from ...._internal.utils.reporting.app_event_payloads import (
     build_agent_assignment_payload,
@@ -27,14 +30,19 @@ from .identity import AssignmentAndScopeResolver, BridgeIdentityState, ToolIdent
 
 # MARK: Payload Normalization
 
+EventPayload = dict[str, object]
+JsonObject = dict[str, JsonValue]
+
 
 class BridgePayloadNormalizer:
     def __init__(self, identity_state: BridgeIdentityState) -> None:
-        self._identity_state = identity_state
-        self._tool_resolver = ToolIdentityResolver(identity_state)
-        self._assignment_scope_resolver = AssignmentAndScopeResolver(identity_state)
+        self._identity_state: BridgeIdentityState = identity_state
+        self._tool_resolver: ToolIdentityResolver = ToolIdentityResolver(identity_state)
+        self._assignment_scope_resolver: AssignmentAndScopeResolver = AssignmentAndScopeResolver(
+            identity_state
+        )
 
-    def normalize_payload(self, event_type: str, data: dict[str, Any]) -> dict[str, Any]:
+    def normalize_payload(self, event_type: str, data: EventPayload) -> EventPayload:
         normalized_event_type = normalize_key_part(event_type) or event_type
         participant_key = normalize_text(data.get("participant_key"))
         participant_name = normalize_text(data.get("participant_name"))
@@ -67,19 +75,22 @@ class BridgePayloadNormalizer:
                 tool_type=tool_type,
             )
             return merge_extra_fields(
-                build_tool_event_payload(
-                    tool_name=tool_name or "tool",
-                    tool_id=canonical_tool_id,
-                    status=status or "executing",
-                    args=args,
-                    result=result,
-                    error=error,
-                    agent_name=agent_name,
-                    swarm_name=swarm_name,
-                    tool_type=tool_type,
-                    participant_key=participant_key,
-                    participant_name=participant_name,
-                    participant_role=participant_role,
+                cast(
+                    EventPayload,
+                    build_tool_event_payload(
+                        tool_name=tool_name or "tool",
+                        tool_id=canonical_tool_id,
+                        status=status or "executing",
+                        args=args,
+                        result=cast(JsonValue, result),
+                        error=error,
+                        agent_name=agent_name,
+                        swarm_name=swarm_name,
+                        tool_type=tool_type,
+                        participant_key=participant_key,
+                        participant_name=participant_name,
+                        participant_role=participant_role,
+                    ),
                 ),
                 data,
             )
@@ -103,12 +114,15 @@ class BridgePayloadNormalizer:
                 tool_type="system",
             )
             return merge_extra_fields(
-                build_system_tool_start_payload(
-                    tool_type=tool_type or "system_tool",
-                    tool_id=canonical_tool_id,
-                    params=params,
-                    agent_name=agent_name,
-                    swarm_name=swarm_name,
+                cast(
+                    EventPayload,
+                    build_system_tool_start_payload(
+                        tool_type=tool_type or "system_tool",
+                        tool_id=canonical_tool_id,
+                        params=params,
+                        agent_name=agent_name,
+                        swarm_name=swarm_name,
+                    ),
                 ),
                 data,
             )
@@ -120,13 +134,18 @@ class BridgePayloadNormalizer:
                 tool_id or "",
                 tool_id or "system_tool",
             )
+            progress_value = data.get("progress")
+            progress = (
+                cast(float, progress_value) if isinstance(progress_value, (int, float)) else None
+            )
             return merge_extra_fields(
-                build_system_tool_chunk_payload(
-                    tool_id=canonical_tool_id,
-                    text=coerce_text(data.get("text")) or "",
-                    progress=data.get("progress")
-                    if isinstance(data.get("progress"), (int, float))
-                    else None,
+                cast(
+                    EventPayload,
+                    build_system_tool_chunk_payload(
+                        tool_id=canonical_tool_id,
+                        text=coerce_text(data.get("text")) or "",
+                        progress=progress,
+                    ),
                 ),
                 data,
             )
@@ -139,9 +158,12 @@ class BridgePayloadNormalizer:
                 tool_id or "system_tool",
             )
             return merge_extra_fields(
-                build_system_tool_complete_payload(
-                    tool_id=canonical_tool_id,
-                    result=data.get("result", tool_payload.get("result")),
+                cast(
+                    EventPayload,
+                    build_system_tool_complete_payload(
+                        tool_id=canonical_tool_id,
+                        result=cast(JsonValue, data.get("result", tool_payload.get("result"))),
+                    ),
                 ),
                 data,
             )
@@ -149,16 +171,19 @@ class BridgePayloadNormalizer:
         if normalized_event_type == "assistant_chunk":
             assistant_payload = coerce_mapping(data.get("assistant")) or {}
             return merge_extra_fields(
-                build_assistant_chunk_payload(
-                    assistant_id=normalize_text(data.get("assistant_id"))
-                    or normalize_text(assistant_payload.get("id"))
-                    or "assistant",
-                    text=coerce_text(data.get("text"))
-                    or coerce_text(assistant_payload.get("delta"))
-                    or "",
-                    participant_key=participant_key,
-                    participant_name=participant_name,
-                    participant_role=participant_role,
+                cast(
+                    EventPayload,
+                    build_assistant_chunk_payload(
+                        assistant_id=normalize_text(data.get("assistant_id"))
+                        or normalize_text(assistant_payload.get("id"))
+                        or "assistant",
+                        text=coerce_text(data.get("text"))
+                        or coerce_text(assistant_payload.get("delta"))
+                        or "",
+                        participant_key=participant_key,
+                        participant_name=participant_name,
+                        participant_role=participant_role,
+                    ),
                 ),
                 data,
             )
@@ -167,56 +192,66 @@ class BridgePayloadNormalizer:
             status_payload = coerce_mapping(data.get("status")) or {}
             assistant_payload = coerce_mapping(data.get("assistant")) or {}
             return merge_extra_fields(
-                build_status_message_payload(
-                    assistant_id=normalize_text(data.get("assistant_id"))
-                    or normalize_text(assistant_payload.get("id"))
-                    or "assistant",
-                    message=coerce_text(data.get("message"))
-                    or coerce_text(status_payload.get("message"))
-                    or "",
+                cast(
+                    EventPayload,
+                    build_status_message_payload(
+                        assistant_id=normalize_text(data.get("assistant_id"))
+                        or normalize_text(assistant_payload.get("id"))
+                        or "assistant",
+                        message=coerce_text(data.get("message"))
+                        or coerce_text(status_payload.get("message"))
+                        or "",
+                    ),
                 ),
                 data,
             )
 
         if normalized_event_type == "interrupt_required":
             interrupt_payload = coerce_mapping(data.get("interrupt")) or {}
+            interrupt_number_value = data.get("interrupt_number")
+            if not isinstance(interrupt_number_value, int):
+                interrupt_number_value = interrupt_payload.get("number")
+            interrupt_number = (
+                interrupt_number_value if isinstance(interrupt_number_value, int) else None
+            )
+            total_interrupts_value = data.get("total_interrupts")
+            if not isinstance(total_interrupts_value, int):
+                total_interrupts_value = interrupt_payload.get("total")
+            total_interrupts = (
+                total_interrupts_value if isinstance(total_interrupts_value, int) else None
+            )
+            choices_value = data.get("choices")
+            if not isinstance(choices_value, list):
+                choices_value = interrupt_payload.get("choices")
+            choices = cast(list[str], choices_value) if isinstance(choices_value, list) else None
             return merge_extra_fields(
-                build_interrupt_required_payload(
-                    interrupt_id=normalize_text(data.get("interrupt_id"))
-                    or normalize_text(interrupt_payload.get("id"))
-                    or build_fallback_id("interrupt"),
-                    data_key=normalize_text(data.get("data_key"))
-                    or normalize_text(interrupt_payload.get("data_key"))
-                    or "input",
-                    prompt=coerce_text(data.get("prompt"))
-                    or coerce_text(interrupt_payload.get("prompt"))
-                    or "Input required.",
-                    tool_name=normalize_text(data.get("tool_name"))
-                    or normalize_text(interrupt_payload.get("tool_name")),
-                    arg_name=normalize_text(data.get("arg_name"))
-                    or normalize_text(interrupt_payload.get("arg_name")),
-                    checkpoint_id=normalize_text(data.get("checkpoint_id"))
-                    or normalize_text(interrupt_payload.get("checkpoint_id")),
-                    assignment_id=normalize_text(data.get("assignment_id"))
-                    or normalize_text(interrupt_payload.get("assignment_id")),
-                    interrupt_number=data.get("interrupt_number")
-                    if isinstance(data.get("interrupt_number"), int)
-                    else interrupt_payload.get("number")
-                    if isinstance(interrupt_payload.get("number"), int)
-                    else None,
-                    total_interrupts=data.get("total_interrupts")
-                    if isinstance(data.get("total_interrupts"), int)
-                    else interrupt_payload.get("total")
-                    if isinstance(interrupt_payload.get("total"), int)
-                    else None,
-                    input_type=normalize_text(data.get("input_type"))
-                    or normalize_text(interrupt_payload.get("input_type")),
-                    choices=data.get("choices")
-                    if isinstance(data.get("choices"), list)
-                    else interrupt_payload.get("choices")
-                    if isinstance(interrupt_payload.get("choices"), list)
-                    else None,
-                    timestamp=normalize_text(data.get("timestamp")),
+                cast(
+                    EventPayload,
+                    build_interrupt_required_payload(
+                        interrupt_id=normalize_text(data.get("interrupt_id"))
+                        or normalize_text(interrupt_payload.get("id"))
+                        or build_fallback_id("interrupt"),
+                        data_key=normalize_text(data.get("data_key"))
+                        or normalize_text(interrupt_payload.get("data_key"))
+                        or "input",
+                        prompt=coerce_text(data.get("prompt"))
+                        or coerce_text(interrupt_payload.get("prompt"))
+                        or "Input required.",
+                        tool_name=normalize_text(data.get("tool_name"))
+                        or normalize_text(interrupt_payload.get("tool_name")),
+                        arg_name=normalize_text(data.get("arg_name"))
+                        or normalize_text(interrupt_payload.get("arg_name")),
+                        checkpoint_id=normalize_text(data.get("checkpoint_id"))
+                        or normalize_text(interrupt_payload.get("checkpoint_id")),
+                        assignment_id=normalize_text(data.get("assignment_id"))
+                        or normalize_text(interrupt_payload.get("assignment_id")),
+                        interrupt_number=interrupt_number,
+                        total_interrupts=total_interrupts,
+                        input_type=normalize_text(data.get("input_type"))
+                        or normalize_text(interrupt_payload.get("input_type")),
+                        choices=choices,
+                        timestamp=normalize_text(data.get("timestamp")),
+                    ),
                 ),
                 data,
             )
@@ -236,21 +271,27 @@ class BridgePayloadNormalizer:
                 swarm_name=swarm_name,
             )
             return merge_extra_fields(
-                build_agent_assignment_payload(
-                    agent_name=agent_name or "unknown-agent",
-                    status=normalize_text(data.get("status"))
-                    or normalize_text(assignment_payload.get("status"))
-                    or "in_progress",
-                    assignment_id=canonical_assignment_id,
-                    swarm_name=swarm_name,
-                    task=normalize_text(data.get("task"))
-                    or normalize_text(assignment_payload.get("task")),
-                    error=normalize_text(data.get("error"))
-                    or normalize_text(assignment_payload.get("error")),
-                    result=data.get("result", assignment_payload.get("result")),
-                    participant_key=participant_key,
-                    participant_name=participant_name,
-                    participant_role=participant_role,
+                cast(
+                    EventPayload,
+                    build_agent_assignment_payload(
+                        agent_name=agent_name or "unknown-agent",
+                        status=normalize_text(data.get("status"))
+                        or normalize_text(assignment_payload.get("status"))
+                        or "in_progress",
+                        assignment_id=canonical_assignment_id,
+                        swarm_name=swarm_name,
+                        task=normalize_text(data.get("task"))
+                        or normalize_text(assignment_payload.get("task")),
+                        error=normalize_text(data.get("error"))
+                        or normalize_text(assignment_payload.get("error")),
+                        result=cast(
+                            JsonValue,
+                            data.get("result", assignment_payload.get("result")),
+                        ),
+                        participant_key=participant_key,
+                        participant_name=participant_name,
+                        participant_role=participant_role,
+                    ),
                 ),
                 data,
             )
@@ -263,23 +304,32 @@ class BridgePayloadNormalizer:
                 scope_type=normalize_text(data.get("scope_type")),
             )
             return merge_extra_fields(
-                build_enrichment_payload(
-                    phase=normalize_text(data.get("phase"))
-                    or normalize_text(enrichment_payload.get("phase"))
-                    or "enrichment",
-                    message=normalize_text(data.get("message"))
-                    or normalize_text(enrichment_payload.get("message"))
-                    or "Enrichment update",
-                    scope_id=scope_id,
-                    scope_name=normalize_text(data.get("scope_name")),
-                    scope_type=normalize_text(data.get("scope_type")),
-                    memory=coerce_mapping(data.get("memory"))
-                    or coerce_mapping(enrichment_payload.get("memory")),
-                    redaction=coerce_mapping(data.get("redaction"))
-                    or coerce_mapping(enrichment_payload.get("redaction")),
-                    participant_key=participant_key,
-                    participant_name=participant_name,
-                    participant_role=participant_role,
+                cast(
+                    EventPayload,
+                    build_enrichment_payload(
+                        phase=normalize_text(data.get("phase"))
+                        or normalize_text(enrichment_payload.get("phase"))
+                        or "enrichment",
+                        message=normalize_text(data.get("message"))
+                        or normalize_text(enrichment_payload.get("message"))
+                        or "Enrichment update",
+                        scope_id=scope_id,
+                        scope_name=normalize_text(data.get("scope_name")),
+                        scope_type=normalize_text(data.get("scope_type")),
+                        memory=cast(
+                            JsonObject | None,
+                            coerce_mapping(data.get("memory"))
+                            or coerce_mapping(enrichment_payload.get("memory")),
+                        ),
+                        redaction=cast(
+                            JsonObject | None,
+                            coerce_mapping(data.get("redaction"))
+                            or coerce_mapping(enrichment_payload.get("redaction")),
+                        ),
+                        participant_key=participant_key,
+                        participant_name=participant_name,
+                        participant_role=participant_role,
+                    ),
                 ),
                 data,
             )
@@ -291,15 +341,21 @@ class BridgePayloadNormalizer:
                 output_payload.get("response")
             )
             if response is None and isinstance(responses, list) and responses:
-                first_response = responses[0]
+                first_response = cast(list[object], responses)[0]
                 if isinstance(first_response, str):
                     response = first_response
             return merge_extra_fields(
-                build_final_payload(
-                    response=response or "",
-                    result=data.get("result", output_payload.get("result")),
-                    token_usage=coerce_mapping(data.get("token_usage"))
-                    or coerce_mapping(output_payload.get("token_usage")),
+                cast(
+                    EventPayload,
+                    build_final_payload(
+                        response=response or "",
+                        result=cast(JsonValue, data.get("result", output_payload.get("result"))),
+                        token_usage=cast(
+                            JsonObject | None,
+                            coerce_mapping(data.get("token_usage"))
+                            or coerce_mapping(output_payload.get("token_usage")),
+                        ),
+                    ),
                 ),
                 data,
             )
@@ -307,12 +363,18 @@ class BridgePayloadNormalizer:
         if normalized_event_type == "error":
             error_info_payload = coerce_mapping(data.get("error_info")) or {}
             return merge_extra_fields(
-                build_error_payload(
-                    error=normalize_text(data.get("error"))
-                    or normalize_text(error_info_payload.get("message"))
-                    or "Unknown error",
-                    details=coerce_mapping(data.get("details"))
-                    or coerce_mapping(error_info_payload.get("details")),
+                cast(
+                    EventPayload,
+                    build_error_payload(
+                        error=normalize_text(data.get("error"))
+                        or normalize_text(error_info_payload.get("message"))
+                        or "Unknown error",
+                        details=cast(
+                            JsonObject | None,
+                            coerce_mapping(data.get("details"))
+                            or coerce_mapping(error_info_payload.get("details")),
+                        ),
+                    ),
                 ),
                 data,
             )

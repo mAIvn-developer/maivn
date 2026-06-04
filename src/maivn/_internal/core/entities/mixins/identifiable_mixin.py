@@ -1,15 +1,29 @@
-"""Mixin for entities that require unique identification.
+"""Mixins for entities that require stable identifiers."""
 
-This mixin provides common UUID generation functionality to eliminate
-DRY violations across different entity types.
-"""
-
+# pyright: strict
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import Protocol, cast
 
 from maivn_shared import create_uuid
 from pydantic import BaseModel, Field
+from typing_extensions import override
+
+# MARK: - Host Protocols
+
+
+class FunctionToolIdentityHost(Protocol):
+    """Host contract required by FunctionToolIdentifiableMixin."""
+
+    func: Callable[..., object]
+
+
+class ModelToolIdentityHost(Protocol):
+    """Host contract required by ModelToolIdentifiableMixin."""
+
+    model: type[BaseModel]
+
 
 # MARK: - Base Identifiable
 
@@ -19,7 +33,8 @@ class IdentifiableMixin(BaseModel):
 
     id: str = Field(default="", description="Unique identifier")
 
-    def model_post_init(self, __context: Any) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         """Initialize the identifier if not provided."""
         if not self.id:
             self.id = self._generate_id()
@@ -44,7 +59,8 @@ class ToolIdentifiableMixin(IdentifiableMixin):
 
     tool_id: str = Field(default="", description="Unique tool identifier")
 
-    def model_post_init(self, __context: Any) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         """Initialize the tool_id if not provided."""
         if not self.tool_id:
             self.tool_id = self._generate_tool_id()
@@ -58,7 +74,7 @@ class ToolIdentifiableMixin(IdentifiableMixin):
         """
         return create_uuid(self._get_id_source())
 
-    def _get_id_source(self) -> Any:
+    def _get_id_source(self) -> object:
         """Get the source object for ID generation.
 
         Override in subclasses to provide tool-specific source.
@@ -75,13 +91,10 @@ class ToolIdentifiableMixin(IdentifiableMixin):
 class FunctionToolIdentifiableMixin(ToolIdentifiableMixin):
     """Mixin for function-based tools with UUID generation."""
 
-    def _get_id_source(self) -> Any:
-        """Get the function for ID generation.
-
-        Returns:
-            Function object or self if unavailable
-        """
-        return getattr(self, "func", None) or self
+    @override
+    def _get_id_source(self) -> object:
+        """Get the function for ID generation."""
+        return cast(FunctionToolIdentityHost, cast(object, self)).func
 
 
 # MARK: - Model Tool Identifiable
@@ -90,13 +103,10 @@ class FunctionToolIdentifiableMixin(ToolIdentifiableMixin):
 class ModelToolIdentifiableMixin(ToolIdentifiableMixin):
     """Mixin for model-based tools with UUID generation."""
 
-    def _get_id_source(self) -> Any:
-        """Get the model class for ID generation.
-
-        Returns:
-            Model class or self if unavailable
-        """
-        return getattr(self, "model", None) or self
+    @override
+    def _get_id_source(self) -> object:
+        """Get the model class for ID generation."""
+        return cast(ModelToolIdentityHost, cast(object, self)).model
 
 
 # MARK: - Exports

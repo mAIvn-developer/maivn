@@ -1,3 +1,4 @@
+# pyright: strict
 """Context variables for reporter propagation.
 
 This module provides context variables that allow nested agent invocations
@@ -76,7 +77,7 @@ def set_current_reporter(reporter: BaseReporter | None) -> None:
     Args:
         reporter: The reporter to set, or None to clear.
     """
-    current_reporter.set(reporter)
+    _ = current_reporter.set(reporter)
 
 
 __all__ = [

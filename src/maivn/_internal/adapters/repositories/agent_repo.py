@@ -4,58 +4,56 @@ Stores agents by id and maintains a secondary name index for lookup.
 
 from __future__ import annotations
 
-# MARK: In-Memory Agent Repository
-from typing import TYPE_CHECKING
+from typing import Generic, TypeVar
 
-from maivn._internal.core.interfaces.repositories import AgentRepoInterface
+from maivn._internal.core.interfaces.repositories.agent import AgentRepositoryEntity
 
-if TYPE_CHECKING:
-    from maivn._internal.api.agent import Agent
+# MARK: Types
+
+AgentT = TypeVar("AgentT", bound=AgentRepositoryEntity)
 
 
-class AgentRepo(AgentRepoInterface):
+class AgentRepo(Generic[AgentT]):
     """In-memory implementation of AgentRepoInterface."""
 
     def __init__(self) -> None:
-        self.store: dict[str, Agent] = {}
-        self._name_index: dict[str, Agent] = {}
+        self.store: dict[str, AgentT] = {}
+        self._name_index: dict[str, AgentT] = {}
 
     # MARK: - Private methods
 
-    def _get_agent_id(self, agent: Agent) -> str | None:
-        return getattr(agent, "id", None)
+    def _get_agent_id(self, agent: AgentT) -> str:
+        return agent.id
 
-    def _get_agent_name(self, agent: Agent) -> str | None:
-        return getattr(agent, "name", None)
+    def _get_agent_name(self, agent: AgentT) -> str | None:
+        return agent.name
 
-    def _add_to_name_index(self, agent: Agent) -> None:
+    def _add_to_name_index(self, agent: AgentT) -> None:
         name = self._get_agent_name(agent)
         if name:
             self._name_index[name] = agent
 
-    def _remove_from_name_index(self, agent: Agent) -> None:
+    def _remove_from_name_index(self, agent: AgentT) -> None:
         name = self._get_agent_name(agent)
         if name and name in self._name_index:
             del self._name_index[name]
 
     # MARK: - Agent methods
 
-    def add_agent(self, agent: Agent) -> None:
-        if agent is None:
-            return
+    def add_agent(self, agent: AgentT) -> None:
         agent_id = self._get_agent_id(agent)
         if not agent_id or agent_id in self.store:
             return
         self.store[agent_id] = agent
         self._add_to_name_index(agent)
 
-    def get_agent(self, agent_id: str) -> Agent | None:
+    def get_agent(self, agent_id: str) -> AgentT | None:
         return self.store.get(agent_id)
 
-    def get_agent_by_name(self, name: str) -> Agent | None:
+    def get_agent_by_name(self, name: str) -> AgentT | None:
         return self._name_index.get(name)
 
-    def list_agents(self) -> list[Agent]:
+    def list_agents(self) -> list[AgentT]:
         return list(self.store.values())
 
     def remove_agent(self, agent_id: str) -> None:
@@ -63,7 +61,7 @@ class AgentRepo(AgentRepoInterface):
         if agent:
             self._remove_from_name_index(agent)
 
-    def update_agent(self, agent: Agent) -> None:
+    def update_agent(self, agent: AgentT) -> None:
         agent_id = self._get_agent_id(agent)
         if not agent_id:
             return

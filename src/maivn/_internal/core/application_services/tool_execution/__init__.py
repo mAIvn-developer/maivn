@@ -4,6 +4,7 @@ Executes function/model tools and resolves declared dependencies before executio
 Includes argument validation, strategy-based dispatch, and Pydantic deserialization.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 from maivn._internal.core.entities.execution_context import ExecutionContext
@@ -13,6 +14,7 @@ from .basic_tool_execution_service import BasicToolExecutionService
 from .execution_strategy import (
     FunctionExecutionStrategy,
     McpExecutionStrategy,
+    MethodExecutionStrategy,
     ModelExecutionStrategy,
     StrategyRegistry,
     ToolExecutionStrategy,
@@ -20,6 +22,8 @@ from .execution_strategy import (
 )
 from .tool_event_dispatcher import ToolEventDispatcher
 from .tool_execution_service import ToolExecutionService
+
+# MARK: Public API
 
 __all__ = [
     # Context
@@ -31,6 +35,7 @@ __all__ = [
     # Strategies
     "FunctionExecutionStrategy",
     "McpExecutionStrategy",
+    "MethodExecutionStrategy",
     "ModelExecutionStrategy",
     "StrategyRegistry",
     "ToolExecutionStrategy",

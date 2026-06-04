@@ -1,53 +1,79 @@
 """Tool configuration validation for BaseScope."""
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Sequence
+from typing import Protocol, cast
 
 from maivn._internal.core.entities.tools import BaseTool
+from maivn._internal.core.interfaces.repositories import ToolRepoInterface
+
+# MARK: Types
+
+
+class _ToolScope(Protocol):
+    name: str | None
+
+    def list_tools(self) -> list[BaseTool]: ...
+
+
+class _AgentScope(_ToolScope, Protocol):
+    use_as_final_output: bool
+
+
+class _SwarmScope(_ToolScope, Protocol):
+    agents: Sequence[_AgentScope]
+
 
 # MARK: Validation Helpers
 
 
-def collect_all_tools(scope: Any) -> list[BaseTool]:
+def collect_all_tools(scope: object) -> list[BaseTool]:
     """Collect tools from scope, member agents, and parent swarm."""
-    all_tools = list(scope._tool_repo.list_tools())
+    all_tools = list(_tool_repo_for(scope).list_tools())
     all_tools.extend(_collect_agent_tools(scope))
     all_tools.extend(_collect_swarm_tools(scope))
     return all_tools
 
 
-def _collect_agent_tools(scope: Any) -> list[BaseTool]:
+def _collect_agent_tools(scope: object) -> list[BaseTool]:
     if not hasattr(scope, "agents"):
         return []
     tools: list[BaseTool] = []
-    for agent in getattr(scope, "agents", []):
+    for agent in cast(_SwarmScope, scope).agents:
         tools.extend(agent.list_tools())
     return tools
 
 
-def _collect_swarm_tools(scope: Any) -> list[BaseTool]:
-    swarm = getattr(scope, "_swarm", None)
+def _collect_swarm_tools(scope: object) -> list[BaseTool]:
+    swarm = cast(object | None, getattr(scope, "_swarm", None))
     if swarm is None:
         return []
-    return list(swarm.list_tools())
+    return list(cast(_ToolScope, swarm).list_tools())
 
 
-def get_scope_name_for_validation(scope: Any) -> str:
+def get_scope_name_for_validation(scope: object) -> str:
     """Build a human-readable scope name for validation error messages."""
-    name = scope.name or scope.__class__.__name__
+    tool_scope = cast(_ToolScope, scope)
+    name = tool_scope.name or scope.__class__.__name__
     if hasattr(scope, "agents"):
         return f"Swarm '{name}' (including all agents)"
-    swarm = getattr(scope, "_swarm", None)
+    swarm = cast(object | None, getattr(scope, "_swarm", None))
     if swarm is not None:
-        return f"Agent '{name}' (including parent Swarm '{swarm.name}')"
+        parent = cast(_ToolScope, swarm)
+        return f"Agent '{name}' (including parent Swarm '{parent.name}')"
     return f"{scope.__class__.__name__} '{name}'"
+
+
+def _tool_repo_for(scope: object) -> ToolRepoInterface:
+    return cast(ToolRepoInterface, getattr(scope, "_tool_repo"))  # noqa: B009
 
 
 # MARK: Flag Validation
 
 
-def validate_tool_flags_per_scope(scope: Any) -> list[str]:
+def validate_tool_flags_per_scope(scope: object) -> list[str]:
     """Validate final_tool counts per independent execution scope.
 
     Each execution scope (agent's own tools, swarm's own tools) may have at most
@@ -68,11 +94,12 @@ def validate_tool_flags_per_scope(scope: Any) -> list[str]:
     return errors
 
 
-def _validate_swarm_scope(swarm: Any) -> list[str]:
+def _validate_swarm_scope(swarm: object) -> list[str]:
     errors: list[str] = []
-    swarm_name = swarm.name or swarm.__class__.__name__
+    swarm_scope = cast(_SwarmScope, swarm)
+    swarm_name = swarm_scope.name or swarm.__class__.__name__
 
-    swarm_tools = list(swarm._tool_repo.list_tools())
+    swarm_tools = list(_tool_repo_for(swarm).list_tools())
     errors.extend(
         _validate_single_final_tool_in_list(
             swarm_tools,
@@ -80,10 +107,10 @@ def _validate_swarm_scope(swarm: Any) -> list[str]:
         )
     )
 
-    agents_with_final_tool: list[Any] = []
-    for agent in getattr(swarm, "agents", []) or []:
+    agents_with_final_tool: list[_AgentScope] = []
+    for agent in swarm_scope.agents or []:
         agent_tools = list(agent.list_tools())
-        agent_name = getattr(agent, "name", None) or "unknown"
+        agent_name = agent.name or "unknown"
         errors.extend(
             _validate_single_final_tool_in_list(
                 agent_tools,
@@ -104,11 +131,12 @@ def _validate_swarm_scope(swarm: Any) -> list[str]:
     return errors
 
 
-def _validate_agent_scope(agent: Any) -> list[str]:
+def _validate_agent_scope(agent: object) -> list[str]:
     errors: list[str] = []
-    agent_name = agent.name or agent.__class__.__name__
+    agent_scope = cast(_AgentScope, agent)
+    agent_name = agent_scope.name or agent.__class__.__name__
 
-    agent_tools = list(agent._tool_repo.list_tools())
+    agent_tools = list(_tool_repo_for(agent).list_tools())
     errors.extend(
         _validate_single_final_tool_in_list(
             agent_tools,
@@ -116,10 +144,11 @@ def _validate_agent_scope(agent: Any) -> list[str]:
         )
     )
 
-    parent_swarm = getattr(agent, "_swarm", None)
+    parent_swarm = cast(object | None, getattr(agent, "_swarm", None))
     if parent_swarm is not None:
-        swarm_name = parent_swarm.name or parent_swarm.__class__.__name__
-        swarm_tools = list(parent_swarm.list_tools())
+        parent_scope = cast(_ToolScope, parent_swarm)
+        swarm_name = parent_scope.name or type(parent_swarm).__name__
+        swarm_tools = list(parent_scope.list_tools())
         errors.extend(
             _validate_single_final_tool_in_list(
                 swarm_tools,
@@ -131,7 +160,7 @@ def _validate_agent_scope(agent: Any) -> list[str]:
 
 
 def _validate_single_final_tool_in_list(
-    tools: list[BaseTool],
+    tools: Sequence[BaseTool],
     *,
     scope_label: str,
 ) -> list[str]:
@@ -141,17 +170,17 @@ def _validate_single_final_tool_in_list(
     final_names = ", ".join(f"'{t.name}'" for t in final_tools)
     return [
         f"\n[ERROR] Multiple tools marked with final_tool=True: {final_names}\n"
-        f"  SCOPE: {scope_label}\n"
-        f"  ISSUE: Only ONE tool per scope can be designated as the final output tool.\n"
-        f"  FIX: Remove 'final_tool=True' from all but one tool in this scope.\n"
+        + f"  SCOPE: {scope_label}\n"
+        + "  ISSUE: Only ONE tool per scope can be designated as the final output tool.\n"
+        + "  FIX: Remove 'final_tool=True' from all but one tool in this scope.\n"
     ]
 
 
 def _validate_designated_final_agent_when_ambiguous(
     *,
-    swarm: Any,
-    swarm_tools: list[BaseTool],
-    agents_with_final_tool: list[Any],
+    swarm: object,
+    swarm_tools: Sequence[BaseTool],
+    agents_with_final_tool: Sequence[_AgentScope],
 ) -> list[str]:
     """Require exactly one use_as_final_output agent when final-tool ownership is ambiguous.
 
@@ -167,13 +196,14 @@ def _validate_designated_final_agent_when_ambiguous(
         return []
 
     designated = [
-        a for a in getattr(swarm, "agents", []) or [] if getattr(a, "use_as_final_output", False)
+        agent for agent in cast(_SwarmScope, swarm).agents or [] if agent.use_as_final_output
     ]
     if len(designated) == 1:
         return []
 
-    swarm_name = swarm.name or swarm.__class__.__name__
-    agent_names = ", ".join(f"'{getattr(a, 'name', 'unknown')}'" for a in agents_with_final_tool)
+    swarm_scope = cast(_SwarmScope, swarm)
+    swarm_name = swarm_scope.name or swarm.__class__.__name__
+    agent_names = ", ".join(f"'{agent.name or 'unknown'}'" for agent in agents_with_final_tool)
     extras: list[str] = []
     if swarm_has_final_tool:
         extras.append("swarm-scope")
@@ -184,43 +214,50 @@ def _validate_designated_final_agent_when_ambiguous(
     if not designated:
         return [
             f"\n[ERROR] Ambiguous final_tool ownership in Swarm '{swarm_name}'\n"
-            f"  Final tools declared on: {ownership}\n"
-            f"  ISSUE: When multiple scopes in a swarm declare final_tool, the swarm's\n"
-            f"         final response agent must be designated explicitly.\n"
-            f"  FIX: Set use_as_final_output=True on exactly one agent.\n"
+            + f"  Final tools declared on: {ownership}\n"
+            + "  ISSUE: When multiple scopes in a swarm declare final_tool, the swarm's\n"
+            + "         final response agent must be designated explicitly.\n"
+            + "  FIX: Set use_as_final_output=True on exactly one agent.\n"
         ]
 
-    designated_names = ", ".join(f"'{getattr(a, 'name', 'unknown')}'" for a in designated)
+    designated_names = ", ".join(f"'{agent.name or 'unknown'}'" for agent in designated)
     return [
-        f"\n[ERROR] Multiple swarm agents marked use_as_final_output=True\n"
-        f"  SCOPE: Swarm '{swarm_name}'\n"
-        f"  Agents: {designated_names}\n"
-        f"  FIX: Set use_as_final_output=True on exactly one agent.\n"
+        "\n[ERROR] Multiple swarm agents marked use_as_final_output=True\n"
+        + f"  SCOPE: Swarm '{swarm_name}'\n"
+        + f"  Agents: {designated_names}\n"
+        + "  FIX: Set use_as_final_output=True on exactly one agent.\n"
     ]
 
 
-def validate_swarm_final_output_agents(scope: Any) -> list[str]:
+def validate_swarm_final_output_agents(scope: object) -> list[str]:
     """Validate that at most one swarm agent has use_as_final_output=True."""
     if not hasattr(scope, "agents"):
         return []
-    agents = list(getattr(scope, "agents", []) or [])
-    flagged = [a for a in agents if bool(getattr(a, "use_as_final_output", False))]
+    swarm_scope = cast(_SwarmScope, scope)
+    agents = list(swarm_scope.agents or [])
+    flagged = [agent for agent in agents if agent.use_as_final_output]
     if len(flagged) <= 1:
         return []
-    agent_names = ", ".join(f"'{getattr(a, 'name', 'unknown')}'" for a in flagged)
+    agent_names = ", ".join(f"'{agent.name or 'unknown'}'" for agent in flagged)
     return [
-        f"\n[ERROR] Multiple swarm agents marked use_as_final_output=True\n"
-        f"  SCOPE: Swarm '{scope.name}'\n"
-        f"  Agents: {agent_names}\n"
-        f"  FIX: Set use_as_final_output=True on exactly one agent.\n"
+        "\n[ERROR] Multiple swarm agents marked use_as_final_output=True\n"
+        + f"  SCOPE: Swarm '{swarm_scope.name}'\n"
+        + f"  Agents: {agent_names}\n"
+        + "  FIX: Set use_as_final_output=True on exactly one agent.\n"
     ]
 
 
 def raise_validation_error(errors: list[str]) -> None:
     """Raise a ValueError with formatted tool configuration errors."""
     error_msg = (
-        "\n" + "=" * 80 + "\n"
-        "TOOL CONFIGURATION ERROR\n" + "=" * 80 + "".join(errors) + "=" * 80 + "\n"
+        "\n"
+        + "=" * 80
+        + "\n"
+        + "TOOL CONFIGURATION ERROR\n"
+        + "=" * 80
+        + "".join(errors)
+        + "=" * 80
+        + "\n"
     )
     raise ValueError(error_msg)
 

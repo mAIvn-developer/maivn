@@ -1,41 +1,62 @@
+# pyright: strict
 """Shared normalization helpers."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Protocol, cast, runtime_checkable
 
-from .._models import AppEvent
+from .._models import AppEvent, JsonObject
+
+# MARK: Types
+
+
+@runtime_checkable
+class SupportsModelDump(Protocol):
+    def model_dump(self) -> object: ...
+
 
 # MARK: Text and Mapping Helpers
 
 
-def clean_text(value: Any) -> str | None:
+def _coerce_dict(value: dict[object, object]) -> JsonObject:
+    return cast(JsonObject, dict(value))
+
+
+def _coerce_model_dump(value: SupportsModelDump) -> JsonObject | None:
+    dumped = value.model_dump()
+    if isinstance(dumped, dict):
+        return cast(JsonObject, dumped)
+    return None
+
+
+def clean_text(value: object) -> str | None:
     if not isinstance(value, str):
         return None
     cleaned = value.strip()
     return cleaned or None
 
 
-def clean_stream_text(value: Any) -> str | None:
+def clean_stream_text(value: object) -> str | None:
     if not isinstance(value, str):
         return None
     return value if value else None
 
 
-def coerce_mapping(value: Any) -> dict[str, Any]:
+def coerce_mapping(value: object) -> JsonObject:
     if isinstance(value, dict):
-        return dict(value)
-    if hasattr(value, "model_dump"):
-        dumped = value.model_dump()
-        if isinstance(dumped, dict):
+        return _coerce_dict(cast(dict[object, object], value))
+    if isinstance(value, SupportsModelDump):
+        dumped = _coerce_model_dump(value)
+        if dumped is not None:
             return dumped
     return {}
 
 
-def get_latest_response_text(value: Any) -> str | None:
+def get_latest_response_text(value: object) -> str | None:
     if not isinstance(value, list):
         return None
-    for item in reversed(value):
+    items = cast(list[object], value)
+    for item in reversed(items):
         if isinstance(item, str):
             cleaned = item.strip()
             if cleaned:
@@ -69,15 +90,15 @@ def map_assignment_status(raw_status: str | None) -> str:
     return "in_progress"
 
 
-def model_result_as_mapping(value: Any) -> dict[str, Any] | None:
-    if hasattr(value, "model_dump"):
-        dumped = value.model_dump()
-        if isinstance(dumped, dict):
+def model_result_as_mapping(value: object) -> JsonObject | None:
+    if isinstance(value, SupportsModelDump):
+        dumped = _coerce_model_dump(value)
+        if dumped is not None:
             return dumped
     if isinstance(value, dict):
-        return dict(value)
+        return _coerce_dict(cast(dict[object, object], value))
     return None
 
 
-def validate_payload(payload: dict[str, Any]) -> AppEvent:
+def validate_payload(payload: JsonObject) -> AppEvent:
     return AppEvent.model_validate(payload)

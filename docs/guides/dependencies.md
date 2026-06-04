@@ -1,24 +1,26 @@
 # Dependencies Guide
 
-Dependencies declare data flow between tools and agents. This guide covers all dependency patterns.
+Most real tasks have steps that depend on each other: fetch the data before you summarize it, get the user's confirmation before you charge their card. Dependencies are how you tell mAIvn about that wiring, so it runs each step in the right order and hands one step's result to the next automatically — no manual plumbing.
+
+This guide walks through every dependency pattern, from chaining two tools together to building multi-stage graphs across agents.
 
 ## Overview
 
-The maivn SDK supports four types of dependencies:
+The mAIvn SDK supports four types of dependencies:
 
 | Type         | Decorator                  | Description                  |
 | ------------ | -------------------------- | ---------------------------- |
 | Tool         | `@depends_on_tool`         | Output from another tool     |
 | Agent        | `@depends_on_agent`        | Output from another agent    |
-| Private Data | `@depends_on_private_data` | Server-side secret injection |
+| Private Data | `@depends_on_private_data` | Inject a secret at execution time |
 | Interrupt    | `@depends_on_interrupt`    | User input collection        |
 
-It also supports two metadata-only execution controls:
+It also supports two execution controls:
 
-| Control    | Decorator                | Description                                            |
-| ---------- | ------------------------ | ------------------------------------------------------ |
-| Await-for  | `@depends_on_await_for`  | Enforce execution order without injecting data         |
-| Reevaluate | `@depends_on_reevaluate` | Force a reevaluate boundary before continuing planning |
+| Control    | Decorator                | Description                                                                                                                          |
+| ---------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Await-for  | `@depends_on_await_for`  | Enforce execution order without injecting data                                                                                       |
+| Reevaluate | `@depends_on_reevaluate` | Force a reevaluate boundary before the dependent runs — the runtime guarantees it (not a soft hint) |
 
 ## Tool Dependencies
 
@@ -154,7 +156,18 @@ def summarize_document() -> dict:
     return {'summary': '...'}
 ```
 
-This causes planning to insert `reevaluate` at the declared boundary so later work can use accumulated context instead of placeholder arguments.
+This makes the runtime pause at the declared boundary so later work can use accumulated context instead of placeholder arguments.
+
+#### A Guaranteed Boundary
+
+`@depends_on_reevaluate` is a hard runtime guarantee, not a hint: when you declare it, the runtime ensures the dependent does not start until the boundary's reevaluate cycle has completed with the target's actual result in scope. You do not have to rely on the model choosing to replan — declaring the boundary is sufficient, and the runtime de-duplicates if the model also happens to replan at the same point.
+
+Each reevaluate cycle that fires surfaces as a `reevaluate_accrued` enrichment event with attribution you can render in your UI:
+
+- `source: "dependency"` — the cycle honours a `@depends_on_reevaluate` boundary; it carries `trigger_tool` (the dependent) and `target_tool` (the target).
+- `source: "llm"` — the model chose to reevaluate on its own.
+
+mAIvn Studio renders these as a distinct cycle chip, separate from regular tool calls. See [Frontend Events](frontend-events.md) for the full `reevaluate` event shape.
 
 ## Agent Dependencies
 
@@ -219,7 +232,7 @@ be resolved before a member agent is invoked.
 
 ## Private Data Dependencies
 
-Inject server-side secrets without exposing them to the LLM.
+Inject secrets into a tool argument without exposing them to the LLM.
 
 ### Basic Pattern
 
@@ -229,7 +242,7 @@ from maivn import depends_on_private_data
 @agent.toolify(description='Call external API')
 @depends_on_private_data(data_key='api_key', arg_name='secret')
 def call_api(query: str, secret: str) -> dict:
-    # 'secret' is injected at runtime
+    # 'secret' is injected at execution time
     return {'result': f'API call with {query}'}
 
 agent.private_data = {'api_key': 'sk-xxx-secret'}
@@ -254,10 +267,10 @@ agent.private_data = {
 
 Private data follows strict security rules:
 
-1. **Schema-only planning**: LLM sees only key names, never values
-2. **Server-side injection**: Values injected at execution time
-3. **Automatic redaction**: Results are scanned and redacted
-4. **Never logged**: Values never appear in logs
+1. **Schema-only planning**: the LLM sees only key names, never values
+2. **Runtime injection**: real values are injected into the tool argument at execution time
+3. **Automatic redaction**: tool results are scanned and known private values redacted before returning to the model
+4. **Never logged**: values never appear in logs
 
 See [Private Data Guide](private-data.md) for full details.
 
@@ -456,7 +469,7 @@ Add comments for complex dependency graphs:
 def final_report(stats: dict, charts: dict) -> dict: ...
 ```
 
-## See Also
+## Next steps
 
 - [Decorators Reference](../api/decorators.md) - API details
 - [Private Data Guide](private-data.md) - Security model

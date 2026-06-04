@@ -1,3 +1,4 @@
+# pyright: strict
 """Event router reporter exports."""
 
 from __future__ import annotations

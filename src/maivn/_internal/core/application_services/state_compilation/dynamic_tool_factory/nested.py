@@ -1,15 +1,26 @@
+"""Nested invocation helpers for dynamic dependency tools."""
+
+# pyright: strict
 from __future__ import annotations
 
-from typing import Any, Literal
+from collections.abc import Callable
+from typing import Literal, TypeAlias, cast
 
 from maivn_shared import MemoryAssetsConfig, MemoryConfig, SwarmConfig
 
 from maivn._internal.utils.reporting.context import current_sdk_delivery_mode
 
+# MARK: - Types
+
+MemoryAssetPayload: TypeAlias = dict[str, object]
+
+
+# MARK: - Mixin
+
 
 class DynamicToolFactoryNestedInvocationMixin:
     @staticmethod
-    def _normalize_included_nested_synthesis(value: Any) -> bool | Literal["auto"]:
+    def _normalize_included_nested_synthesis(value: object) -> bool | Literal["auto"]:
         if isinstance(value, bool):
             return value
         if isinstance(value, str):
@@ -25,7 +36,7 @@ class DynamicToolFactoryNestedInvocationMixin:
     def _build_nested_invocation_swarm_config(
         self,
         *,
-        agent: Any,
+        agent: object,
         agent_id: str,
         use_as_final_output: bool,
         resolved_nested_synthesis: bool | Literal["auto"],
@@ -42,12 +53,12 @@ class DynamicToolFactoryNestedInvocationMixin:
     def _build_nested_invocation_memory_assets_config(
         self,
         *,
-        agent: Any,
-        swarm_scope: Any,
+        agent: object,
+        swarm_scope: object,
         memory_recall_turn_active: bool = False,
     ) -> MemoryAssetsConfig | None:
-        defined_skills: list[dict[str, Any]] = []
-        bound_resources: list[dict[str, Any]] = []
+        defined_skills: list[MemoryAssetPayload] = []
+        bound_resources: list[MemoryAssetPayload] = []
         if memory_recall_turn_active:
             recall_turn_active: bool | None = True
         else:
@@ -76,26 +87,26 @@ class DynamicToolFactoryNestedInvocationMixin:
         return config if config.is_configured() else None
 
     @staticmethod
-    def _coerce_memory_config(value: Any) -> MemoryConfig | None:
+    def _coerce_memory_config(value: object) -> MemoryConfig | None:
         if isinstance(value, MemoryConfig):
             return value
         if isinstance(value, dict):
             return MemoryConfig.model_validate(value)
         return None
 
-    def _resolve_scope_memory_config(self, scope: Any) -> MemoryConfig | None:
-        resolver = getattr(scope, "resolve_memory_config", None)
+    def _resolve_scope_memory_config(self, scope: object) -> MemoryConfig | None:
+        resolver = _optional_attr(scope, "resolve_memory_config")
         if callable(resolver):
-            resolved = resolver(None)
+            resolved = cast(Callable[[object | None], object], resolver)(None)
             if isinstance(resolved, MemoryConfig) and resolved.is_configured():
                 return resolved
-        return self._coerce_memory_config(getattr(scope, "memory_config", None))
+        return self._coerce_memory_config(_optional_attr(scope, "memory_config"))
 
     def _build_nested_invocation_memory_config(
         self,
         *,
-        agent: Any,
-        swarm_scope: Any,
+        agent: object,
+        swarm_scope: object,
     ) -> MemoryConfig | None:
         return MemoryConfig.merge(
             self._resolve_scope_memory_config(agent),
@@ -104,15 +115,15 @@ class DynamicToolFactoryNestedInvocationMixin:
 
     @staticmethod
     def _merge_payload_list(
-        existing: list[dict[str, Any]],
-        incoming: list[dict[str, Any]],
+        existing: list[MemoryAssetPayload],
+        incoming: list[MemoryAssetPayload],
         *,
         identity_keys: tuple[str, ...],
-    ) -> list[dict[str, Any]]:
-        merged: list[dict[str, Any]] = [item for item in existing if isinstance(item, dict)]
+    ) -> list[MemoryAssetPayload]:
+        merged = list(existing)
         seen: set[str] = set()
 
-        def _identity(item: dict[str, Any]) -> str:
+        def _identity(item: MemoryAssetPayload) -> str:
             for candidate_key in identity_keys:
                 raw_value = item.get(candidate_key)
                 if isinstance(raw_value, str) and raw_value.strip():
@@ -125,8 +136,6 @@ class DynamicToolFactoryNestedInvocationMixin:
                 seen.add(identifier)
 
         for item in incoming:
-            if not isinstance(item, dict):
-                continue
             identifier = _identity(item)
             if identifier and identifier in seen:
                 continue
@@ -139,26 +148,21 @@ class DynamicToolFactoryNestedInvocationMixin:
     def _merge_memory_assets(
         self,
         *,
-        defined_skills: list[dict[str, Any]],
-        bound_resources: list[dict[str, Any]],
-        scope: Any,
+        defined_skills: list[MemoryAssetPayload],
+        bound_resources: list[MemoryAssetPayload],
+        scope: object,
         default_agent_id: str | None = None,
         default_swarm_id: str | None = None,
     ) -> None:
-        build_assets = getattr(scope, "build_memory_asset_payloads", None)
-        if not callable(build_assets):
-            return
-
-        raw_payloads = build_assets(
+        payloads = self._build_memory_asset_payloads(
+            scope,
             default_agent_id=default_agent_id,
             default_swarm_id=default_swarm_id,
         )
-        if not isinstance(raw_payloads, tuple) or len(raw_payloads) != 2:
+        if payloads is None:
             return
 
-        skill_payloads_raw, resource_payloads_raw = raw_payloads
-        skill_payloads = skill_payloads_raw if isinstance(skill_payloads_raw, list) else []
-        resource_payloads = resource_payloads_raw if isinstance(resource_payloads_raw, list) else []
+        skill_payloads, resource_payloads = payloads
         if skill_payloads:
             defined_skills[:] = self._merge_payload_list(
                 defined_skills,
@@ -171,3 +175,47 @@ class DynamicToolFactoryNestedInvocationMixin:
                 resource_payloads,
                 identity_keys=("resource_id", "id", "title", "name"),
             )
+
+    @staticmethod
+    def _build_memory_asset_payloads(
+        scope: object,
+        *,
+        default_agent_id: str | None = None,
+        default_swarm_id: str | None = None,
+    ) -> tuple[list[MemoryAssetPayload], list[MemoryAssetPayload]] | None:
+        build_assets = _optional_attr(scope, "build_memory_asset_payloads")
+        if not callable(build_assets):
+            return None
+
+        raw_payloads = build_assets(
+            default_agent_id=default_agent_id,
+            default_swarm_id=default_swarm_id,
+        )
+        if not isinstance(raw_payloads, tuple):
+            return None
+        raw_payload_tuple = cast(tuple[object, ...], raw_payloads)
+        if len(raw_payload_tuple) != 2:
+            return None
+
+        skill_payloads_raw, resource_payloads_raw = raw_payload_tuple
+        return (
+            _coerce_payload_list(skill_payloads_raw),
+            _coerce_payload_list(resource_payloads_raw),
+        )
+
+
+# MARK: - Helpers
+
+
+def _coerce_payload_list(value: object) -> list[MemoryAssetPayload]:
+    if not isinstance(value, list):
+        return []
+    return [
+        cast(MemoryAssetPayload, item)
+        for item in cast(list[object], value)
+        if isinstance(item, dict)
+    ]
+
+
+def _optional_attr(value: object, attr: str) -> object | None:
+    return cast(object | None, getattr(value, attr, None))

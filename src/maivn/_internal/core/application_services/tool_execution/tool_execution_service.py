@@ -4,18 +4,24 @@ Extends ``BasicToolExecutionService`` with input validation, dependency
 resolution, strategy-based dispatch, and before/after execution hooks.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
+from maivn_shared import BaseDependency
 from maivn_shared.infrastructure.logging import MetricsLoggerProtocol
+from pydantic import JsonValue
+from typing_extensions import override
 
 from maivn._internal.core.entities.execution_context import ExecutionContext
+from maivn._internal.core.services.agent_execution_service import AgentRegistry
 from maivn._internal.core.services.dependency_execution_service import (
     DependencyExecutionService,
 )
+from maivn._internal.core.services.interrupt_service import InterruptService
 
 from ..helpers import InputValidator, PydanticDeserializer
 from .argument_utils import prune_arguments
@@ -25,6 +31,14 @@ from .helpers import DependencyResolver
 
 if TYPE_CHECKING:
     from maivn._internal.utils.reporting.terminal_reporter import BaseReporter
+
+
+# MARK: Types
+
+JsonObject = dict[str, JsonValue]
+HookPayload = dict[str, object]
+ExecutionHook = Callable[[HookPayload], object]
+HookEntry = tuple[ExecutionHook, object, str]
 
 # MARK: Enhanced Execution
 
@@ -59,28 +73,29 @@ class ToolExecutionService(BasicToolExecutionService):
         )
         deserializer = pydantic_deserializer or PydanticDeserializer(logger=logger)
 
-        self._dependency_resolver = dependency_resolver or DependencyResolver(
+        self._dependency_resolver: DependencyResolver = dependency_resolver or DependencyResolver(
             logger=logger,
             dependency_service=dependency_service,
         )
-        self._strategy_registry = strategy_registry or create_default_registry(
+        self._strategy_registry: StrategyRegistry = strategy_registry or create_default_registry(
             logger=logger,
             deserializer=deserializer,
         )
-        self._dependency_service = dependency_service
-        self._input_validator = input_validator or InputValidator
+        self._dependency_service: DependencyExecutionService = dependency_service
+        self._input_validator: type[InputValidator] = input_validator or InputValidator
         self._get_reporter: Callable[[], BaseReporter | None] = reporter_supplier or (lambda: None)
 
     # MARK: - Execution
 
+    @override
     def execute_tool_call(
         self,
         tool_id: str,
-        args: dict[str, Any],
+        args: JsonObject,
         context: ExecutionContext | None = None,
         *,
         tool_event_id: str | None = None,
-    ) -> Any:
+    ) -> object:
         """Execute a tool call with dependency resolution and input validation.
 
         Args:
@@ -104,7 +119,8 @@ class ToolExecutionService(BasicToolExecutionService):
 
         self._logger.debug("[TOOL_EXEC] Tool type: %s", type(tool).__name__)
 
-        resolved_args = self._resolve_dependencies(tool, validated_args, context)
+        defaulted_args = self._apply_default_args(tool, validated_args)
+        resolved_args = self._resolve_dependencies(tool, defaulted_args, context)
         filtered_args = self._filter_arguments(tool_id, tool, resolved_args)
 
         self._run_execution_hooks(
@@ -120,7 +136,7 @@ class ToolExecutionService(BasicToolExecutionService):
 
         try:
             result = self._strategy_registry.execute(tool, filtered_args, context)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - tool-call failures run after hooks then propagate
             self._run_execution_hooks(
                 stage="after",
                 tool_id=tool_id,
@@ -151,30 +167,50 @@ class ToolExecutionService(BasicToolExecutionService):
         self,
         tool_id: str,
         tool: ToolType,
-        args: dict[str, Any],
-    ) -> dict[str, Any]:
+        args: JsonObject,
+    ) -> dict[str, object]:
         """Validate input arguments for security."""
-        if getattr(tool, "tool_type", None) == "agent":
+        if tool.tool_type == "agent":
             self._logger.debug("[TOOL_EXEC] Skipping input validation for agent tool %s", tool_id)
-            return args
+            return dict(args)
         try:
             validated_args = self._input_validator.validate_tool_arguments(args)
             self._logger.debug("[TOOL_EXEC] Input validation passed for %s", tool_id)
-            return validated_args
+            return dict(validated_args)
         except ValueError as e:
             self._logger.error("[TOOL_EXEC] Input validation failed for %s: %s", tool_id, e)
             raise
 
     # MARK: - Dependency Resolution
 
+    @staticmethod
+    def _apply_default_args(tool: ToolType, args: dict[str, object]) -> dict[str, object]:
+        """Merge tool-level default args before dependency resolution.
+
+        ``ToolOverride.default_args`` and MCP defaults both compile to the
+        canonical ``metadata["default_args"]`` shape used by the server.
+        Local execution applies the same rule so SDK and server runs do not
+        diverge. Model-supplied args always win.
+        """
+        metadata = _object_dict_or_none(cast(object, getattr(tool, "metadata", None)))
+        default_args = _object_dict_or_none(metadata.get("default_args")) if metadata else None
+        if not isinstance(default_args, dict) or not default_args:
+            mcp_defaults = cast(object, getattr(tool, "default_args", None))
+            default_args = _object_dict_or_none(mcp_defaults)
+        if not isinstance(default_args, dict) or not default_args:
+            return args
+        merged = dict(default_args)
+        merged.update(args)
+        return merged
+
     def _resolve_dependencies(
         self,
         tool: ToolType,
-        args: dict[str, Any],
+        args: dict[str, object],
         context: ExecutionContext,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Resolve tool dependencies if needed."""
-        dependencies = getattr(tool, "dependencies", None)
+        dependencies: list[BaseDependency] = tool.dependencies
 
         self._logger.debug("[TOOL_EXEC] Tool has dependencies: %s", bool(dependencies))
         if dependencies:
@@ -205,8 +241,8 @@ class ToolExecutionService(BasicToolExecutionService):
         self,
         tool_id: str,
         tool: ToolType,
-        args: dict[str, Any],
-    ) -> dict[str, Any]:
+        args: dict[str, object],
+    ) -> dict[str, object]:
         """Filter arguments to only those accepted by the tool."""
         filtered_args, dropped_keys = prune_arguments(tool, args, self._logger)
         if dropped_keys:
@@ -225,9 +261,9 @@ class ToolExecutionService(BasicToolExecutionService):
         stage: str,
         tool_id: str,
         tool: ToolType,
-        args: dict[str, Any],
+        args: dict[str, object],
         context: ExecutionContext,
-        result: Any,
+        result: object | None,
         error: Exception | None,
         tool_event_id: str | None = None,
     ) -> None:
@@ -241,7 +277,7 @@ class ToolExecutionService(BasicToolExecutionService):
         of duplicated pills when all three levels are wired.
         """
         hooks = self._collect_hooks(stage, tool, context)
-        payload = {
+        payload: HookPayload = {
             "stage": stage,
             "tool_id": tool_id,
             "tool": tool,
@@ -254,14 +290,12 @@ class ToolExecutionService(BasicToolExecutionService):
         reporter = self._get_reporter()
 
         for hook, owner, source in hooks:
-            if hook is None:
-                continue
             hook_name = _resolve_hook_name(hook)
             started_at = time.monotonic()
             hook_status = "completed"
             error_message: str | None = None
             try:
-                hook(payload)
+                _ = hook(payload)
             except Exception as exc:  # noqa: BLE001 - hook failures must never abort execution
                 hook_status = "failed"
                 error_message = str(exc) or exc.__class__.__name__
@@ -345,7 +379,7 @@ class ToolExecutionService(BasicToolExecutionService):
         stage: str,
         tool: ToolType,
         context: ExecutionContext,
-    ) -> list[tuple[Any, Any, str]]:
+    ) -> list[HookEntry]:
         """Collect hooks to run for ``stage`` based on hook-execution modes.
 
         Returns a list of ``(hook_callable, owner, source)`` triples where
@@ -357,16 +391,16 @@ class ToolExecutionService(BasicToolExecutionService):
         inside-out (tool, scope, swarm). A level is skipped if its hook is
         ``None`` or its ``hook_execution_mode`` disables it for this tool type.
         """
-        scope = getattr(context, "scope", None)
+        scope = context.scope
         swarm = self._get_swarm_from_scope(scope)
-        tool_type = getattr(tool, "tool_type", None)
+        tool_type = tool.tool_type
 
-        scope_active = getattr(scope, "hook_execution_mode", "tool") == "tool"
-        swarm_mode = getattr(swarm, "hook_execution_mode", "tool")
+        scope_active = _string_attr(scope, "hook_execution_mode", "tool") == "tool"
+        swarm_mode = _string_attr(swarm, "hook_execution_mode", "tool")
         swarm_active = swarm_mode == "tool" or (swarm_mode == "agent" and tool_type == "agent")
 
         # Outside-in: swarm wraps scope wraps tool.
-        outside_in: list[tuple[Any, bool, str]] = [
+        outside_in: list[tuple[object | None, bool, str]] = [
             (swarm, swarm_active, "swarm"),
             (scope, scope_active, "scope"),
             (tool, True, "tool"),
@@ -374,29 +408,29 @@ class ToolExecutionService(BasicToolExecutionService):
         ordered = outside_in if stage == "before" else list(reversed(outside_in))
         attr = "before_execute" if stage == "before" else "after_execute"
 
-        hooks: list[tuple[Any, Any, str]] = []
+        hooks: list[HookEntry] = []
         for owner, active, source in ordered:
             if not active:
                 continue
-            hook = getattr(owner, attr, None)
+            hook = _hook_attr(owner, attr)
             if hook is not None:
                 hooks.append((hook, owner, source))
         return hooks
 
-    def _get_swarm_from_scope(self, scope: Any) -> Any:
+    def _get_swarm_from_scope(self, scope: object | None) -> object | None:
         """Get swarm object from scope if available."""
-        get_swarm = getattr(scope, "get_swarm", None)
+        get_swarm = cast(object, getattr(scope, "get_swarm", None))
         if callable(get_swarm):
-            return get_swarm()
+            return cast(Callable[[], object | None], get_swarm)()
         return None
 
     # MARK: - Service Configuration
 
-    def set_agent_registry(self, registry: Any) -> None:
+    def set_agent_registry(self, registry: AgentRegistry) -> None:
         """Set agent registry for dependency resolution."""
         self._dependency_service.set_agent_registry(registry)
 
-    def set_interrupt_service(self, service: Any) -> None:
+    def set_interrupt_service(self, service: InterruptService) -> None:
         """Set interrupt service for dependency resolution."""
         self._dependency_service.set_interrupt_service(service)
 
@@ -404,9 +438,9 @@ class ToolExecutionService(BasicToolExecutionService):
 # MARK: - Module Helpers
 
 
-def _resolve_hook_name(hook: Any) -> str:
+def _resolve_hook_name(hook: object) -> str:
     """Best-effort display name for a hook callable."""
-    name = getattr(hook, "__name__", None)
+    name = cast(object, getattr(hook, "__name__", None))
     if isinstance(name, str) and name:
         return name
     return hook.__class__.__name__
@@ -415,7 +449,7 @@ def _resolve_hook_name(hook: Any) -> str:
 def _resolve_hook_target(
     *,
     source: str,
-    owner: Any,
+    owner: object,
     tool: ToolType,
     tool_id: str,
     tool_event_id: str | None,
@@ -438,15 +472,31 @@ def _resolve_hook_target(
     """
     if source == "tool":
         target_id = tool_event_id or tool_id
-        target_name = getattr(tool, "name", None) or tool_id
+        target_name = tool.name or tool_id
         return "tool", target_id, target_name
 
-    owner_name = getattr(owner, "name", None) or getattr(owner, "__class__", type(owner)).__name__
-    owner_id = getattr(owner, "id", None) or owner_name
+    owner_name = _string_attr(owner, "name", owner.__class__.__name__)
+    owner_id = _string_attr(owner, "id", owner_name)
     if source == "swarm":
         return "swarm", str(owner_id), str(owner_name)
     # source == "scope" → render on the agent card
     return "agent", str(owner_id), str(owner_name)
+
+
+def _object_dict_or_none(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    return {str(key): item for key, item in cast(dict[object, object], value).items()}
+
+
+def _string_attr(owner: object | None, attr: str, fallback: str) -> str:
+    value = cast(object, getattr(owner, attr, fallback))
+    return value if isinstance(value, str) and value else fallback
+
+
+def _hook_attr(owner: object | None, attr: str) -> ExecutionHook | None:
+    hook = cast(object, getattr(owner, attr, None))
+    return cast(ExecutionHook, hook) if callable(hook) else None
 
 
 __all__ = ["ToolExecutionService"]

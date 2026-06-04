@@ -5,12 +5,13 @@ interrupts, and model tool completion.  System-tool, update, status,
 final, and enrichment handlers live in ``system_tool_handlers``.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import Protocol, cast
 
 from maivn_shared import (
     ENRICHMENT_EVENT_NAME,
@@ -27,13 +28,36 @@ from maivn_shared import (
     SYSTEM_TOOL_START_EVENT_NAME,
     TOOL_EVENT_NAME,
     UPDATE_EVENT_NAME,
+    ToolCall,
 )
 from maivn_shared.infrastructure.logging import LoggerProtocol
+from pydantic import JsonValue
 
 from maivn._internal.core import SSEEvent, ToolEventPayload, ToolEventValue
 
-if TYPE_CHECKING:
-    from .event_stream_processor import EventStreamHandlers
+# MARK: Types
+
+JsonObject = dict[str, JsonValue]
+
+
+class EventStreamHandlerCallbacks(Protocol):
+    """Callback surface consumed by individual event handlers."""
+
+    coerce_payload: Callable[[JsonValue], JsonObject]
+    process_tool_requests: Callable[[dict[str, ToolEventPayload], str], None]
+    process_tool_batch: Callable[[str, ToolEventValue, str], None]
+    submit_tool_call: Callable[[str, JsonObject, str], None]
+    acknowledge_barrier: Callable[[str, str], None]
+    handle_user_input_request: Callable[[str, JsonObject, str], None] | None
+    handle_interrupt_required: Callable[[JsonObject, str], None] | None
+    handle_model_tool_complete: Callable[[JsonObject], None] | None
+    handle_system_tool_start: Callable[[JsonObject], None] | None
+    handle_system_tool_chunk: Callable[[JsonObject], None] | None
+    handle_system_tool_complete: Callable[[JsonObject], None] | None
+    handle_system_tool_error: Callable[[JsonObject], None] | None
+    handle_action_update: Callable[[JsonObject], None] | None
+    handle_status_message: Callable[[JsonObject], None] | None
+    handle_enrichment: Callable[[JsonObject], None] | None
 
 
 # MARK: Event Processing State
@@ -45,7 +69,7 @@ class EventProcessingState:
 
     pending_tool_events: dict[str, ToolEventPayload]
     last_tool_event_time: float
-    final_payload: dict[str, Any] | None
+    final_payload: JsonObject | None
     first_event_logged: bool
 
     @classmethod
@@ -89,7 +113,7 @@ EVENT_HANDLER_MAP: dict[str, str] = {
 
 def handle_heartbeat(
     resume_url: str,
-    handlers: EventStreamHandlers,
+    handlers: EventStreamHandlerCallbacks,
     state: EventProcessingState,
     pending_event_timeout_s: float,
     logger: LoggerProtocol,
@@ -113,12 +137,12 @@ def handle_heartbeat(
 def handle_tool_event(
     event: SSEEvent,
     resume_url: str,
-    handlers: EventStreamHandlers,
+    handlers: EventStreamHandlerCallbacks,
     state: EventProcessingState,
     logger: LoggerProtocol,
 ) -> None:
     """Handle tool event, routing to appropriate sub-handler."""
-    payload = cast(ToolEventPayload, handlers.coerce_payload(event.payload))
+    payload = cast(ToolEventPayload, cast(object, handlers.coerce_payload(event.payload)))
     tool_event_id = str(payload.get("id", ""))
 
     if not tool_event_id:
@@ -136,7 +160,7 @@ def route_tool_event(
     payload: ToolEventPayload,
     resume_url: str,
     pending_tool_events: dict[str, ToolEventPayload],
-    handlers: EventStreamHandlers,
+    handlers: EventStreamHandlerCallbacks,
     logger: LoggerProtocol,
 ) -> bool:
     """Route a tool event to the appropriate handler.
@@ -144,13 +168,14 @@ def route_tool_event(
     Returns:
         True if the event was handled immediately, False if queued.
     """
-    value = payload.get("value", {})
-    if not isinstance(value, dict):
+    value_obj = cast(object, payload.get("value", {}))
+    if not isinstance(value_obj, dict):
         pending_tool_events[tool_event_id] = payload
         return False
+    value = cast(ToolEventValue, cast(object, value_obj))
 
     if value.get("tool_calls"):
-        handlers.process_tool_batch(tool_event_id, cast(ToolEventValue, value), resume_url)
+        handlers.process_tool_batch(tool_event_id, value, resume_url)
         return True
 
     if value.get("barrier"):
@@ -167,19 +192,34 @@ def route_tool_event(
     return False
 
 
-def extract_tool_call_payload(value: Mapping[str, Any]) -> dict[str, Any]:
+def extract_tool_call_payload(value: Mapping[str, object]) -> JsonObject:
     """Extract and normalize tool call payload from event value."""
-    tool_call_payload: dict[str, Any] = dict(cast(dict[str, Any], value.get("tool_call", {})))
+    tool_call_value = value.get("tool_call", {})
+    if isinstance(tool_call_value, ToolCall):
+        tool_call_payload: JsonObject = {
+            "tool_id": tool_call_value.tool_id,
+            "args": tool_call_value.args,
+        }
+    elif isinstance(tool_call_value, Mapping):
+        tool_call_payload = _json_mapping_to_dict(cast(Mapping[object, object], tool_call_value))
+    else:
+        tool_call_payload = {}
 
     if "private_data_injected" not in tool_call_payload:
         if "private_data_injected" in value:
-            tool_call_payload["private_data_injected"] = value["private_data_injected"]
+            tool_call_payload["private_data_injected"] = cast(
+                JsonValue, value["private_data_injected"]
+            )
         elif "user_data_injected" in value:
-            # Backward-compatible alias: user_data -> private_data
-            tool_call_payload["private_data_injected"] = value["user_data_injected"]
+            # "user_data_injected" is an alias for "private_data_injected".
+            tool_call_payload["private_data_injected"] = cast(
+                JsonValue, value["user_data_injected"]
+            )
 
     if "interrupt_data_injected" not in tool_call_payload and "interrupt_data_injected" in value:
-        tool_call_payload["interrupt_data_injected"] = value["interrupt_data_injected"]
+        tool_call_payload["interrupt_data_injected"] = cast(
+            JsonValue, value["interrupt_data_injected"]
+        )
 
     return tool_call_payload
 
@@ -190,30 +230,31 @@ def extract_tool_call_payload(value: Mapping[str, Any]) -> dict[str, Any]:
 def handle_interrupt_request(
     event: SSEEvent,
     resume_url: str,
-    handlers: EventStreamHandlers,
+    handlers: EventStreamHandlerCallbacks,
     logger: LoggerProtocol,
 ) -> None:
     """Handle legacy interrupt request event."""
     if not handlers.handle_user_input_request:
         return
 
-    payload = cast(ToolEventPayload, handlers.coerce_payload(event.payload))
+    payload = cast(ToolEventPayload, cast(object, handlers.coerce_payload(event.payload)))
     tool_event_id = str(payload.get("id", ""))
-    value = payload.get("value", {})
+    value = cast(object, payload.get("value", {}))
 
     if isinstance(value, dict):
+        value_payload = _json_mapping_to_dict(cast(dict[object, object], value))
         logger.info(
             "[USER_INPUT] Requesting input for tool=%s arg=%s",
-            value.get("tool_name"),
-            value.get("arg_name"),
+            value_payload.get("tool_name"),
+            value_payload.get("arg_name"),
         )
-        handlers.handle_user_input_request(tool_event_id, cast(dict[str, Any], value), resume_url)
+        handlers.handle_user_input_request(tool_event_id, value_payload, resume_url)
 
 
 def handle_interrupt_required(
     event: SSEEvent,
     resume_url: str,
-    handlers: EventStreamHandlers,
+    handlers: EventStreamHandlerCallbacks,
     logger: LoggerProtocol,
 ) -> None:
     """Handle checkpoint-based interrupt required event."""
@@ -234,7 +275,7 @@ def handle_interrupt_required(
 
 def handle_model_tool_complete(
     event: SSEEvent,
-    handlers: EventStreamHandlers,
+    handlers: EventStreamHandlerCallbacks,
     logger: LoggerProtocol,
 ) -> None:
     """Handle model tool completion event."""
@@ -247,9 +288,18 @@ def handle_model_tool_complete(
     handlers.handle_model_tool_complete(payload)
 
 
+# MARK: Helpers
+
+
+def _json_mapping_to_dict(value: Mapping[object, object]) -> JsonObject:
+    """Copy a mapping into the JSON object shape used by SSE payload callbacks."""
+    return {str(key): cast(JsonValue, item) for key, item in value.items()}
+
+
 __all__ = [
     "EVENT_HANDLER_MAP",
     "EventProcessingState",
+    "EventStreamHandlerCallbacks",
     "extract_tool_call_payload",
     "handle_heartbeat",
     "handle_interrupt_request",

@@ -2,25 +2,24 @@
 Provides DI-friendly registries and shared tool access for groups of agents.
 """
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import cast
 
 from pydantic import Field, PrivateAttr, model_validator
-from typing_extensions import Self
+from typing_extensions import Self, override
 
-from maivn._internal.adapters.repositories import AgentRepo
-from maivn._internal.core.interfaces.repositories import AgentRepoInterface, ToolRepoInterface
-from maivn._internal.core.registrars import AgentRegistrar
+from maivn._internal.adapters.repositories.agent_repo import AgentRepo
+from maivn._internal.core.interfaces.repositories.agent import AgentRepoInterface
+from maivn._internal.core.interfaces.repositories.tool import ToolRepoInterface
+from maivn._internal.core.registrars.register_agent import AgentRegistrar
 
+from ..agent.agent import Agent, bind_agent_swarm
 from ..base_scope import BaseScope
 from .invocation_methods import SwarmInvocationMethodsMixin
 from .member import SwarmMemberDecoratorBuilder
 from .validation import validate_force_final_tool_request
-
-if TYPE_CHECKING:
-    from ..agent import Agent
-
 
 # MARK: Swarm
 
@@ -37,17 +36,24 @@ class Swarm(SwarmInvocationMethodsMixin, BaseScope):
         default_factory=list,
         description="List of agents in the swarm",
     )
+    agent_repo: object | None = Field(
+        default=None,
+        description="Optional repository for Swarm member Agent registration.",
+        exclude=True,
+        repr=False,
+    )
 
-    _agent_repo: AgentRepoInterface = PrivateAttr()
-    _agent_registrar: AgentRegistrar = PrivateAttr()
+    _agent_repo: AgentRepoInterface[Agent] = PrivateAttr()
+    _agent_registrar: AgentRegistrar[Agent] = PrivateAttr()
 
     # MARK: - Lifecycle
 
-    def model_post_init(self, context: Any) -> None:
+    @override
+    def model_post_init(self, context: object) -> None:
         """Initialize swarm services and registries."""
         super().model_post_init(context)
 
-        self._agent_repo = getattr(self, "agent_repo", None) or AgentRepo()
+        self._agent_repo = _coerce_agent_repo(self.agent_repo)
         self._agent_registrar = AgentRegistrar(repo=self._agent_repo)
 
         if self.agents:
@@ -63,7 +69,7 @@ class Swarm(SwarmInvocationMethodsMixin, BaseScope):
     # MARK: - Repository Access
 
     @property
-    def member_agent_repository(self) -> AgentRepoInterface:
+    def member_agent_repository(self) -> AgentRepoInterface[Agent]:
         """Access the agent repository."""
         return self._agent_repo
 
@@ -77,14 +83,15 @@ class Swarm(SwarmInvocationMethodsMixin, BaseScope):
     def add_agent(self, agent: Agent) -> None:
         """Add an agent to the swarm."""
         self._agent_registrar(self, agent)
+        bind_agent_swarm(agent, self)
 
     def get_agent(self, agent_id: str) -> Agent | None:
         """Retrieve an agent by ID."""
-        return self._agent_repo.get_agent(agent_id)  # type: ignore[return-value]
+        return self._agent_repo.get_agent(agent_id)
 
     def list_agents(self) -> list[Agent]:
         """List all agents in the swarm."""
-        return self._agent_repo.list_agents()  # type: ignore[return-value]
+        return self._agent_repo.list_agents()
 
     @property
     def member(self) -> SwarmMemberDecoratorBuilder:
@@ -93,6 +100,7 @@ class Swarm(SwarmInvocationMethodsMixin, BaseScope):
 
     # MARK: - Validation
 
+    @override
     def validate_on_invoke(self) -> None:
         """Validate swarm configuration before invocation."""
         self.validate_tool_configuration()
@@ -103,6 +111,7 @@ class Swarm(SwarmInvocationMethodsMixin, BaseScope):
         if not self.agents:
             raise ValueError("Swarm.invoke requires at least one Agent in the swarm.")
 
+    @override
     def _validate_force_final_tool_request(self, force_final_tool: bool) -> None:
         """Validate force_final_tool usage for swarm invocations.
 
@@ -117,10 +126,31 @@ class Swarm(SwarmInvocationMethodsMixin, BaseScope):
         validate_force_final_tool_request(self, force_final_tool)
 
 
+# MARK: - Repository Helpers
+
+
+def _coerce_agent_repo(repo: object | None) -> AgentRepoInterface[Agent]:
+    if repo is None:
+        return AgentRepo[Agent]()
+
+    required_methods = (
+        "add_agent",
+        "get_agent",
+        "get_agent_by_name",
+        "list_agents",
+        "remove_agent",
+        "update_agent",
+    )
+    for method_name in required_methods:
+        if not callable(getattr(repo, method_name, None)):
+            raise TypeError("agent_repo must implement AgentRepoInterface")
+    return cast(AgentRepoInterface[Agent], repo)
+
+
 def _rebuild_swarm_model() -> None:
     from ..agent import Agent
 
-    Swarm.model_rebuild(_types_namespace={"Agent": Agent})
+    _ = Swarm.model_rebuild(_types_namespace={"Agent": Agent})
 
 
 _rebuild_swarm_model()

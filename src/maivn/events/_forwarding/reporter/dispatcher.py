@@ -1,12 +1,12 @@
 """Dispatcher that routes normalized AppEvents to reporter methods."""
 
+# pyright: strict
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+from typing import Protocol
 
 from ..._models import AppEvent
-from ..payload import normalized_text
+from ..payload import EventPayload, normalized_text
 from ..state import NormalizedEventForwardingState
 from .assignment import forward_agent_assignment, forward_enrichment
 from .hooks import forward_hook_fired
@@ -20,11 +20,20 @@ from .tools import (
     forward_tool_event,
 )
 
-# MARK: Dispatcher type
+# MARK: Dispatcher Protocol
 
 
-Forwarder = Callable[..., None]
-"""Signature: ``(event, *, payload, reporter, state) -> None``."""
+class Forwarder(Protocol):
+    """Callable shape for event-specific reporter forwarders."""
+
+    def __call__(
+        self,
+        event: AppEvent,
+        *,
+        payload: EventPayload,
+        reporter: object,
+        state: NormalizedEventForwardingState,
+    ) -> None: ...
 
 
 # MARK: Dispatch Table
@@ -58,8 +67,8 @@ _DISPATCHERS: dict[str, Forwarder] = {
 def forward_to_reporter(
     event: AppEvent,
     *,
-    payload: dict[str, Any],
-    reporter: Any,
+    payload: EventPayload,
+    reporter: object,
     state: NormalizedEventForwardingState,
 ) -> None:
     """Route a normalized AppEvent to the matching reporter forwarder."""

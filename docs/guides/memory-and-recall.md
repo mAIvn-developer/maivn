@@ -1,6 +1,8 @@
 # Memory and Recall
 
-Memory keeps long-running conversations accurate by combining:
+A model on its own forgets everything once a conversation gets long enough. Memory is how mAIvn gives an agent a working recollection: it remembers what was said earlier, pulls back the parts that matter for the current question, and learns reusable lessons over time.
+
+Concretely, memory keeps long-running conversations accurate by combining:
 
 - summarization when thread context grows too large
 - retrieval of relevant memory signals (vector, keyword, graph, skills, insights, resources)
@@ -35,7 +37,7 @@ AI-generated insights are narrower by default: auto extraction only supports `ag
 - `focus`: retrieval + vector persistence.
 - `clarity`: retrieval + vector + graph persistence.
 
-Effective behavior is policy-gated server-side (org policy + subscription tier + runtime safety checks).
+Effective behavior is policy-gated within the runtime (org policy + subscription tier + runtime safety checks).
 If requested settings exceed allowed limits, runtime behavior is safely downscoped.
 
 ## Quick Start
@@ -138,7 +140,7 @@ agent = Agent(
 ### Bound Resource Versioning
 
 Bound resources are content-hash aware. If a resource payload includes an existing
-`resource_id` plus fresh `content_base64`, the server compares the supplied bytes with the
+`resource_id` plus fresh `content_base64`, the runtime compares the supplied bytes with the
 stored `content_hash`:
 
 - same hash: the existing resource is reused and rebound to the current agent or swarm scope
@@ -302,7 +304,7 @@ Notes:
 - Prefer stable `thread_id` reuse across turns.
 - `insight_extraction.sharing_scope` only accepts `agent` or `swarm` for AI-generated insights.
 - Promote durable lessons to `project` or `org` from the Developer Portal when broader reuse is warranted.
-- Policy/tier constraints still apply server-side even when `memory_config` requests higher capability.
+- Policy/tier constraints still apply within the runtime even when `memory_config` requests higher capability.
 
 ## Related Guides
 

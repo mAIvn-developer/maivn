@@ -1,15 +1,34 @@
+# pyright: strict
 """Session lifecycle forwarding mixin for EventRouterReporter."""
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import cast
+
+from ..base import BaseReporter
+
+# MARK: Types
+
+RouterPayload = dict[str, object]
+
 
 # MARK: Session Forwarding
 
 
 class SessionRouterMixin:
-    _forward: Any
-    _reporter: Any
+    _reporter: BaseReporter = cast(BaseReporter, cast(object, None))
+
+    def _forward(
+        self,
+        *,
+        category: str,
+        event_name: str,
+        payload: RouterPayload,
+        forward: Callable[[], None],
+    ) -> None:
+        _ = (category, event_name, payload, forward)
+        raise NotImplementedError
 
     def report_session_start(
         self,
@@ -23,7 +42,10 @@ class SessionRouterMixin:
             forward=lambda: self._reporter.report_session_start(session_id, assistant_id),
         )
 
-    def report_private_data(self, private_data: dict[str, Any]) -> None:
+    def report_private_data(
+        self,
+        private_data: dict[str, object],
+    ) -> None:
         self._forward(
             category="lifecycle",
             event_name="private_data",

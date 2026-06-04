@@ -1,14 +1,16 @@
 """SSE event consumption helpers for orchestrators."""
 
+# pyright: strict
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterator
-from typing import Any
+from typing import Protocol, TypeAlias, cast
 
-from maivn_shared import loads
+from maivn_shared import SessionClientProtocol, loads
+from pydantic import JsonValue
 
-from maivn._internal.core import SessionEndpoints, SSEEvent
+from maivn._internal.core import SessionEndpoints, SSEEvent, ToolEventPayload, ToolEventValue
 from maivn._internal.core.exceptions import ServerAuthenticationError
 from maivn._internal.core.services import EventStreamHandlers
 from maivn._internal.utils.reporting.terminal_reporter import BaseReporter
@@ -16,6 +18,80 @@ from maivn._internal.utils.reporting.terminal_reporter import BaseReporter
 from .reporter_hooks import OrchestratorReporterHooks
 
 LOGGER = logging.getLogger(__name__)
+
+
+# MARK: Types
+
+JsonObject: TypeAlias = dict[str, JsonValue]
+ProgressTask: TypeAlias = object
+
+
+class _EventProcessor(Protocol):
+    def consume(
+        self,
+        *,
+        events: Iterator[SSEEvent],
+        resume_url: str,
+        handlers: EventStreamHandlers,
+        on_event: Callable[[SSEEvent], None] | None = None,
+    ) -> JsonObject: ...
+
+
+class _InterruptManager(Protocol):
+    resumed_session_id: str | None
+
+    def store_resumed_session(self, session_id: str | None) -> None: ...
+
+    def should_chain(self, result: JsonObject) -> bool: ...
+
+    def build_resumed_endpoints(self, base_url: str, session_id: str) -> SessionEndpoints: ...
+
+
+class _ToolEventDispatcher(Protocol):
+    def process_tool_requests(
+        self,
+        tool_events: dict[str, ToolEventPayload],
+        resume_url: str,
+    ) -> None: ...
+
+    def process_tool_batch(
+        self,
+        tool_event_id: str,
+        value: ToolEventValue,
+        resume_url: str,
+    ) -> None: ...
+
+    def submit_tool_call(
+        self,
+        tool_event_id: str,
+        tool_call_payload: JsonObject,
+        resume_url: str,
+    ) -> None: ...
+
+    def acknowledge_barrier(self, tool_event_id: str, resume_url: str) -> None: ...
+
+
+class _InterruptHandler(Protocol):
+    def handle_user_input_request(
+        self,
+        tool_event_id: str,
+        value: JsonObject,
+        resume_url: str,
+    ) -> None: ...
+
+    def handle_interrupt_required(self, interrupt_data: JsonObject, resume_url: str) -> None: ...
+
+
+class _SSEClient(Protocol):
+    def iter_events(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> Iterator[SSEEvent]: ...
+
+
+# MARK: Event Consumption
 
 
 class EventConsumptionCoordinator:
@@ -26,25 +102,27 @@ class EventConsumptionCoordinator:
     def __init__(
         self,
         *,
-        client: Any,
-        event_processor: Any,
-        interrupt_manager: Any,
-        interrupt_service: Any,
-        tool_event_dispatcher: Any,
-        interrupt_handler: Any,
-        sse_client: Any,
+        client: SessionClientProtocol,
+        event_processor: _EventProcessor,
+        interrupt_manager: _InterruptManager,
+        interrupt_service: object,
+        tool_event_dispatcher: _ToolEventDispatcher,
+        interrupt_handler: _InterruptHandler,
+        sse_client: _SSEClient,
         reporter_hooks: OrchestratorReporterHooks,
-        set_reporter_context: Callable[[BaseReporter | None, Any | None], None],
+        set_reporter_context: Callable[[BaseReporter | None, ProgressTask | None], None],
     ) -> None:
-        self._client = client
-        self._event_processor = event_processor
-        self._interrupt_manager = interrupt_manager
-        self._interrupt_service = interrupt_service
-        self._tool_event_dispatcher = tool_event_dispatcher
-        self._interrupt_handler = interrupt_handler
-        self._sse_client = sse_client
-        self._reporter_hooks = reporter_hooks
-        self._set_reporter_context = set_reporter_context
+        self._client: SessionClientProtocol = client
+        self._event_processor: _EventProcessor = event_processor
+        self._interrupt_manager: _InterruptManager = interrupt_manager
+        self._interrupt_service: object = interrupt_service
+        self._tool_event_dispatcher: _ToolEventDispatcher = tool_event_dispatcher
+        self._interrupt_handler: _InterruptHandler = interrupt_handler
+        self._sse_client: _SSEClient = sse_client
+        self._reporter_hooks: OrchestratorReporterHooks = reporter_hooks
+        self._set_reporter_context: Callable[[BaseReporter | None, ProgressTask | None], None] = (
+            set_reporter_context
+        )
 
     # MARK: - Public API
 
@@ -53,9 +131,9 @@ class EventConsumptionCoordinator:
         endpoints: SessionEndpoints,
         timeout: float,
         reporter: BaseReporter | None,
-        progress_task: Any | None = None,
+        progress_task: ProgressTask | None = None,
         on_event: Callable[[SSEEvent], None] | None = None,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         """Consume SSE events from the server."""
         self._setup_event_consumption(reporter, progress_task)
         handlers = self._build_event_handlers(reporter)
@@ -90,11 +168,12 @@ class EventConsumptionCoordinator:
     # MARK: - Event Handling
 
     def _setup_event_consumption(
-        self, reporter: BaseReporter | None, progress_task: Any | None
+        self, reporter: BaseReporter | None, progress_task: ProgressTask | None
     ) -> None:
         self._set_reporter_context(reporter, progress_task)
-        if reporter and hasattr(self._interrupt_service, "set_reporter"):
-            self._interrupt_service.set_reporter(reporter)
+        set_reporter = getattr(self._interrupt_service, "set_reporter", None)
+        if reporter and callable(set_reporter):
+            _ = set_reporter(reporter)
         self._interrupt_manager.store_resumed_session(None)
 
     def _build_event_handlers(self, reporter: BaseReporter | None) -> EventStreamHandlers:
@@ -125,9 +204,9 @@ class EventConsumptionCoordinator:
         endpoints: SessionEndpoints,
         timeout: float,
         reporter: BaseReporter | None,
-        progress_task: Any | None,
+        progress_task: ProgressTask | None,
         on_event: Callable[[SSEEvent], None] | None,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         _ = endpoints  # Parameter kept for API compatibility.
         resumed_session_id = self._interrupt_manager.resumed_session_id
         if resumed_session_id and "without a valid final payload" in str(error):
@@ -142,13 +221,13 @@ class EventConsumptionCoordinator:
 
     def _process_consumption_result(
         self,
-        result: dict[str, Any],
+        result: JsonObject,
         endpoints: SessionEndpoints,
         timeout: float,
         reporter: BaseReporter | None,
-        progress_task: Any | None,
+        progress_task: ProgressTask | None,
         on_event: Callable[[SSEEvent], None] | None,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         _ = endpoints  # Parameter kept for API compatibility.
         if self._interrupt_manager.should_chain(result):
             resumed_session_id = self._interrupt_manager.resumed_session_id
@@ -166,10 +245,10 @@ class EventConsumptionCoordinator:
         resumed_session_id: str,
         timeout: float,
         reporter: BaseReporter | None,
-        progress_task: Any | None,
+        progress_task: ProgressTask | None,
         on_event: Callable[[SSEEvent], None] | None,
-    ) -> dict[str, Any]:
-        base_url = getattr(self._client, "base_url", getattr(self._client, "_base_url", ""))
+    ) -> JsonObject:
+        base_url = self._client.base_url or ""
         resumed_endpoints = self._interrupt_manager.build_resumed_endpoints(
             base_url, resumed_session_id
         )
@@ -187,35 +266,49 @@ class EventConsumptionCoordinator:
         return self._sse_client.iter_events(events_url, headers=headers)
 
     def _get_client_headers(self) -> dict[str, str] | None:
-        headers_fn = getattr(self._client, "headers", None)
-        if not callable(headers_fn):
+        headers_attr = cast(object, getattr(self._client, "headers", None))
+        if not callable(headers_attr):
             return None
+        headers_fn = cast(Callable[[], object], headers_attr)
         try:
             headers_obj = headers_fn()
         except ServerAuthenticationError:
             raise
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - missing headers should not abort streaming
             LOGGER.warning("Failed to read client headers: %s", exc)
             return None
-        if isinstance(headers_obj, dict) and all(
-            isinstance(key, str) and isinstance(value, str) for key, value in headers_obj.items()
-        ):
-            return headers_obj
+        if isinstance(headers_obj, dict):
+            headers = cast(dict[object, object], headers_obj)
+            if all(
+                isinstance(key, str) and isinstance(value, str) for key, value in headers.items()
+            ):
+                return {str(key): str(value) for key, value in headers.items()}
         if headers_obj is not None:
+            headers_type = type(cast(object, headers_obj)).__name__
             LOGGER.warning(
                 "Client headers() returned invalid type: %s",
-                type(headers_obj).__name__,
+                headers_type,
             )
         return None
 
     # MARK: - Payload Helpers
 
     @staticmethod
-    def _coerce_payload(payload: Any) -> dict[str, Any]:
+    def _coerce_payload(payload: object) -> JsonObject:
         if isinstance(payload, dict):
-            return payload
-        try:
-            decoded = loads(payload)
-            return decoded if isinstance(decoded, dict) else {}
-        except Exception:
+            return EventConsumptionCoordinator._coerce_mapping(cast(dict[object, object], payload))
+        if not isinstance(payload, (str, bytes)):
             return {}
+        try:
+            decoded = cast(object, loads(payload))
+            if isinstance(decoded, dict):
+                return EventConsumptionCoordinator._coerce_mapping(
+                    cast(dict[object, object], decoded)
+                )
+            return {}
+        except Exception:  # noqa: BLE001 - invalid JSON payloads are ignored
+            return {}
+
+    @staticmethod
+    def _coerce_mapping(mapping: dict[object, object]) -> JsonObject:
+        return {str(key): cast(JsonValue, value) for key, value in mapping.items()}

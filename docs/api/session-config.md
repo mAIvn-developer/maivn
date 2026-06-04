@@ -1,7 +1,8 @@
 # Session Config Models
 
-Typed session config models carry runtime controls for SDK invocations. Use these
-objects instead of putting control keys in request `metadata`.
+Typed config objects that carry runtime controls for SDK invocations.
+
+Use these objects to set controls — not control keys in request `metadata`.
 
 ## Import
 
@@ -265,7 +266,7 @@ MemoryAssetsConfig(
 | -------------------- | ---------------------------- | ------- | ----------------------------------------------------------- |
 | `defined_skills`     | `list[MemorySkillConfig]`    | `[]`    | User-defined skill payloads available for retrieval.        |
 | `bound_resources`    | `list[MemoryResourceConfig]` | `[]`    | Bound resource payloads available for retrieval.            |
-| `recall_turn_active` | `bool \| None`               | `None`  | Marks a recall-active turn for server-side memory behavior. |
+| `recall_turn_active` | `bool \| None`               | `None`  | Marks a recall-active turn for server-managed memory behavior. |
 
 ### MemorySkillConfig
 
@@ -418,7 +419,7 @@ SessionExecutionConfig(
 | ------------------------- | ---------------------- | ------- | ------------------------------------------------------- |
 | `agent_id`                | `str \| None`          | `None`  | SDK agent identifier.                                   |
 | `timeout`                 | `int \| float \| None` | `None`  | Execution timeout. Must be non-negative.                |
-| `sdk_delivery_mode`       | `str \| None`          | `None`  | SDK delivery mode used by server-side routing.          |
+| `sdk_delivery_mode`       | `str \| None`          | `None`  | SDK delivery mode used by server routing.          |
 | `client_timezone`         | `str \| None`          | `None`  | Client IANA timezone used for datetime-aware execution. |
 | `sdk_deployment_timezone` | `str \| None`          | `None`  | SDK deployment timezone fallback.                       |
 

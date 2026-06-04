@@ -1,7 +1,6 @@
 # Studio Authoring and Debugging
 
-This guide focuses on building apps that work cleanly in mAIvn Studio and on
-debugging them quickly.
+Studio works best when your apps tell it a little about themselves: what prompts to suggest, how to run, and which variant to start with. This guide shows how to author apps so they behave cleanly in Studio, and how to track down problems fast once they are running.
 
 ## Authoring Studio-Friendly Apps
 

@@ -4,13 +4,16 @@ This module implements the Strategy pattern for tool execution, allowing
 type-specific execution logic to be encapsulated and dispatched cleanly.
 """
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 from maivn_shared.infrastructure.logging import LoggerProtocol
 
 from maivn._internal.core.entities import BaseTool, FunctionTool, McpTool, ModelTool
+from maivn._internal.core.entities.tools import MethodTool
 from maivn._internal.core.exceptions import ToolExecutionError
 
 if TYPE_CHECKING:
@@ -19,7 +22,15 @@ if TYPE_CHECKING:
     from ..helpers import PydanticDeserializer
 
 
-# MARK: Protocol
+# MARK: Protocols
+
+
+class McpServerProtocol(Protocol):
+    """MCP server surface required by execution strategies."""
+
+    def call_tool(self, tool_name: str, args: dict[str, object]) -> object:
+        """Call an MCP tool by name."""
+        ...
 
 
 @runtime_checkable
@@ -44,9 +55,9 @@ class ToolExecutionStrategy(Protocol):
     def execute(
         self,
         tool: BaseTool,
-        args: dict[str, Any],
+        args: dict[str, object],
         context: ExecutionContext | None = None,
-    ) -> Any:
+    ) -> object:
         """Execute the tool with the given arguments.
 
         Args:
@@ -78,8 +89,8 @@ class FunctionExecutionStrategy:
             logger: Logger for operation tracking
             deserializer: Pydantic deserializer for argument conversion
         """
-        self._logger = logger
-        self._deserializer = deserializer
+        self._logger: LoggerProtocol | None = logger
+        self._deserializer: PydanticDeserializer | None = deserializer
 
     def can_execute(self, tool: BaseTool) -> bool:
         """Check if this strategy can execute the given tool."""
@@ -88,9 +99,9 @@ class FunctionExecutionStrategy:
     def execute(
         self,
         tool: BaseTool,
-        args: dict[str, Any],
+        args: dict[str, object],
         context: ExecutionContext | None = None,
-    ) -> Any:
+    ) -> object:
         """Execute a function tool.
 
         Args:
@@ -106,21 +117,69 @@ class FunctionExecutionStrategy:
         """
         if not isinstance(tool, FunctionTool):
             raise ToolExecutionError(
-                tool_id=getattr(tool, "name", "unknown"),
+                tool_id=tool.name,
                 reason=f"Expected FunctionTool, got {type(tool).__name__}",
             )
 
-        func = getattr(tool, "func", None)
-        if not callable(func):
-            raise ToolExecutionError(
-                tool_id=getattr(tool, "name", "unknown"),
-                reason="FunctionTool has no callable 'func'",
-            )
+        _ = context
+        func = tool.func
 
         if self._logger:
-            self._logger.info("[TOOL_EXEC] Executing function %s", func.__name__)
+            self._logger.info("[TOOL_EXEC] Executing function %s", _callable_name(func))
 
         # Deserialize dict arguments to Pydantic models if deserializer provided
+        if self._deserializer:
+            args = self._deserializer.deserialize_args(func, args)
+
+        return func(**args)
+
+
+# MARK: Method Strategy
+
+
+class MethodExecutionStrategy:
+    """Strategy for executing method tools.
+
+    A ``MethodTool`` wraps a bound method on a connector/toolset instance
+    (typically produced by ``@toolset`` + ``@toolify``). Execution is
+    structurally identical to a function tool: ``tool.func`` is a callable
+    that already closes over its host instance, so the strategy just
+    invokes it with the LLM-supplied kwargs.
+    """
+
+    def __init__(
+        self,
+        *,
+        logger: LoggerProtocol | None = None,
+        deserializer: PydanticDeserializer | None = None,
+    ) -> None:
+        self._logger: LoggerProtocol | None = logger
+        self._deserializer: PydanticDeserializer | None = deserializer
+
+    def can_execute(self, tool: BaseTool) -> bool:
+        return isinstance(tool, MethodTool)
+
+    def execute(
+        self,
+        tool: BaseTool,
+        args: dict[str, object],
+        context: ExecutionContext | None = None,
+    ) -> object:
+        if not isinstance(tool, MethodTool):
+            raise ToolExecutionError(
+                tool_id=tool.name,
+                reason=f"Expected MethodTool, got {type(tool).__name__}",
+            )
+
+        _ = context
+        func = tool.func
+
+        if self._logger:
+            self._logger.info(
+                "[TOOL_EXEC] Executing method %s",
+                _callable_name(func, fallback="<method>"),
+            )
+
         if self._deserializer:
             args = self._deserializer.deserialize_args(func, args)
 
@@ -139,7 +198,7 @@ class ModelExecutionStrategy:
         Args:
             logger: Logger for operation tracking
         """
-        self._logger = logger
+        self._logger: LoggerProtocol | None = logger
 
     def can_execute(self, tool: BaseTool) -> bool:
         """Check if this strategy can execute the given tool."""
@@ -148,9 +207,9 @@ class ModelExecutionStrategy:
     def execute(
         self,
         tool: BaseTool,
-        args: dict[str, Any],
+        args: dict[str, object],
         context: ExecutionContext | None = None,
-    ) -> Any:
+    ) -> object:
         """Execute a model tool.
 
         Args:
@@ -166,16 +225,12 @@ class ModelExecutionStrategy:
         """
         if not isinstance(tool, ModelTool):
             raise ToolExecutionError(
-                tool_id=getattr(tool, "name", "unknown"),
+                tool_id=tool.name,
                 reason=f"Expected ModelTool, got {type(tool).__name__}",
             )
 
-        model_cls = getattr(tool, "model", None)
-        if model_cls is None:
-            raise ToolExecutionError(
-                tool_id=getattr(tool, "name", "unknown"),
-                reason="ModelTool has no 'model' attribute",
-            )
+        _ = context
+        model_cls = tool.model
 
         if self._logger:
             self._logger.info("[TOOL_EXEC] Executing model %s", model_cls.__name__)
@@ -183,7 +238,7 @@ class ModelExecutionStrategy:
         try:
             instance = model_cls(**args)
             return instance.model_dump(mode="json")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - model validation is reported as tool failure
             raise ToolExecutionError(
                 tool_id=model_cls.__name__,
                 reason=f"Model validation failed: {e}",
@@ -203,7 +258,7 @@ class McpExecutionStrategy:
         Args:
             logger: Logger for operation tracking
         """
-        self._logger = logger
+        self._logger: LoggerProtocol | None = logger
 
     def can_execute(self, tool: BaseTool) -> bool:
         """Check if this strategy can execute the given tool."""
@@ -212,9 +267,9 @@ class McpExecutionStrategy:
     def execute(
         self,
         tool: BaseTool,
-        args: dict[str, Any],
+        args: dict[str, object],
         context: ExecutionContext | None = None,
-    ) -> Any:
+    ) -> object:
         """Execute an MCP tool.
 
         Args:
@@ -230,7 +285,7 @@ class McpExecutionStrategy:
         """
         if not isinstance(tool, McpTool):
             raise ToolExecutionError(
-                tool_id=getattr(tool, "name", "unknown"),
+                tool_id=tool.name,
                 reason=f"Expected McpTool, got {type(tool).__name__}",
             )
 
@@ -245,14 +300,14 @@ class McpExecutionStrategy:
 
         try:
             return server.call_tool(tool.mcp_tool_name, args)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - MCP server failures are reported as tool failure
             raise ToolExecutionError(
                 tool_id=tool.name,
                 reason=f"MCP tool execution failed: {exc}",
                 original_error=exc,
             ) from exc
 
-    def _resolve_server(self, tool: McpTool, context: ExecutionContext | None) -> Any:
+    def _resolve_server(self, tool: McpTool, context: ExecutionContext | None) -> McpServerProtocol:
         """Resolve the MCP server for the tool.
 
         Args:
@@ -265,13 +320,11 @@ class McpExecutionStrategy:
         Raises:
             ToolExecutionError: If server not found
         """
-        server = getattr(tool, "server", None)
+        server = cast(McpServerProtocol | None, tool.server)
 
         if server is None and context is not None:
-            scope = getattr(context, "scope", None)
-            if scope:
-                servers = getattr(scope, "_mcp_servers", {})
-                server = servers.get(tool.server_name)
+            servers = _mcp_servers_from_scope(context.scope)
+            server = servers.get(tool.server_name)
 
         if server is None:
             raise ToolExecutionError(
@@ -325,9 +378,9 @@ class StrategyRegistry:
     def execute(
         self,
         tool: BaseTool,
-        args: dict[str, Any],
+        args: dict[str, object],
         context: ExecutionContext | None = None,
-    ) -> Any:
+    ) -> object:
         """Execute a tool using the appropriate strategy.
 
         Args:
@@ -344,7 +397,7 @@ class StrategyRegistry:
         strategy = self.get_strategy(tool)
         if strategy is None:
             raise ToolExecutionError(
-                tool_id=getattr(tool, "name", "unknown"),
+                tool_id=tool.name,
                 reason=f"No execution strategy for tool type: {type(tool).__name__}",
             )
         return strategy.execute(tool, args, context)
@@ -370,15 +423,32 @@ def create_default_registry(
     return StrategyRegistry(
         [
             FunctionExecutionStrategy(logger=logger, deserializer=deserializer),
+            MethodExecutionStrategy(logger=logger, deserializer=deserializer),
             ModelExecutionStrategy(logger=logger),
             McpExecutionStrategy(logger=logger),
         ]
     )
 
 
+# MARK: Helpers
+
+
+def _callable_name(func: object, *, fallback: str = "<function>") -> str:
+    name = cast(object, getattr(func, "__name__", fallback))
+    return name if isinstance(name, str) and name else fallback
+
+
+def _mcp_servers_from_scope(scope: object | None) -> Mapping[str, McpServerProtocol]:
+    servers = cast(object, getattr(scope, "_mcp_servers", {}))
+    if isinstance(servers, Mapping):
+        return cast(Mapping[str, McpServerProtocol], servers)
+    return {}
+
+
 __all__ = [
     "FunctionExecutionStrategy",
     "McpExecutionStrategy",
+    "MethodExecutionStrategy",
     "ModelExecutionStrategy",
     "StrategyRegistry",
     "ToolExecutionStrategy",

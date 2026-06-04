@@ -38,8 +38,8 @@ jobs:
       - name: Ruff
         run: uv run --no-sync ruff check .
 
-      - name: Pyright
-        run: uv run --no-sync pyright src/maivn
+      - name: Basedpyright
+        run: uv run --no-sync --with basedpyright basedpyright -p .
 
       - name: Pytest
         run: uv run --no-sync pytest

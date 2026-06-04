@@ -1,8 +1,34 @@
 """Tool normalization helpers for structured output flows."""
 
+# pyright: strict
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
+from typing import Protocol, cast, runtime_checkable
+
 from maivn._internal.core.entities import BaseTool
+
+# MARK: - Protocols
+
+
+@runtime_checkable
+class _ModelCopyTool(Protocol):
+    def model_copy(self, *, update: Mapping[str, object] | None = None) -> object:
+        """Return a model copy with updated fields."""
+        ...
+
+
+@runtime_checkable
+class _ModelDumpTool(Protocol):
+    def model_dump(self) -> object:
+        """Return a serializable model payload."""
+        ...
+
+
+@runtime_checkable
+class _FinalToolWritable(Protocol):
+    final_tool: bool
+
 
 # MARK: - Public API
 
@@ -16,13 +42,13 @@ def normalize_tools_for_structured_output(
     If an existing tool uses the same model class as structured_tool,
     that tool is promoted to final_tool=True and no duplicate is added.
     """
-    structured_model = getattr(structured_tool, "model", None)
+    structured_model = _optional_attr(structured_tool, "model")
     existing_match: BaseTool | None = None
 
     # Check if any existing tool uses the same model class
     if structured_model is not None:
         for tool in tools:
-            tool_model = getattr(tool, "model", None)
+            tool_model = _optional_attr(tool, "model")
             if tool_model is structured_model:
                 existing_match = tool
                 break
@@ -34,40 +60,40 @@ def normalize_tools_for_structured_output(
             if tool is existing_match:
                 # Promote this tool to final_tool=True
                 updated = _try_set_final_tool(tool, True)
-                normalized.append(updated if updated is not None else tool)
+                normalized.append(cast(BaseTool, updated) if updated is not None else tool)
             else:
                 # Set other tools to final_tool=False
-                if getattr(tool, "final_tool", False):
+                if _is_final_tool(tool):
                     updated = _try_set_final_tool(tool, False)
                     if updated is None:
                         continue
-                    tool = updated
+                    tool = cast(BaseTool, updated)
                 normalized.append(tool)
         return normalized
 
     # No existing match - use original logic
     normalized = []
     for tool in tools:
-        if getattr(tool, "final_tool", False):
+        if _is_final_tool(tool):
             updated = _try_set_final_tool(tool, False)
             if updated is None:
                 continue
-            tool = updated
+            tool = cast(BaseTool, updated)
         normalized.append(tool)
 
     normalized.append(structured_tool)
 
     stabilized: list[BaseTool] = []
     for tool in normalized[:-1]:
-        if getattr(tool, "final_tool", False):
+        if _is_final_tool(tool):
             updated = _try_set_final_tool(tool, False)
             if updated is None:
                 continue
-            tool = updated
+            tool = cast(BaseTool, updated)
         stabilized.append(tool)
 
     final_tool = normalized[-1]
-    final_tool = _try_set_final_tool(final_tool, True) or final_tool
+    final_tool = cast(BaseTool, _try_set_final_tool(final_tool, True) or final_tool)
     stabilized.append(final_tool)
 
     return stabilized
@@ -76,7 +102,7 @@ def normalize_tools_for_structured_output(
 # MARK: - Private Helpers
 
 
-def _try_set_final_tool(tool: BaseTool, final_tool: bool) -> BaseTool | None:
+def _try_set_final_tool(tool: object, final_tool: bool) -> object | None:
     """Best-effort helper to set a tool's final_tool flag.
 
     Tries strategies in order of preference: pydantic model_copy, direct
@@ -89,17 +115,18 @@ def _try_set_final_tool(tool: BaseTool, final_tool: bool) -> BaseTool | None:
     # (Pydantic ValidationError inherits from ValueError).
     expected = (AttributeError, TypeError, ValueError)
 
-    if hasattr(tool, "model_copy"):
+    if isinstance(tool, _ModelCopyTool):
         try:
             return tool.model_copy(update={"final_tool": final_tool})
         except expected:
             pass
 
-    try:
-        tool.final_tool = final_tool
-        return tool
-    except expected:
-        pass
+    if isinstance(tool, _FinalToolWritable):
+        try:
+            tool.final_tool = final_tool
+            return tool
+        except expected:
+            pass
 
     try:
         object.__setattr__(tool, "final_tool", final_tool)
@@ -107,15 +134,26 @@ def _try_set_final_tool(tool: BaseTool, final_tool: bool) -> BaseTool | None:
     except expected:
         pass
 
-    if hasattr(tool, "model_dump"):
+    if isinstance(tool, _ModelDumpTool):
         try:
             data = tool.model_dump()
-            data["final_tool"] = final_tool
-            return tool.__class__(**data)
+            if not isinstance(data, dict):
+                return None
+            payload = cast(dict[str, object], data)
+            payload["final_tool"] = final_tool
+            return cast(Callable[..., object], type(tool))(**payload)
         except expected:
             pass
 
     return None
+
+
+def _is_final_tool(tool: object) -> bool:
+    return _optional_attr(tool, "final_tool") is True
+
+
+def _optional_attr(value: object, attr: str) -> object | None:
+    return cast(object | None, getattr(value, attr, None))
 
 
 __all__ = ["normalize_tools_for_structured_output"]

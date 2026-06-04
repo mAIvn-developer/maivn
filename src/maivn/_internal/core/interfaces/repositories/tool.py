@@ -1,3 +1,4 @@
+# pyright: strict
 """Tool repository interface.
 Defines abstract methods for storing and retrieving tool instances.
 """
@@ -6,7 +7,9 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from maivn._internal.core.entities.tools import BaseTool
+from ...entities.tools import BaseTool
+
+# MARK: - Tool Repository Interface
 
 
 class ToolRepoInterface(ABC):

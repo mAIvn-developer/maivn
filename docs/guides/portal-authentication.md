@@ -1,6 +1,11 @@
 # Portal Authentication
 
-This guide covers account sign-in behavior in the mAIvn Developer Portal and how to resolve common login issues quickly.
+Signing in to the mAIvn Developer Portal is how you get to your dashboard,
+projects, and account settings in the web app. This guide walks through
+what the sign-in flow does, how to reset a forgotten password, and how to
+clear up the login problems people hit most often.
+
+> **See also:** [Authentication & API Keys](authentication.md) — authenticating the SDK with an API key (distinct from signing in to the portal web app covered here).
 
 ## Sign-In Flow
 
@@ -50,3 +55,10 @@ This guide covers account sign-in behavior in the mAIvn Developer Portal and how
 - Opening protected routes while signed out redirects you to `/login`.
 - Profile, organization, project, and billing pages require authentication.
 - Security-sensitive actions (for example profile or credential updates) require a valid in-session CSRF token.
+
+## Related
+
+- [Authentication & API Keys](authentication.md) — authenticate the SDK
+  with an API key (distinct from the portal sign-in covered here).
+- [Workspace Operations](workspace-operations.md) — what you can do once
+  you are signed in: organizations, projects, and navigation.

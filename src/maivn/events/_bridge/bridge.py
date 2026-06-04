@@ -1,13 +1,15 @@
 """Reusable EventBridge for streaming AppEvent v1 payloads to frontends via SSE."""
 
+# pyright: strict
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator
-from typing import Any, Literal
+from collections.abc import AsyncGenerator, Awaitable
+from typing import ClassVar, Final, Literal, cast
 
 from .dedup import build_interrupt_fingerprint, build_status_fingerprint
 from .emitters import (
+    EventPayload,
     emit_agent_assignment,
     emit_assistant_chunk,
     emit_enrichment,
@@ -22,7 +24,6 @@ from .emitters import (
     emit_tool_event,
 )
 from .queueing import enqueue_event
-from .registry import BridgeRegistry
 from .runtime.identity import AssignmentAndScopeResolver, BridgeIdentityState, ToolIdentityResolver
 from .runtime.normalization import BridgePayloadNormalizer
 from .schema import ValidationMode, validate_event
@@ -32,8 +33,15 @@ from .streaming import generate_sse_events, reopen_bridge
 from .ui_event import UIEvent
 
 BackpressurePolicy = Literal["block", "drop_oldest", "drop_newest"]
-_VALID_BACKPRESSURE: frozenset[str] = frozenset({"block", "drop_oldest", "drop_newest"})
-_VALID_VALIDATION_MODES: frozenset[str] = frozenset({"off", "warn", "strict"})
+
+_VALID_BACKPRESSURE: Final[frozenset[BackpressurePolicy]] = cast(
+    frozenset[BackpressurePolicy],
+    frozenset(("block", "drop_oldest", "drop_newest")),
+)  # pyright: ignore[reportUnnecessaryCast]
+_VALID_VALIDATION_MODES: Final[frozenset[ValidationMode]] = cast(
+    frozenset[ValidationMode],
+    frozenset(("off", "warn", "strict")),
+)  # pyright: ignore[reportUnnecessaryCast]
 
 
 # MARK: EventBridge
@@ -42,7 +50,10 @@ _VALID_VALIDATION_MODES: frozenset[str] = frozenset({"off", "warn", "strict"})
 class EventBridge:
     """Bridge between SDK execution events and a frontend SSE stream."""
 
-    TERMINAL_EVENTS: frozenset[str] = frozenset({"final", "error", "session_end"})
+    TERMINAL_EVENTS: ClassVar[frozenset[str]] = cast(
+        frozenset[str],
+        frozenset(("final", "error", "session_end")),
+    )
 
     def __init__(
         self,
@@ -69,47 +80,55 @@ class EventBridge:
                 f"backpressure must be one of {sorted(_VALID_BACKPRESSURE)}, got {backpressure!r}"
             )
         if schema_validation not in _VALID_VALIDATION_MODES:
+            allowed_modes: list[ValidationMode] = sorted(_VALID_VALIDATION_MODES)
             raise ValueError(
-                f"schema_validation must be one of {sorted(_VALID_VALIDATION_MODES)}, "
-                f"got {schema_validation!r}"
+                f"schema_validation must be one of {allowed_modes}, got {schema_validation!r}"
             )
 
-        self.session_id = session_id
-        self._max_history = max_history
-        self._heartbeat_interval = heartbeat_interval
-        self._queue_maxsize = queue_maxsize
+        self.session_id: str = session_id
+        self._max_history: int = max_history
+        self._heartbeat_interval: float = heartbeat_interval
+        self._queue_maxsize: int = queue_maxsize
         self._backpressure: BackpressurePolicy = backpressure
         self._schema_validation: ValidationMode = schema_validation
         self._queue: asyncio.Queue[UIEvent] = asyncio.Queue(maxsize=queue_maxsize)
-        self._subscriber_connected = asyncio.Event()
-        self._subscriber_count = 0
-        self._closed = False
+        self._subscriber_connected: asyncio.Event = asyncio.Event()
+        self._subscriber_count: int = 0
+        self._closed: bool = False
         self._event_history: list[UIEvent] = []
         # Total events ever appended to history; lets us detect when older
         # events have aged out of the buffer so reconnects with a missing
         # cursor can be diagnosed.
-        self._history_evictions = 0
-        self._security_policy = EventBridgeSecurityPolicy(audience=audience)
-        self.audience = self._security_policy.audience
-        self._identity_state = BridgeIdentityState()
-        self._tool_identity_resolver = ToolIdentityResolver(self._identity_state)
-        self._assignment_scope_resolver = AssignmentAndScopeResolver(self._identity_state)
-        self._payload_normalizer = BridgePayloadNormalizer(self._identity_state)
+        self._history_evictions: int = 0
+        self._security_policy: EventBridgeSecurityPolicy = EventBridgeSecurityPolicy(
+            audience=audience
+        )
+        self.audience: BridgeAudience = self._security_policy.audience
+        self._identity_state: BridgeIdentityState = BridgeIdentityState()
+        self._tool_identity_resolver: ToolIdentityResolver = ToolIdentityResolver(
+            self._identity_state
+        )
+        self._assignment_scope_resolver: AssignmentAndScopeResolver = AssignmentAndScopeResolver(
+            self._identity_state
+        )
+        self._payload_normalizer: BridgePayloadNormalizer = BridgePayloadNormalizer(
+            self._identity_state
+        )
         # Dedup of overlapping logical emissions. Reset by reopen() and (when
         # ``reset_on_session_start`` is set) on the ``session_start`` packet,
         # whichever comes first.
-        self._dedupe_interrupts = dedupe_interrupts
-        self._dedupe_status_messages = dedupe_status_messages
-        self._reset_on_session_start = reset_on_session_start
+        self._dedupe_interrupts: bool = dedupe_interrupts
+        self._dedupe_status_messages: bool = dedupe_status_messages
+        self._reset_on_session_start: bool = reset_on_session_start
         self._emitted_interrupt_fingerprints: set[tuple[str, str]] = set()
         self._last_status_fingerprint: tuple[str, str] | None = None
 
-    async def _emit_normalized(self, event_type: str, data: dict[str, Any]) -> None:
+    async def _emit_normalized(self, event_type: str, data: EventPayload) -> None:
         validate_event(event_type, data, mode=self._schema_validation)
         bridge_safe_data = self._security_policy.sanitize_event(event_type, data)
         await self._emit_packet(event_type, bridge_safe_data)
 
-    async def _emit_packet(self, event_type: str, data: dict[str, Any]) -> None:
+    async def _emit_packet(self, event_type: str, data: EventPayload) -> None:
         if self._closed:
             logger.warning("Attempted to emit to closed bridge: %s", self.session_id)
             return
@@ -126,19 +145,30 @@ class EventBridge:
 
     async def _enqueue_event(self, event: UIEvent) -> None:
         """Place an event on the live queue, applying the backpressure policy."""
-        await enqueue_event(self, event)
+        await enqueue_event(
+            queue=self._queue,
+            queue_maxsize=self._queue_maxsize,
+            backpressure=self._backpressure,
+            session_id=self.session_id,
+            event=event,
+        )
 
-    async def emit(self, event_type: str, data: dict[str, Any]) -> None:
+    async def emit(self, event_type: str, data: EventPayload) -> None:
         """Emit an event to the UI stream."""
         if self._reset_on_session_start and event_type == "session_start":
             self._reset_dedup_state()
+        normalized_data = self._payload_normalizer.normalize_payload(event_type, data)
+        # Run the status dedup drop-check against the NORMALIZED payload so a
+        # duplicate whose canonical status text is nested differently in the
+        # raw payload (e.g. under ``status``/``assistant``) is dropped just
+        # like a top-level one — normalization lifts the canonical
+        # ``message``/``assistant_id`` to the top level the fingerprint reads.
         if (
             self._dedupe_status_messages
             and event_type == "status_message"
-            and self._should_drop_status_message(data)
+            and self._should_drop_status_message(normalized_data)
         ):
             return
-        normalized_data = self._payload_normalizer.normalize_payload(event_type, data)
         if event_type == "interrupt_required" and self._should_drop_interrupt_payload(
             normalized_data
         ):
@@ -173,7 +203,7 @@ class EventBridge:
         self._emitted_interrupt_fingerprints.add(fingerprint)
         return False
 
-    def _should_drop_interrupt_payload(self, data: dict[str, Any]) -> bool:
+    def _should_drop_interrupt_payload(self, data: EventPayload) -> bool:
         prompt = data.get("prompt")
         data_key = data.get("data_key")
         if not isinstance(prompt, str) or not isinstance(data_key, str):
@@ -186,7 +216,7 @@ class EventBridge:
             arg_name=arg_name if isinstance(arg_name, str) else None,
         )
 
-    def _should_drop_status_message(self, data: dict[str, Any]) -> bool:
+    def _should_drop_status_message(self, data: EventPayload) -> bool:
         if not self._dedupe_status_messages:
             return False
         fingerprint = build_status_fingerprint(data)
@@ -204,8 +234,8 @@ class EventBridge:
         tool_name: str,
         tool_id: str,
         status: str,
-        args: dict[str, Any] | None = None,
-        result: Any = None,
+        args: EventPayload | None = None,
+        result: object = None,
         error: str | None = None,
         agent_name: str | None = None,
         swarm_name: str | None = None,
@@ -238,7 +268,7 @@ class EventBridge:
         self,
         tool_type: str,
         tool_id: str,
-        params: dict[str, Any] | None = None,
+        params: EventPayload | None = None,
         agent_name: str | None = None,
         swarm_name: str | None = None,
     ) -> None:
@@ -279,7 +309,7 @@ class EventBridge:
     async def emit_system_tool_complete(
         self,
         tool_id: str,
-        result: Any,
+        result: object,
     ) -> None:
         """Emit a system tool completion event."""
         canonical_tool_id = self._identity_state.tool_id_aliases.get(tool_id, tool_id)
@@ -295,9 +325,16 @@ class EventBridge:
         self,
         assistant_id: str,
         text: str,
+        *,
+        replace_content: bool = False,
     ) -> None:
         """Emit a streamed assistant response chunk."""
-        await emit_assistant_chunk(self._emit_normalized, assistant_id=assistant_id, text=text)
+        await emit_assistant_chunk(
+            self._emit_normalized,
+            assistant_id=assistant_id,
+            text=text,
+            replace_content=replace_content,
+        )
 
     async def emit_status_message(
         self,
@@ -360,7 +397,7 @@ class EventBridge:
         swarm_name: str | None = None,
         task: str | None = None,
         error: str | None = None,
-        result: Any | None = None,
+        result: object | None = None,
     ) -> None:
         """Emit an agent assignment event (for swarms)."""
         canonical_assignment_id = self._assignment_scope_resolver.resolve_agent_assignment_id(
@@ -387,8 +424,9 @@ class EventBridge:
         scope_id: str | None = None,
         scope_name: str | None = None,
         scope_type: str | None = None,
-        memory: dict[str, Any] | None = None,
-        redaction: dict[str, Any] | None = None,
+        memory: EventPayload | None = None,
+        redaction: EventPayload | None = None,
+        reevaluate: EventPayload | None = None,
     ) -> None:
         """Emit an enrichment phase change event."""
         canonical_scope_id = self._assignment_scope_resolver.resolve_scope_id(
@@ -405,13 +443,14 @@ class EventBridge:
             scope_type=scope_type,
             memory=memory,
             redaction=redaction,
+            reevaluate=reevaluate,
         )
 
-    async def emit_final(self, response: str, result: Any = None) -> None:
+    async def emit_final(self, response: str, result: object = None) -> None:
         """Emit final completion event."""
         await emit_final(self._emit_normalized, response=response, result=result)
 
-    async def emit_error(self, error: str, details: dict[str, Any] | None = None) -> None:
+    async def emit_error(self, error: str, details: EventPayload | None = None) -> None:
         """Emit an error event."""
         await emit_error(self._emit_normalized, error=error, details=details)
 
@@ -444,12 +483,66 @@ class EventBridge:
 
     # MARK: Streaming and Lifecycle
 
+    @property
+    def stream_default_heartbeat_interval(self) -> float:
+        return self._heartbeat_interval
+
+    @property
+    def stream_max_history(self) -> int:
+        return self._max_history
+
+    @property
+    def stream_history_evictions(self) -> int:
+        return self._history_evictions
+
+    @property
+    def stream_is_closed(self) -> bool:
+        return self._closed
+
+    def stream_mark_closed(self) -> None:
+        self._closed = True
+
+    def stream_history_snapshot(self) -> list[UIEvent]:
+        return list(self._event_history)
+
+    def stream_queue_empty(self) -> bool:
+        return self._queue.empty()
+
+    def stream_queue_get_nowait(self) -> UIEvent:
+        return self._queue.get_nowait()
+
+    def stream_queue_put_nowait(self, event: UIEvent) -> None:
+        self._queue.put_nowait(event)
+
+    async def stream_queue_get(self) -> UIEvent:
+        return await self._queue.get()
+
+    def stream_subscriber_attached(self) -> None:
+        self._subscriber_count += 1
+        self._subscriber_connected.set()
+
+    def stream_subscriber_detached(self) -> None:
+        self._subscriber_count = max(0, self._subscriber_count - 1)
+        if self._subscriber_count == 0:
+            self._subscriber_connected.clear()
+
+    def stream_reset_state(self) -> None:
+        self._closed = False
+        self._subscriber_connected.clear()
+        self._subscriber_count = 0
+        self._event_history.clear()
+        while not self._queue.empty():
+            try:
+                _ = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
     async def generate_sse(
         self,
         last_event_id: str | None = None,
         *,
         heartbeat_interval: float | None = None,
-    ) -> AsyncGenerator[dict[str, Any], None]:
+    ) -> AsyncGenerator[dict[str, object], None]:
         """Generate SSE events for streaming to client.
 
         Keep-alives are emitted as SSE comment frames (``: keepalive ...\\n\\n``)
@@ -482,12 +575,13 @@ class EventBridge:
         if self._subscriber_connected.is_set():
             return True
         try:
-            await asyncio.wait_for(self._subscriber_connected.wait(), timeout=timeout)
+            connected_wait: Awaitable[bool] = self._subscriber_connected.wait()
+            _ = await asyncio.wait_for(connected_wait, timeout=timeout)
         except TimeoutError:
             return False
         return True
 
-    def get_history(self) -> list[dict[str, Any]]:
+    def get_history(self) -> list[dict[str, object]]:
         """Get event history as list of dicts."""
         return [event.to_dict() for event in self._event_history]
 
@@ -521,8 +615,8 @@ class EventBridge:
 
 
 __all__ = [
+    "BackpressurePolicy",
     "BridgeAudience",
-    "BridgeRegistry",
     "EventBridge",
     "EventBridgeSecurityPolicy",
     "UIEvent",

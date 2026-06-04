@@ -2,9 +2,11 @@
 Formats tool execution events and results for display.
 """
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, ClassVar
 
 from rich.markup import escape
 from rich.text import Text
@@ -17,6 +19,8 @@ from ..._formatters import (
     get_event_icon,
 )
 from .._shared_helpers import (
+    ToolArgs,
+    ToolDetails,
     build_error_details,
     build_tool_start_details,
     get_tool_prefix,
@@ -29,6 +33,8 @@ from .tool_children import ToolChildRenderer
 if TYPE_CHECKING:
     from rich.console import Console
 
+ToolDisplayInfo = Mapping[str, object]
+
 
 # MARK: Tool Reporter
 
@@ -36,19 +42,19 @@ if TYPE_CHECKING:
 class ToolReporter:
     """Handles tool execution reporting."""
 
-    STREAMING_MAX_LINES = 50
+    STREAMING_MAX_LINES: ClassVar[int] = 50
 
     # MARK: - Initialization
 
     def __init__(self, console: Console) -> None:
         """Initialize tool reporter."""
-        self.console = console
-        self.tracker = EventTracker()
+        self.console: Console = console
+        self.tracker: EventTracker = EventTracker()
 
-        self._child_renderer = ToolChildRenderer(
+        self._child_renderer: ToolChildRenderer = ToolChildRenderer(
             print_to_console=self._print_to_console,
         )
-        self._streaming = StreamingHandler(console)
+        self._streaming: StreamingHandler = StreamingHandler(console)
 
     # MARK: - Public Reporting Methods
 
@@ -73,7 +79,7 @@ class ToolReporter:
         event_id: str,
         tool_type: str | None = None,
         agent_name: str | None = None,
-        tool_args: dict[str, Any] | None = None,
+        tool_args: ToolArgs | None = None,
     ) -> None:
         """Report tool execution start."""
         self.tracker.record_tool_start(
@@ -102,12 +108,13 @@ class ToolReporter:
         self,
         event_id: str,
         elapsed_ms: int | None = None,
-        result: Any | None = None,
+        result: object | None = None,
     ) -> None:
         """Report tool execution completion."""
-        tool_info = self.tracker.get_tool_info(event_id)
-        if not tool_info:
+        raw_tool_info = self.tracker.get_tool_info(event_id)
+        if not raw_tool_info:
             return
+        tool_info = raw_tool_info
 
         if elapsed_ms is None:
             elapsed_ms = self.tracker.calculate_elapsed_ms(event_id)
@@ -140,18 +147,18 @@ class ToolReporter:
         event_id: str | None = None,
         agent_name: str | None = None,
         swarm_name: str | None = None,
-        result: Any | None = None,
+        result: object | None = None,
     ) -> None:
         """Report MODEL tool execution completion."""
         _ = (event_id, swarm_name)
         self.tracker.record_model_tool()
 
         text = Text()
-        text.append("[MODEL] ", style="bold magenta")
-        text.append(f"[OK] Complete: {tool_name}", style="green")
+        _ = text.append("[MODEL] ", style="bold magenta")
+        _ = text.append(f"[OK] Complete: {tool_name}", style="green")
         self._print_to_console(text)
         if result is not None:
-            tool_info: dict[str, Any] = {
+            tool_info: dict[str, object] = {
                 "name": tool_name,
                 "tool_type": "model",
             }
@@ -191,7 +198,7 @@ class ToolReporter:
             )
             return
 
-        report_system_tool_progress(
+        _ = report_system_tool_progress(
             console=self.console,
             print_to_console=self._print_to_console,
             event_id=event_id,
@@ -221,7 +228,7 @@ class ToolReporter:
         self,
         event_type: str,
         message: str,
-        details: dict[str, Any] | None = None,
+        details: ToolDetails | None = None,
     ) -> None:
         """Print an event with color coding."""
         color = get_event_color(event_type)
@@ -234,7 +241,7 @@ class ToolReporter:
 
     def _print_event_details(
         self,
-        details: dict[str, Any],
+        details: ToolDetails,
         color: str,
     ) -> None:
         """Print event details with proper formatting."""
@@ -266,11 +273,12 @@ class ToolReporter:
 
     def _print_tool_completion(
         self,
-        tool_info: dict[str, Any],
+        tool_info: ToolDisplayInfo,
         elapsed_ms: int,
     ) -> None:
         """Print tool completion message."""
-        prefix = get_tool_prefix(tool_info.get("tool_type"))
+        tool_type = tool_info.get("tool_type")
+        prefix = get_tool_prefix(tool_type if isinstance(tool_type, str) else None)
         elapsed_str = format_elapsed_time(elapsed_ms)
 
         prefix_styles = {
@@ -281,11 +289,12 @@ class ToolReporter:
             "FUNC": "bold cyan",
         }
         style = prefix_styles.get(prefix, "bold cyan")
+        tool_name = str(tool_info.get("name") or "")
 
         text = Text()
-        text.append(f"[{prefix}] ", style=style)
-        text.append(
-            f"[OK] Completed: {tool_info['name']} ({elapsed_str})",
+        _ = text.append(f"[{prefix}] ", style=style)
+        _ = text.append(
+            f"[OK] Completed: {tool_name} ({elapsed_str})",
             style="green",
         )
         self._print_to_console(text)
@@ -293,6 +302,6 @@ class ToolReporter:
     def _print_reevaluate_message(self) -> None:
         """Print reevaluate system tool message."""
         text = Text()
-        text.append("[SYSTEM] ", style="bold blue")
-        text.append("[OK] Reevaluating", style="green")
+        _ = text.append("[SYSTEM] ", style="bold blue")
+        _ = text.append("[OK] Reevaluating", style="green")
         self._print_to_console(text)

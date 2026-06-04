@@ -1,8 +1,10 @@
+# pyright: strict
 from __future__ import annotations
 
 import base64
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Protocol, TypeGuard, cast
 
 from maivn_shared import MemoryConfig
 from maivn_shared.domain.entities.memory_config import is_reserved_memory_metadata_key
@@ -18,8 +20,12 @@ _MAX_RESOURCE_INLINE_BYTES = 50 * 1024 * 1024
 
 class _BaseScopeMemoryProtocol(Protocol):
     memory_config: MemoryConfig
-    skills: list[dict[str, Any]]
-    resources: list[dict[str, Any]]
+    skills: list[dict[str, object]]
+    resources: list[dict[str, object]]
+
+
+class _Readable(Protocol):
+    def read(self) -> object: ...
 
 
 # MARK: Mixin
@@ -29,7 +35,7 @@ class BaseScopeMemoryMixin:
     # MARK: - Memory Configuration
 
     @staticmethod
-    def coerce_memory_config(value: Any) -> MemoryConfig | None:
+    def coerce_memory_config(value: object) -> MemoryConfig | None:
         """Coerce ``None`` / dict / ``MemoryConfig`` to a typed config or ``None``."""
         if value is None:
             return None
@@ -39,40 +45,43 @@ class BaseScopeMemoryMixin:
             return MemoryConfig.model_validate(value)
         raise TypeError("memory_config must be a MemoryConfig, dictionary, or None")
 
-    def resolve_memory_config(self, override: Any = None) -> MemoryConfig | None:
+    def resolve_memory_config(self, override: object = None) -> MemoryConfig | None:
         """Merge the scope's memory config with a per-call ``override``."""
-        scope = cast(_BaseScopeMemoryProtocol, self)
+        scope = cast(_BaseScopeMemoryProtocol, cast(object, self))
         return MemoryConfig.merge(scope.memory_config, self.coerce_memory_config(override))
 
     @staticmethod
-    def reject_reserved_memory_metadata_keys(metadata: Any) -> None:
+    def reject_reserved_memory_metadata_keys(metadata: object) -> None:
         if not isinstance(metadata, dict):
             return
+        metadata_map = cast(Mapping[object, object], metadata)
         reserved_keys = sorted(
-            key for key in metadata if isinstance(key, str) and is_reserved_memory_metadata_key(key)
+            key
+            for key in metadata_map
+            if isinstance(key, str) and is_reserved_memory_metadata_key(key)
         )
         if reserved_keys:
             joined = ", ".join(reserved_keys)
             raise ValueError(
                 "Reserved memory metadata keys are not allowed in metadata; "
-                f"use memory_config instead ({joined})"
+                + f"use memory_config instead ({joined})"
             )
         reserved_session_keys = sorted(
             key
-            for key in metadata
+            for key in metadata_map
             if isinstance(key, str) and is_reserved_session_config_metadata_key(key)
         )
         if reserved_session_keys:
             joined = ", ".join(reserved_session_keys)
             raise ValueError(
                 "Reserved session-control metadata keys are not allowed in metadata; "
-                f"use typed session config fields instead ({joined})"
+                + f"use typed session config fields instead ({joined})"
             )
 
     # MARK: - Normalization Helpers
 
     @staticmethod
-    def _coerce_string(value: Any) -> str | None:
+    def _coerce_string(value: object) -> str | None:
         if not isinstance(value, str):
             return None
         normalized = value.strip()
@@ -81,7 +90,7 @@ class BaseScopeMemoryMixin:
         return normalized
 
     @classmethod
-    def _encode_resource_content_base64(cls, raw_resource: dict[str, Any]) -> str | None:
+    def _encode_resource_content_base64(cls, raw_resource: Mapping[str, object]) -> str | None:
         inline_content_present = any(
             key in raw_resource for key in ("content_bytes", "text_content", "file")
         )
@@ -90,7 +99,7 @@ class BaseScopeMemoryMixin:
             if inline_content_present:
                 raise ValueError(
                     "resources inline content is invalid; provide non-empty content_bytes, "
-                    "text_content, or file"
+                    + "text_content, or file"
                 )
             return None
         if not content_bytes:
@@ -100,7 +109,7 @@ class BaseScopeMemoryMixin:
         return base64.b64encode(content_bytes).decode("ascii")
 
     @staticmethod
-    def _extract_resource_content_bytes(raw_resource: dict[str, Any]) -> bytes | None:
+    def _extract_resource_content_bytes(raw_resource: Mapping[str, object]) -> bytes | None:
         content_bytes = raw_resource.get("content_bytes")
         if isinstance(content_bytes, bytes):
             return content_bytes
@@ -114,7 +123,7 @@ class BaseScopeMemoryMixin:
         return BaseScopeMemoryMixin._read_resource_file_bytes(raw_resource.get("file"))
 
     @staticmethod
-    def _read_resource_file_bytes(file_value: Any) -> bytes | None:
+    def _read_resource_file_bytes(file_value: object) -> bytes | None:
         if file_value is None:
             return None
         if isinstance(file_value, bytes):
@@ -126,7 +135,7 @@ class BaseScopeMemoryMixin:
             if file_path.exists() and file_path.is_file():
                 return file_path.read_bytes()
             return None
-        if hasattr(file_value, "read"):
+        if _is_readable(file_value):
             raw = file_value.read()
             if isinstance(raw, str):
                 return raw.encode("utf-8")
@@ -137,9 +146,9 @@ class BaseScopeMemoryMixin:
     # MARK: - Skill Payloads
 
     def _resolve_default_skill_sharing_scope(self) -> str:
-        scope = cast(_BaseScopeMemoryProtocol, self)
-        skill_extraction = getattr(scope.memory_config, "skill_extraction", None)
-        raw_scope = getattr(skill_extraction, "sharing_scope", None)
+        scope = cast(_BaseScopeMemoryProtocol, cast(object, self))
+        skill_extraction = cast(object, getattr(scope.memory_config, "skill_extraction", None))
+        raw_scope = cast(object, getattr(skill_extraction, "sharing_scope", None))
         if raw_scope is None:
             return _DEFAULT_SKILL_SHARING_SCOPE
 
@@ -150,12 +159,12 @@ class BaseScopeMemoryMixin:
 
     def _normalize_skill_payload(
         self,
-        raw_skill: dict[str, Any],
+        raw_skill: dict[str, object],
         *,
         default_sharing_scope: str,
         default_agent_id: str | None,
         default_swarm_id: str | None,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         name = self._coerce_string(raw_skill.get("name") or raw_skill.get("title"))
         if name is None:
             return None
@@ -173,23 +182,35 @@ class BaseScopeMemoryMixin:
 
         steps = raw_skill.get("steps")
         normalized_steps = (
-            [step for step in steps if isinstance(step, dict)] if isinstance(steps, list) else []
+            [
+                dict(cast(Mapping[str, object], step))
+                for step in cast(list[object], steps)
+                if isinstance(step, dict)
+            ]
+            if isinstance(steps, list)
+            else []
         )
         preconditions = raw_skill.get("preconditions")
         if not isinstance(preconditions, dict):
             preconditions = {}
+        else:
+            preconditions = dict(cast(Mapping[str, object], preconditions))
         postconditions = raw_skill.get("postconditions")
         if not isinstance(postconditions, dict):
             postconditions = {}
+        else:
+            postconditions = dict(cast(Mapping[str, object], postconditions))
         metadata = raw_skill.get("metadata")
         if not isinstance(metadata, dict):
             metadata = {}
+        else:
+            metadata = dict(cast(Mapping[str, object], metadata))
 
         skill_id = self._coerce_string(raw_skill.get("skill_id") or raw_skill.get("id"))
         agent_id = self._coerce_string(raw_skill.get("agent_id")) or default_agent_id
         swarm_id = self._coerce_string(raw_skill.get("swarm_id")) or default_swarm_id
 
-        payload: dict[str, Any] = {
+        payload: dict[str, object] = {
             "name": name,
             "title": name,
             "description": description,
@@ -215,12 +236,12 @@ class BaseScopeMemoryMixin:
 
     def _normalize_resource_payload(
         self,
-        raw_resource: dict[str, Any],
+        raw_resource: dict[str, object],
         *,
         default_binding_type: str,
         default_agent_id: str | None,
         default_swarm_id: str | None,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         title = self._coerce_string(raw_resource.get("title") or raw_resource.get("name"))
         resource_id = self._coerce_string(raw_resource.get("resource_id") or raw_resource.get("id"))
         source_url = self._coerce_string(raw_resource.get("source_url") or raw_resource.get("url"))
@@ -257,7 +278,11 @@ class BaseScopeMemoryMixin:
         tags = raw_resource.get("tags")
         normalized_tags: list[str] = []
         if isinstance(tags, list):
-            normalized_tags = [tag.strip() for tag in tags if isinstance(tag, str) and tag.strip()]
+            normalized_tags = [
+                tag.strip()
+                for tag in cast(list[object], tags)
+                if isinstance(tag, str) and tag.strip()
+            ]
         binding_type = (
             self._coerce_string(raw_resource.get("binding_type")) or default_binding_type or "sdk"
         )
@@ -291,7 +316,7 @@ class BaseScopeMemoryMixin:
                 source_type = "attachment"
         mime_type = self._coerce_string(raw_resource.get("mime_type"))
 
-        payload: dict[str, Any] = {
+        payload: dict[str, object] = {
             "title": title,
             "name": title,
             "binding_type": normalized_binding_type,
@@ -325,10 +350,10 @@ class BaseScopeMemoryMixin:
         *,
         default_agent_id: str | None = None,
         default_swarm_id: str | None = None,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        scope = cast(_BaseScopeMemoryProtocol, self)
+    ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+        scope = cast(_BaseScopeMemoryProtocol, cast(object, self))
         default_sharing_scope = self._resolve_default_skill_sharing_scope()
-        normalized_skills: list[dict[str, Any]] = []
+        normalized_skills: list[dict[str, object]] = []
         for raw_skill in scope.skills:
             normalized = self._normalize_skill_payload(
                 raw_skill,
@@ -339,7 +364,7 @@ class BaseScopeMemoryMixin:
             if normalized is not None:
                 normalized_skills.append(normalized)
 
-        normalized_resources: list[dict[str, Any]] = []
+        normalized_resources: list[dict[str, object]] = []
         if default_agent_id is not None:
             default_resource_binding_type = "agent"
         elif default_swarm_id is not None:
@@ -363,15 +388,15 @@ class BaseScopeMemoryMixin:
 
     @staticmethod
     def _merge_payload_list(
-        existing: list[dict[str, Any]],
-        incoming: list[dict[str, Any]],
+        existing: list[dict[str, object]],
+        incoming: list[dict[str, object]],
         *,
         identity_keys: tuple[str, ...],
-    ) -> list[dict[str, Any]]:
-        merged: list[dict[str, Any]] = [item for item in existing if isinstance(item, dict)]
+    ) -> list[dict[str, object]]:
+        merged: list[dict[str, object]] = list(existing)
         seen: set[str] = set()
 
-        def _identity(item: dict[str, Any]) -> str:
+        def _identity(item: dict[str, object]) -> str:
             for key in identity_keys:
                 raw_value = item.get(key)
                 if isinstance(raw_value, str) and raw_value.strip():
@@ -384,8 +409,6 @@ class BaseScopeMemoryMixin:
                 seen.add(identifier)
 
         for item in incoming:
-            if not isinstance(item, dict):
-                continue
             identifier = _identity(item)
             if identifier and identifier in seen:
                 continue
@@ -396,15 +419,12 @@ class BaseScopeMemoryMixin:
 
     def apply_memory_assets_to_metadata(
         self,
-        metadata: dict[str, Any],
+        metadata: dict[str, object],
         *,
         overwrite: bool = False,
         default_agent_id: str | None = None,
         default_swarm_id: str | None = None,
     ) -> None:
-        if not isinstance(metadata, dict):
-            return
-
         skills, resources = self.build_memory_asset_payloads(
             default_agent_id=default_agent_id,
             default_swarm_id=default_swarm_id,
@@ -413,8 +433,12 @@ class BaseScopeMemoryMixin:
             if overwrite or not isinstance(metadata.get("memory_defined_skills"), list):
                 metadata["memory_defined_skills"] = skills
             else:
-                metadata["memory_defined_skills"] = self._merge_payload_list(
+                existing_skills = cast(
+                    list[dict[str, object]],
                     metadata["memory_defined_skills"],
+                )
+                metadata["memory_defined_skills"] = self._merge_payload_list(
+                    existing_skills,
                     skills,
                     identity_keys=("skill_id", "id", "name"),
                 )
@@ -422,8 +446,16 @@ class BaseScopeMemoryMixin:
             if overwrite or not isinstance(metadata.get("memory_bound_resources"), list):
                 metadata["memory_bound_resources"] = resources
             else:
-                metadata["memory_bound_resources"] = self._merge_payload_list(
+                existing_resources = cast(
+                    list[dict[str, object]],
                     metadata["memory_bound_resources"],
+                )
+                metadata["memory_bound_resources"] = self._merge_payload_list(
+                    existing_resources,
                     resources,
                     identity_keys=("resource_id", "id", "title", "name"),
                 )
+
+
+def _is_readable(value: object) -> TypeGuard[_Readable]:
+    return callable(getattr(value, "read", None))

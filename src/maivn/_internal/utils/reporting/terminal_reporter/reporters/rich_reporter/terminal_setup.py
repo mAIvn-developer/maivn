@@ -1,10 +1,12 @@
 """Terminal configuration and input handling for RichReporter."""
 
+# pyright: strict
 from __future__ import annotations
 
 import shutil
+import struct
 import sys
-from typing import Any
+from typing import Protocol, cast
 
 from prompt_toolkit import prompt as pt_prompt
 from prompt_toolkit.formatted_text import HTML
@@ -12,19 +14,38 @@ from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.live import Live
 
+
+class _Reconfigure(Protocol):
+    def __call__(self, *, errors: str) -> object: ...
+
+
+class _Kernel32(Protocol):
+    def GetStdHandle(self, n_std_handle: int) -> int: ...
+
+    def GetConsoleScreenBufferInfo(
+        self,
+        h_console_output: int,
+        lp_console_screen_buffer_info: object,
+    ) -> int: ...
+
+
+class _WinDLL(Protocol):
+    kernel32: _Kernel32
+
+
 # MARK: Terminal Configuration
 
 
 def configure_stdout_stderr_for_windows() -> None:
     """Configure stdout/stderr for Windows to handle encoding errors."""
     try:
-        stdout_reconfigure: Any = getattr(sys.stdout, "reconfigure", None)
-        stderr_reconfigure: Any = getattr(sys.stderr, "reconfigure", None)
+        stdout_reconfigure = getattr(sys.stdout, "reconfigure", None)
+        stderr_reconfigure = getattr(sys.stderr, "reconfigure", None)
         if callable(stdout_reconfigure):
-            stdout_reconfigure(errors="replace")
+            _ = cast(_Reconfigure, stdout_reconfigure)(errors="replace")
         if callable(stderr_reconfigure):
-            stderr_reconfigure(errors="replace")
-    except Exception:
+            _ = cast(_Reconfigure, stderr_reconfigure)(errors="replace")
+    except Exception:  # noqa: BLE001 - Stream reconfigure is a best-effort Windows probe.
         pass
 
 
@@ -36,7 +57,7 @@ def get_terminal_width() -> int:
 
     try:
         terminal_width = shutil.get_terminal_size(fallback=(120, 24)).columns
-    except Exception:
+    except Exception:  # noqa: BLE001 - Terminal-size probing falls back below.
         pass
 
     try:
@@ -44,46 +65,32 @@ def get_terminal_width() -> int:
             columns = os.environ.get("COLUMNS")
             if columns:
                 terminal_width = int(columns)
-    except Exception:
+    except Exception:  # noqa: BLE001 - Invalid COLUMNS values fall back below.
         pass
 
     try:
         if terminal_width is None or terminal_width <= 0:
             if os.name == "nt":
                 import ctypes
-                from ctypes import wintypes
-
-                class _COORD(ctypes.Structure):
-                    _fields_ = [("X", wintypes.SHORT), ("Y", wintypes.SHORT)]
-
-                class _SMALL_RECT(ctypes.Structure):
-                    _fields_ = [
-                        ("Left", wintypes.SHORT),
-                        ("Top", wintypes.SHORT),
-                        ("Right", wintypes.SHORT),
-                        ("Bottom", wintypes.SHORT),
-                    ]
-
-                class _CONSOLE_SCREEN_BUFFER_INFO(ctypes.Structure):
-                    _fields_ = [
-                        ("dwSize", _COORD),
-                        ("dwCursorPosition", _COORD),
-                        ("wAttributes", wintypes.WORD),
-                        ("srWindow", _SMALL_RECT),
-                        ("dwMaximumWindowSize", _COORD),
-                    ]
 
                 STD_OUTPUT_HANDLE = -11
-                h_console = ctypes.windll.kernel32.GetStdHandle(
+                windll = cast(_WinDLL, cast(object, ctypes.windll))
+                h_console = windll.kernel32.GetStdHandle(
                     STD_OUTPUT_HANDLE,
                 )
-                csbi = _CONSOLE_SCREEN_BUFFER_INFO()
-                ctypes.windll.kernel32.GetConsoleScreenBufferInfo(
+                csbi = ctypes.create_string_buffer(22)
+                _ = windll.kernel32.GetConsoleScreenBufferInfo(
                     h_console,
                     ctypes.byref(csbi),
                 )
-                terminal_width = csbi.srWindow.Right - csbi.srWindow.Left + 1
-    except Exception:
+                unpacked = cast(
+                    tuple[int, int, int, int, int, int, int, int, int, int, int],
+                    cast(object, struct.unpack("<hhhhHhhhhhh", csbi.raw)),
+                )
+                left = unpacked[5]
+                right = unpacked[7]
+                terminal_width = int(right) - int(left) + 1
+    except Exception:  # noqa: BLE001 - Windows console API probing falls back below.
         pass
 
     if terminal_width is None or terminal_width <= 40:
@@ -109,18 +116,18 @@ class InputHandler:
     """Handles user input collection with styled prompts."""
 
     def __init__(self, console: Console) -> None:
-        self.console = console
+        self.console: Console = console
 
     def get_input(self, prompt: str, live: Live | None = None) -> str:
         """Collect input from the terminal using prompt_toolkit."""
         if live:
-            live.update("")
-            live.refresh()
+            _ = live.update("")
+            _ = live.refresh()
             live.stop()
             self.console.print()
 
-        sys.stdout.flush()
-        sys.stderr.flush()
+        _ = sys.stdout.flush()
+        _ = sys.stderr.flush()
 
         print()
 
@@ -134,7 +141,7 @@ class InputHandler:
                 }
             )
 
-            def get_bottom_toolbar():
+            def get_bottom_toolbar() -> HTML:
                 return HTML("<dim>Press Ctrl+C to cancel</dim>")
 
             try:
@@ -146,7 +153,7 @@ class InputHandler:
                 return response
             except KeyboardInterrupt:
                 raise
-            except Exception:
+            except Exception:  # noqa: BLE001 - prompt_toolkit may fail in plain terminals.
                 return input(prompt)
         finally:
             if live:

@@ -1,29 +1,67 @@
 """Configuration management for the maivn SDK.
 
 This module provides structured configuration management with type safety and validation.
-The default server base URL can be overridden via the MAIVN_SERVER_BASE_URL environment
-variable; all other configuration values must be provided by the consuming application.
+It loads ``.env`` at import time to preserve the SDK's historical environment behavior
+before computing the default server base URL from ``MAIVN_SERVER_BASE_URL``.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from types import MappingProxyType
+from typing import SupportsFloat, SupportsIndex, SupportsInt, TypeAlias, cast
 
 from dotenv import load_dotenv
+from pydantic import JsonValue
+
+from ..env_parsing import coerce_bool_value
+from .keys import (
+    FIELD_API_KEY,
+    FIELD_BASE_URL,
+    FIELD_DEFAULT_TIMEOUT_SECONDS,
+    FIELD_DEPENDENCY_WAIT_TIMEOUT_SECONDS,
+    FIELD_DEPLOYMENT_TIMEZONE,
+    FIELD_ENABLE_BACKGROUND_EXECUTION,
+    FIELD_ENABLE_TIMING_LOGS,
+    FIELD_FORMAT_STRING,
+    FIELD_LOG_LEVEL,
+    FIELD_MAX_PARALLEL_TOOLS,
+    FIELD_MAX_RETRIES,
+    FIELD_MOCK_BASE_URL,
+    FIELD_PENDING_EVENT_TIMEOUT_SECONDS,
+    FIELD_REQUIRE_API_KEY,
+    FIELD_TIMEOUT_SECONDS,
+    FIELD_TOOL_EXECUTION_TIMEOUT_SECONDS,
+    FIELD_TOTAL_EXECUTION_TIMEOUT_SECONDS,
+    SECTION_EXECUTION,
+    SECTION_LOGGING,
+    SECTION_SECURITY,
+    SECTION_SERVER,
+)
+from .validators import (
+    log_level_error,
+    required_api_key_error,
+    validate_non_empty_string,
+    validate_non_negative,
+    validate_optional_positive,
+    validate_positive,
+    validate_url,
+)
 
 # MARK: Constants
 
-load_dotenv()
+_ = load_dotenv()
 
+ConfigMapping: TypeAlias = Mapping[str, JsonValue]
+FloatInput: TypeAlias = str | bytes | SupportsFloat | SupportsIndex
+IntInput: TypeAlias = str | bytes | SupportsInt | SupportsIndex
+_EMPTY_CONFIG: ConfigMapping = MappingProxyType({})
+
+# Default server URL, overridable via MAIVN_SERVER_BASE_URL env var.
 DEFAULT_SERVER_BASE_URL = os.environ.get("MAIVN_SERVER_BASE_URL", "https://api.maivn.io")
-# DEFAULT_SERVER_BASE_URL = "https://api.maivn.io"
-
-"""Default server URL, overridable via MAIVN_SERVER_BASE_URL env var."""
-
-VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
-"""Valid logging level values."""
 
 
 # MARK: Configuration Classes
@@ -52,35 +90,14 @@ class ServerConfiguration:
         Raises:
             ValueError: If any configuration value is invalid
         """
-        self._validate_url(self.base_url, "base_url")
-        self._validate_url(self.mock_base_url, "mock_base_url")
-        self._validate_positive(self.timeout_seconds, "timeout_seconds")
-        self._validate_non_negative(self.max_retries, "max_retries")
-        if not isinstance(self.deployment_timezone, str) or not self.deployment_timezone.strip():
-            raise ValueError("deployment_timezone must be a non-empty string")
-
-    @staticmethod
-    def _validate_url(url: str, field_name: str) -> None:
-        """Validate URL format."""
-        if not url:
-            raise ValueError(f"{field_name} cannot be empty")
-        if not url.startswith(("http://", "https://")):
-            raise ValueError(f"{field_name} must start with http:// or https://, got: {url}")
-
-    @staticmethod
-    def _validate_positive(value: float, field_name: str) -> None:
-        """Validate that a value is positive."""
-        if value <= 0:
-            raise ValueError(f"{field_name} must be positive, got: {value}")
-
-    @staticmethod
-    def _validate_non_negative(value: int, field_name: str) -> None:
-        """Validate that a value is non-negative."""
-        if value < 0:
-            raise ValueError(f"{field_name} must be non-negative, got: {value}")
+        validate_url(self.base_url, FIELD_BASE_URL)
+        validate_url(self.mock_base_url, FIELD_MOCK_BASE_URL)
+        validate_positive(self.timeout_seconds, FIELD_TIMEOUT_SECONDS)
+        validate_non_negative(self.max_retries, FIELD_MAX_RETRIES)
+        validate_non_empty_string(self.deployment_timezone, FIELD_DEPLOYMENT_TIMEZONE)
 
     @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> ServerConfiguration:
+    def from_dict(cls, config: ConfigMapping) -> ServerConfiguration:
         """Create configuration from dictionary.
 
         Args:
@@ -94,13 +111,11 @@ class ServerConfiguration:
             Server configuration instance
         """
         return cls(
-            base_url=config.get("base_url", cls.base_url),
-            mock_base_url=config.get("mock_base_url", cls.mock_base_url),
-            timeout_seconds=float(config.get("timeout_seconds", cls.timeout_seconds)),
-            max_retries=int(config.get("max_retries", cls.max_retries)),
-            deployment_timezone=str(
-                config.get("deployment_timezone", getattr(cls, "deployment_timezone", "UTC"))
-            ),
+            base_url=cast(str, config.get(FIELD_BASE_URL, cls.base_url)),
+            mock_base_url=cast(str, config.get(FIELD_MOCK_BASE_URL, cls.mock_base_url)),
+            timeout_seconds=_to_float(config.get(FIELD_TIMEOUT_SECONDS, cls.timeout_seconds)),
+            max_retries=_to_int(config.get(FIELD_MAX_RETRIES, cls.max_retries)),
+            deployment_timezone=str(config.get(FIELD_DEPLOYMENT_TIMEZONE, cls.deployment_timezone)),
         )
 
 
@@ -148,50 +163,27 @@ class ExecutionConfiguration:
     long-running workflows. Default: 7200 seconds (2 hours).
     """
 
-    max_prompt_length_for_tool_name: int = 30
-    tool_name_hash_modulo: int = 10000
-
     def __post_init__(self) -> None:
         """Validate configuration values.
 
         Raises:
             ValueError: If any configuration value is invalid
         """
-        self._validate_positive(self.default_timeout_seconds, "default_timeout_seconds")
-        self._validate_non_negative(
-            self.pending_event_timeout_seconds, "pending_event_timeout_seconds"
+        validate_positive(self.default_timeout_seconds, FIELD_DEFAULT_TIMEOUT_SECONDS)
+        validate_non_negative(
+            self.pending_event_timeout_seconds, FIELD_PENDING_EVENT_TIMEOUT_SECONDS
         )
-        self._validate_positive(self.max_parallel_tools, "max_parallel_tools")
-        self._validate_positive(
-            self.tool_execution_timeout_seconds, "tool_execution_timeout_seconds"
+        validate_positive(self.max_parallel_tools, FIELD_MAX_PARALLEL_TOOLS)
+        validate_positive(self.tool_execution_timeout_seconds, FIELD_TOOL_EXECUTION_TIMEOUT_SECONDS)
+        validate_positive(
+            self.dependency_wait_timeout_seconds, FIELD_DEPENDENCY_WAIT_TIMEOUT_SECONDS
         )
-        self._validate_positive(
-            self.dependency_wait_timeout_seconds, "dependency_wait_timeout_seconds"
+        validate_optional_positive(
+            self.total_execution_timeout_seconds, FIELD_TOTAL_EXECUTION_TIMEOUT_SECONDS
         )
-        self._validate_optional_positive(
-            self.total_execution_timeout_seconds, "total_execution_timeout_seconds"
-        )
-
-    @staticmethod
-    def _validate_positive(value: float | int, field_name: str) -> None:
-        """Validate that a value is positive."""
-        if value <= 0:
-            raise ValueError(f"{field_name} must be positive, got: {value}")
-
-    @staticmethod
-    def _validate_non_negative(value: float, field_name: str) -> None:
-        """Validate that a value is non-negative."""
-        if value < 0:
-            raise ValueError(f"{field_name} must be non-negative, got: {value}")
-
-    @staticmethod
-    def _validate_optional_positive(value: float | None, field_name: str) -> None:
-        """Validate that an optional value is positive if provided."""
-        if value is not None and value <= 0:
-            raise ValueError(f"{field_name} must be positive (or None for no limit), got: {value}")
 
     @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> ExecutionConfiguration:
+    def from_dict(cls, config: ConfigMapping) -> ExecutionConfiguration:
         """Create configuration from dictionary.
 
         Args:
@@ -203,44 +195,41 @@ class ExecutionConfiguration:
                 - tool_execution_timeout_seconds: Per-tool execution timeout
                 - dependency_wait_timeout_seconds: Dependency resolution timeout
                 - total_execution_timeout_seconds: Total execution timeout (None = no limit)
-                - max_prompt_length_for_tool_name: Maximum prompt length for tool naming
-                - tool_name_hash_modulo: Modulo for tool name hash generation
 
         Returns:
             Execution configuration instance
         """
-        enable_bg = _parse_bool(
-            config.get("enable_background_execution", cls.enable_background_execution)
+        enable_bg = coerce_bool_value(
+            config.get(FIELD_ENABLE_BACKGROUND_EXECUTION, cls.enable_background_execution)
         )
 
         total_timeout = config.get(
-            "total_execution_timeout_seconds", cls.total_execution_timeout_seconds
+            FIELD_TOTAL_EXECUTION_TIMEOUT_SECONDS, cls.total_execution_timeout_seconds
         )
         if total_timeout is not None:
-            total_timeout = float(total_timeout)
+            total_timeout = _to_float(total_timeout)
 
         return cls(
-            default_timeout_seconds=float(
-                config.get("default_timeout_seconds", cls.default_timeout_seconds)
+            default_timeout_seconds=_to_float(
+                config.get(FIELD_DEFAULT_TIMEOUT_SECONDS, cls.default_timeout_seconds)
             ),
-            pending_event_timeout_seconds=float(
-                config.get("pending_event_timeout_seconds", cls.pending_event_timeout_seconds)
+            pending_event_timeout_seconds=_to_float(
+                config.get(FIELD_PENDING_EVENT_TIMEOUT_SECONDS, cls.pending_event_timeout_seconds)
             ),
-            max_parallel_tools=int(config.get("max_parallel_tools", cls.max_parallel_tools)),
+            max_parallel_tools=_to_int(
+                config.get(FIELD_MAX_PARALLEL_TOOLS, cls.max_parallel_tools)
+            ),
             enable_background_execution=enable_bg,
-            tool_execution_timeout_seconds=float(
-                config.get("tool_execution_timeout_seconds", cls.tool_execution_timeout_seconds)
+            tool_execution_timeout_seconds=_to_float(
+                config.get(FIELD_TOOL_EXECUTION_TIMEOUT_SECONDS, cls.tool_execution_timeout_seconds)
             ),
-            dependency_wait_timeout_seconds=float(
-                config.get("dependency_wait_timeout_seconds", cls.dependency_wait_timeout_seconds)
+            dependency_wait_timeout_seconds=_to_float(
+                config.get(
+                    FIELD_DEPENDENCY_WAIT_TIMEOUT_SECONDS,
+                    cls.dependency_wait_timeout_seconds,
+                )
             ),
             total_execution_timeout_seconds=total_timeout,
-            max_prompt_length_for_tool_name=int(
-                config.get("max_prompt_length_for_tool_name", cls.max_prompt_length_for_tool_name)
-            ),
-            tool_name_hash_modulo=int(
-                config.get("tool_name_hash_modulo", cls.tool_name_hash_modulo)
-            ),
         )
 
 
@@ -255,7 +244,7 @@ class SecurityConfiguration:
     require_api_key: bool = True
 
     @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> SecurityConfiguration:
+    def from_dict(cls, config: ConfigMapping) -> SecurityConfiguration:
         """Create configuration from dictionary.
 
         Args:
@@ -266,10 +255,10 @@ class SecurityConfiguration:
         Returns:
             Security configuration instance
         """
-        require_key = _parse_bool(config.get("require_api_key", cls.require_api_key))
+        require_key = coerce_bool_value(config.get(FIELD_REQUIRE_API_KEY, cls.require_api_key))
 
         return cls(
-            api_key=config.get("api_key"),
+            api_key=cast(str | None, config.get(FIELD_API_KEY)),
             require_api_key=require_key,
         )
 
@@ -286,7 +275,7 @@ class LoggingConfiguration:
     enable_timing_logs: bool = True
 
     @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> LoggingConfiguration:
+    def from_dict(cls, config: ConfigMapping) -> LoggingConfiguration:
         """Create configuration from dictionary.
 
         Args:
@@ -298,15 +287,17 @@ class LoggingConfiguration:
         Returns:
             Logging configuration instance
         """
-        level = config.get("level", cls.level)
+        level = config.get(FIELD_LOG_LEVEL, cls.level)
         if isinstance(level, str):
             level = level.upper()
 
-        enable_timing = _parse_bool(config.get("enable_timing_logs", cls.enable_timing_logs))
+        enable_timing = coerce_bool_value(
+            config.get(FIELD_ENABLE_TIMING_LOGS, cls.enable_timing_logs)
+        )
 
         return cls(
             level=str(level),
-            format_string=config.get("format_string", cls.format_string),
+            format_string=cast(str, config.get(FIELD_FORMAT_STRING, cls.format_string)),
             enable_timing_logs=enable_timing,
         )
 
@@ -324,7 +315,7 @@ class MaivnConfiguration:
     logging: LoggingConfiguration = field(default_factory=LoggingConfiguration)
 
     @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> MaivnConfiguration:
+    def from_dict(cls, config: ConfigMapping) -> MaivnConfiguration:
         """Create complete configuration from dictionary.
 
         Args:
@@ -338,10 +329,12 @@ class MaivnConfiguration:
             Complete configuration instance
         """
         return cls(
-            server=ServerConfiguration.from_dict(config.get("server", {})),
-            execution=ExecutionConfiguration.from_dict(config.get("execution", {})),
-            security=SecurityConfiguration.from_dict(config.get("security", {})),
-            logging=LoggingConfiguration.from_dict(config.get("logging", {})),
+            server=ServerConfiguration.from_dict(_get_config_section(config, SECTION_SERVER)),
+            execution=ExecutionConfiguration.from_dict(
+                _get_config_section(config, SECTION_EXECUTION)
+            ),
+            security=SecurityConfiguration.from_dict(_get_config_section(config, SECTION_SECURITY)),
+            logging=LoggingConfiguration.from_dict(_get_config_section(config, SECTION_LOGGING)),
         )
 
     def validate(self) -> list[str]:
@@ -352,23 +345,16 @@ class MaivnConfiguration:
         """
         errors: list[str] = []
 
-        if not self.server.base_url.startswith(("http://", "https://")):
-            errors.append("Server base_url must start with http:// or https://")
+        security_error = required_api_key_error(
+            require_api_key=self.security.require_api_key,
+            api_key=self.security.api_key,
+        )
+        if security_error is not None:
+            errors.append(security_error)
 
-        if self.server.timeout_seconds <= 0:
-            errors.append("Server timeout must be positive")
-
-        if self.execution.default_timeout_seconds <= 0:
-            errors.append("Execution timeout must be positive")
-
-        if self.execution.max_parallel_tools <= 0:
-            errors.append("Max parallel tools must be positive")
-
-        if self.security.require_api_key and not self.security.api_key:
-            errors.append("API key is required but not provided")
-
-        if self.logging.level not in VALID_LOG_LEVELS:
-            errors.append(f"Log level must be one of: {', '.join(sorted(VALID_LOG_LEVELS))}")
+        logging_error = log_level_error(self.logging.level)
+        if logging_error is not None:
+            errors.append(logging_error)
 
         return errors
 
@@ -376,18 +362,16 @@ class MaivnConfiguration:
 # MARK: Utility Functions
 
 
-def _parse_bool(value: Any) -> bool:
-    """Parse a value as boolean, handling string representations.
+def _get_config_section(config: ConfigMapping, key: str) -> ConfigMapping:
+    return cast(ConfigMapping, config.get(key, _EMPTY_CONFIG))
 
-    Args:
-        value: Value to parse (bool, str, or other)
 
-    Returns:
-        Boolean interpretation of the value
-    """
-    if isinstance(value, str):
-        return value.lower() in ("true", "1", "yes")
-    return bool(value)
+def _to_float(value: object) -> float:
+    return float(cast(FloatInput, value))
+
+
+def _to_int(value: object) -> int:
+    return int(cast(IntInput, value))
 
 
 # MARK: Exports

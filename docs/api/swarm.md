@@ -1,6 +1,6 @@
 # Swarm
 
-The `Swarm` class coordinates multiple agents for complex multi-agent workflows. It provides shared tool access and automatic agent-to-agent communication.
+The `Swarm` class coordinates multiple agents for multi-agent workflows, providing shared tool access and automatic agent-to-agent communication.
 
 ## Import
 
@@ -75,7 +75,7 @@ Common fields:
 
 Notes:
 
-- Effective behavior is policy-gated server-side by workspace and plan limits.
+- Effective behavior is policy-gated by your workspace and plan limits.
 - Per-agent and per-invocation `memory_config` values may further downscope behavior.
 - `thread_id` governs episodic recall; scoped skills, resources, and promoted insights are reused across future threads.
 - `insight_extraction.sharing_scope` is limited to `agent` or `swarm` for AI-generated insights. Use portal promotion for broader reuse.
@@ -154,6 +154,7 @@ def invoke(
     messages: Sequence[BaseMessage] | BaseMessage,
     *,
     model: Any = None,
+    force_model: str | None = None,
     reasoning: Any = None,
     force_final_tool: bool = False,
     stream_response: bool = True,
@@ -173,6 +174,7 @@ def invoke(
 | ------------------------------- | -------------------------------------------- | -------- | -------------------------------------------------------------------------------------- |
 | `messages`                      | `Sequence[BaseMessage] \| BaseMessage`       | Required | Messages to send                                                                       |
 | `model`                         | `Any`                                        | `None`   | LLM selection hint                                                                     |
+| `force_model`                   | `str \| None`                                | `None`   | Pin a specific model by name, bypassing the selection hint                             |
 | `reasoning`                     | `Any`                                        | `None`   | Reasoning level                                                                        |
 | `force_final_tool`              | `bool`                                       | `False`  | Force final tool output                                                                |
 | `stream_response`               | `bool`                                       | `True`   | Request streamed model output from the server transport                                |
@@ -276,7 +278,7 @@ Notes:
 
 ### preview_redaction()
 
-Preview server-side redaction for a `RedactedMessage` without starting a swarm invocation.
+Preview the redaction applied to a `RedactedMessage` without starting a swarm invocation.
 
 ```python
 def preview_redaction(
@@ -314,6 +316,7 @@ def stream(
     messages: Sequence[BaseMessage] | BaseMessage,
     *,
     model: Any = None,
+    force_model: str | None = None,
     reasoning: Any = None,
     force_final_tool: bool = False,
     stream_response: bool = True,
@@ -334,6 +337,7 @@ def stream(
 | ------------------------------- | ------------------------------------------------------ | -------- | ------------------------------------------------------------------------ |
 | `messages`                      | `Sequence[BaseMessage] \| BaseMessage`                 | Required | Messages to send to the swarm                                            |
 | `model`                         | `Any`                                                  | `None`   | LLM selection hint                                                       |
+| `force_model`                   | `str \| None`                                          | `None`   | Pin a specific model by name, bypassing the selection hint               |
 | `reasoning`                     | `Any`                                                  | `None`   | Reasoning level                                                          |
 | `force_final_tool`              | `bool`                                                 | `False`  | Force the final tool or final-output agent result                        |
 | `stream_response`               | `bool`                                                 | `True`   | Request streamed model output from the server transport                  |

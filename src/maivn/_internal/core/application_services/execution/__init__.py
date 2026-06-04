@@ -2,11 +2,11 @@
 Provides a shared thread pool executor for orchestrator operations.
 """
 
+# pyright: strict
 from __future__ import annotations
 
-# MARK: - Imports
 from .background_executor import BackgroundExecutor, wait_with_timeout
 
-# MARK: - Public API
+# MARK: Public API
 
 __all__ = ["BackgroundExecutor", "wait_with_timeout"]

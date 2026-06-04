@@ -18,11 +18,12 @@ internal payload evolution. The validator focuses on catching the kinds
 of mistakes that would otherwise reach a frontend developer at 2am.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
-from typing import Any, Literal
+from collections.abc import Iterator, Mapping
+from typing import Literal, cast
 
 ValidationMode = Literal["off", "warn", "strict"]
 _VALID_MODES: frozenset[str] = frozenset({"off", "warn", "strict"})
@@ -53,6 +54,7 @@ _REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "interrupt_required": ("interrupt_id", "data_key", "prompt"),
     "agent_assignment": ("agent_name", "status"),
     "enrichment": ("phase", "message"),
+    "hook_fired": ("name", "stage", "status", "target_type"),
     "final": ("response",),
     "error": ("error",),
     "session_start": ("session_id",),
@@ -70,8 +72,8 @@ _RESERVED_FIELD_NAMES: frozenset[str] = frozenset({"__class__", "__proto__", "co
 
 
 def validate_event(
-    event_type: str,
-    data: Mapping[str, Any],
+    event_type: object,
+    data: object,
     *,
     mode: ValidationMode = "warn",
 ) -> None:
@@ -101,7 +103,7 @@ def validate_event(
     _logger.warning(message)
 
 
-def _iter_problems(event_type: str, data: Mapping[str, Any]):
+def _iter_problems(event_type: object, data: object) -> Iterator[str]:
     if not isinstance(event_type, str):
         yield f"event_type must be str, got {type(event_type).__name__}"
         return
@@ -111,29 +113,62 @@ def _iter_problems(event_type: str, data: Mapping[str, Any]):
     if not isinstance(data, Mapping):
         yield f"data must be a mapping, got {type(data).__name__}"
         return
+    payload = cast(Mapping[str, object], data)
 
-    reserved_hits = list(_iter_reserved_hits(data))
+    reserved_hits = list(_iter_reserved_hits(payload))
     if reserved_hits:
         yield "reserved field names present at " + ", ".join(reserved_hits)
 
     required = _REQUIRED_FIELDS.get(event_type)
     if required is None:
         return
-    missing = [field for field in required if data.get(field) in (None, "")]
+    missing = [field for field in required if payload.get(field) in (None, "")]
     if missing:
         yield f"missing required fields {missing}"
 
 
-def _iter_reserved_hits(value: Any, *, path: str = "$"):
+def _iter_reserved_hits(
+    value: object,
+    *,
+    path: str = "$",
+    active_ids: set[int] | None = None,
+) -> Iterator[str]:
+    if isinstance(value, Mapping):
+        traversable: Mapping[object, object] | list[object] = cast(Mapping[object, object], value)
+    elif isinstance(value, list):
+        traversable = cast(list[object], value)
+    else:
+        return
+
+    if active_ids is None:
+        active_ids = set()
+    value_id = id(traversable)
+    if value_id in active_ids:
+        return
+
+    active_ids.add(value_id)
+    try:
+        yield from _iter_reserved_hits_inner(traversable, path=path, active_ids=active_ids)
+    finally:
+        active_ids.remove(value_id)
+
+
+def _iter_reserved_hits_inner(
+    value: Mapping[object, object] | list[object],
+    *,
+    path: str,
+    active_ids: set[int],
+) -> Iterator[str]:
     if isinstance(value, Mapping):
         for key, item in value.items():
-            here = f"{path}.{key}"
-            if key in _RESERVED_FIELD_NAMES:
+            key_text = str(key)
+            here = f"{path}.{key_text}"
+            if isinstance(key, str) and key in _RESERVED_FIELD_NAMES:
                 yield here
-            yield from _iter_reserved_hits(item, path=here)
-    elif isinstance(value, list):
+            yield from _iter_reserved_hits(item, path=here, active_ids=active_ids)
+    else:
         for index, item in enumerate(value):
-            yield from _iter_reserved_hits(item, path=f"{path}[{index}]")
+            yield from _iter_reserved_hits(item, path=f"{path}[{index}]", active_ids=active_ids)
 
 
 __all__ = [

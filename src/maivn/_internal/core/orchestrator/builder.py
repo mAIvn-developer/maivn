@@ -2,15 +2,18 @@
 Provides a fluent API for dependency wiring and configuration overrides.
 """
 
+# pyright: strict
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from maivn_shared import SessionClientProtocol
 from maivn_shared.infrastructure.logging import MetricsLoggerProtocol
 
 from maivn._internal.core.interfaces import AgentOrchestratorInterface
 from maivn._internal.utils.logging import get_optional_logger
+
+from .protocols import OrchestratedAgent
 
 if TYPE_CHECKING:
     from maivn._internal.core.services import (
@@ -25,7 +28,7 @@ if TYPE_CHECKING:
     from maivn._internal.core.tool_specs import ToolSpecFactory
 
 
-class OrchestratorBuilder:
+class AgentOrchestratorBuilder:
     """Builder for constructing agent orchestrators with dependency injection.
 
     Provides a fluent interface for configuring orchestrator dependencies
@@ -36,7 +39,7 @@ class OrchestratorBuilder:
 
     def __init__(self) -> None:
         """Initialize the builder with empty configuration."""
-        self._agent: Any | None = None
+        self._agent: OrchestratedAgent | None = None
         self._client: SessionClientProtocol | None = None
         self._logger: MetricsLoggerProtocol | None = None
         self._timeout: float | None = None
@@ -52,39 +55,39 @@ class OrchestratorBuilder:
 
     # MARK: - Core Configuration
 
-    def with_agent(self, agent: Any) -> OrchestratorBuilder:
+    def with_agent(self, agent: OrchestratedAgent) -> AgentOrchestratorBuilder:
         """Configure the agent to orchestrate."""
         self._agent = agent
         return self
 
-    def with_client(self, client: SessionClientProtocol) -> OrchestratorBuilder:
+    def with_client(self, client: SessionClientProtocol) -> AgentOrchestratorBuilder:
         """Configure the session client."""
         self._client = client
         return self
 
-    def with_logger(self, logger: MetricsLoggerProtocol) -> OrchestratorBuilder:
+    def with_logger(self, logger: MetricsLoggerProtocol) -> AgentOrchestratorBuilder:
         """Configure the logger."""
         self._logger = logger
         return self
 
-    def with_timeout(self, timeout: float) -> OrchestratorBuilder:
+    def with_timeout(self, timeout: float) -> AgentOrchestratorBuilder:
         """Override the HTTP timeout used for client calls."""
         self._timeout = timeout
         return self
 
-    def with_pending_event_timeout(self, timeout: float) -> OrchestratorBuilder:
+    def with_pending_event_timeout(self, timeout: float) -> AgentOrchestratorBuilder:
         """Override the pending tool-event timeout for SSE processing."""
         self._pending_event_timeout = timeout
         return self
 
     # MARK: - Service Configuration
 
-    def with_tool_spec_factory(self, factory: ToolSpecFactory) -> OrchestratorBuilder:
+    def with_tool_spec_factory(self, factory: ToolSpecFactory) -> AgentOrchestratorBuilder:
         """Override the tool spec factory used during state compilation."""
         self._tool_spec_factory = factory
         return self
 
-    def with_state_compiler(self, compiler: StateCompiler) -> OrchestratorBuilder:
+    def with_state_compiler(self, compiler: StateCompiler) -> AgentOrchestratorBuilder:
         """Provide a custom StateCompiler implementation."""
         self._state_compiler = compiler
         return self
@@ -92,7 +95,7 @@ class OrchestratorBuilder:
     def with_tool_execution_service(
         self,
         service: ToolExecutionService,
-    ) -> OrchestratorBuilder:
+    ) -> AgentOrchestratorBuilder:
         """Provide a custom ToolExecutionService implementation."""
         self._tool_execution_service = service
         return self
@@ -100,7 +103,7 @@ class OrchestratorBuilder:
     def with_tool_execution_orchestrator(
         self,
         orchestrator: ToolExecutionOrchestrator,
-    ) -> OrchestratorBuilder:
+    ) -> AgentOrchestratorBuilder:
         """Provide a custom ToolExecutionOrchestrator implementation."""
         self._tool_execution_orchestrator = orchestrator
         return self
@@ -108,22 +111,24 @@ class OrchestratorBuilder:
     def with_event_stream_processor(
         self,
         processor: EventStreamProcessor,
-    ) -> OrchestratorBuilder:
+    ) -> AgentOrchestratorBuilder:
         """Provide a custom EventStreamProcessor implementation."""
         self._event_stream_processor = processor
         return self
 
-    def with_session_service(self, session_service: SessionService) -> OrchestratorBuilder:
+    def with_session_service(self, session_service: SessionService) -> AgentOrchestratorBuilder:
         """Provide a custom SessionService implementation."""
         self._session_service = session_service
         return self
 
-    def with_background_executor(self, executor: BackgroundExecutor) -> OrchestratorBuilder:
+    def with_background_executor(self, executor: BackgroundExecutor) -> AgentOrchestratorBuilder:
         """Provide a custom BackgroundExecutor implementation."""
         self._background_executor = executor
         return self
 
-    def with_interrupt_service(self, interrupt_service: InterruptService) -> OrchestratorBuilder:
+    def with_interrupt_service(
+        self, interrupt_service: InterruptService
+    ) -> AgentOrchestratorBuilder:
         """Provide a custom InterruptService implementation."""
         self._interrupt_service = interrupt_service
         return self
@@ -138,7 +143,7 @@ class OrchestratorBuilder:
         from .core import AgentOrchestrator
 
         orchestrator = AgentOrchestrator(
-            agent=cast(Any, self._agent),
+            agent=self._agent,
             client=self._client,
             logger=self._logger or get_optional_logger(),
             tool_spec_factory=self._tool_spec_factory,
@@ -152,18 +157,27 @@ class OrchestratorBuilder:
             http_timeout=self._timeout,
             pending_event_timeout_s=self._pending_event_timeout,
         )
-        return cast(AgentOrchestratorInterface, orchestrator)
+        # Double-cast through ``object`` because basedpyright's reportInvalidCast
+        # heuristic now flags AgentOrchestrator → AgentOrchestratorInterface as
+        # disparate after the Protocol-member rename (the concrete class's public
+        # surface is much wider than the Protocol's, and structural-overlap
+        # scoring penalises that). The cast is intentional: AgentOrchestrator
+        # satisfies the Protocol by construction.
+        return cast(AgentOrchestratorInterface, cast(object, orchestrator))
 
 
 # MARK: - Factory Function
 
+OrchestratorBuilder = AgentOrchestratorBuilder
 
-def create_orchestrator_for_agent(agent: Any) -> AgentOrchestratorInterface:
+
+def create_orchestrator_for_agent(agent: OrchestratedAgent) -> AgentOrchestratorInterface:
     """Create an orchestrator for an agent using sensible defaults."""
-    return OrchestratorBuilder().with_agent(agent).build()
+    return AgentOrchestratorBuilder().with_agent(agent).build()
 
 
 __all__ = [
+    "AgentOrchestratorBuilder",
     "OrchestratorBuilder",
     "create_orchestrator_for_agent",
 ]

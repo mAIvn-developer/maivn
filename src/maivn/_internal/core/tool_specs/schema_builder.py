@@ -4,19 +4,47 @@ Generates JSON schemas for both function tools and Pydantic model tools,
 including dependency field handling and nested model flattening.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 import inspect
 from collections.abc import Callable
-from typing import Any
+from typing import Annotated, Final, TypeAlias, cast, get_args, get_origin, get_type_hints
 
-from maivn_shared import ArgsSchema, create_uuid
-from pydantic import BaseModel
+from maivn_shared import ArgsSchema, BaseDependency, create_uuid
+from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from .dependency_detector import DependencyDetector
 from .model_discovery import find_model_class
 from .schema_processors import SchemaTypeProcessor
 from .type_utils import is_pydantic_model
+
+# MARK: Types
+
+JsonObject: TypeAlias = dict[str, JsonValue]
+FunctionToolCallable: TypeAlias = Callable[..., object]
+
+
+# MARK: Function Tool Matching
+
+_FUNCTION_TOOL_CANDIDATE_KEYWORDS: Final[frozenset[str]] = frozenset(
+    {
+        "calculation",
+        "calculated",
+        "computed",
+        "results",
+        "output",
+        "specs",
+    }
+)
+_FUNCTION_TOOL_PROPERTY_TOKENS: Final[tuple[str, ...]] = ("_specs", "_data")
+_FUNCTION_TOOL_NAME_TOKENS: Final[tuple[str, ...]] = (
+    "calculate_",
+    "_displacement",
+    "_capacity",
+    "_geometry",
+    "_coefficient",
+)
 
 # MARK: Schema Builder
 
@@ -32,16 +60,16 @@ class SchemaBuilder:
         """Initialize the schema builder."""
         self._model_classes: dict[str, type[BaseModel]] = {}
         self._processed_models: dict[type[BaseModel], str] = {}
-        self._available_function_tools: list[Callable[..., Any]] = []
-        self._dependency_detector = DependencyDetector()
-        self._schema_processor = SchemaTypeProcessor(
+        self._available_function_tools: list[FunctionToolCallable] = []
+        self._dependency_detector: DependencyDetector = DependencyDetector()
+        self._schema_processor: SchemaTypeProcessor = SchemaTypeProcessor(
             dependency_detector=self._dependency_detector,
             resolve_tool_id=self._resolve_tool_id,
         )
 
     # MARK: - Public API
 
-    def set_function_tools(self, function_tools: list[Callable[..., Any]]) -> None:
+    def set_function_tools(self, function_tools: list[FunctionToolCallable]) -> None:
         """Set the available function tools for dependency detection."""
         self._available_function_tools = function_tools
 
@@ -51,7 +79,7 @@ class SchemaBuilder:
             return self._processed_models[model]
         return create_uuid(model)
 
-    def create_from_function(self, func: Callable[..., Any], tool_id: str) -> ArgsSchema:
+    def create_from_function(self, func: FunctionToolCallable, tool_id: str) -> ArgsSchema:
         """Create schema from function signature.
 
         Args:
@@ -63,16 +91,17 @@ class SchemaBuilder:
         """
         signature = inspect.signature(func)
         properties, required = self._process_function_parameters(signature, func)
-        return_schema = self._extract_return_type(signature)
+        return_schema = self._extract_return_type(signature, func)
 
-        return {
+        schema: JsonObject = {
             "tool_id": tool_id,
             "tool_type": "func",
-            "description": func.__doc__ or "",
-            "properties": properties,
-            "required": required,
-            "return_type": return_schema,
+            "description": _get_doc(func),
+            "properties": cast(JsonValue, properties),
+            "required": cast(JsonValue, required),
+            "return_type": cast(JsonValue, return_schema),
         }
+        return schema
 
     def create_from_model(self, model: type[BaseModel], tool_id: str) -> ArgsSchema:
         """Create schema from Pydantic model with flattened dependencies.
@@ -85,89 +114,125 @@ class SchemaBuilder:
             Schema dictionary with explicit tool dependencies
         """
         self._register_model(model, tool_id)
-        model_schema = model.model_json_schema()
-        self._register_nested_models(model_schema.get("$defs", {}), model.__module__)
+        model_schema = cast(JsonObject, model.model_json_schema())
+        self._register_nested_models(_get_object_value(model_schema, "$defs"), model.__module__)
 
         all_properties = self._process_model_properties(model_schema, model)
         properties, data_dep_fields = self._separate_data_dependencies(all_properties)
-        required = [f for f in model_schema.get("required", []) if f not in data_dep_fields]
+        required = [
+            field_name
+            for field_name in _get_str_list_value(model_schema, "required")
+            if field_name not in data_dep_fields
+        ]
 
-        return {
+        schema: JsonObject = {
             "tool_id": tool_id,
             "tool_type": "model",
-            "description": model.__doc__ or "",
-            "properties": properties,
-            "required": required,
+            "description": _get_doc(model),
+            "properties": cast(JsonValue, properties),
+            "required": cast(JsonValue, required),
         }
+        return schema
 
     # MARK: - Function Schema Building
 
     def _process_function_parameters(
         self,
         signature: inspect.Signature,
-        func: Callable[..., Any],
-    ) -> tuple[dict[str, Any], list[str]]:
+        func: FunctionToolCallable,
+    ) -> tuple[JsonObject, list[str]]:
         """Process all function parameters into schema properties."""
-        properties: dict[str, Any] = {}
+        properties: JsonObject = {}
         required: list[str] = []
+        resolved_hints = self._resolve_type_hints(func)
 
         for param_name, param in signature.parameters.items():
             if param_name == "self":
                 continue
 
-            param_schema = self._build_parameter_schema(param, func)
-            properties[param_name] = param_schema["schema"]
+            property_schema, is_required = self._build_parameter_schema(
+                param,
+                func,
+                resolved_annotation=resolved_hints.get(param_name),
+            )
+            properties[param_name] = cast(JsonValue, property_schema)
 
-            if param_schema["required"]:
+            if is_required:
                 required.append(param_name)
 
         return properties, required
 
+    @staticmethod
+    def _resolve_type_hints(func: FunctionToolCallable) -> dict[str, object]:
+        """Resolve string annotations (``from __future__ import annotations``)
+        into actual type objects.
+
+        ``include_extras=True`` keeps :pep:`593` ``Annotated[...]`` metadata
+        intact; without it Pydantic ``Field`` descriptions and bare-string
+        parameter descriptions would be stripped before they ever reached
+        the JSON schema.
+        """
+        try:
+            return cast(dict[str, object], get_type_hints(func, include_extras=True))
+        except Exception:  # noqa: BLE001 - annotation evaluation may execute third-party refs.
+            return {}
+
     def _build_parameter_schema(
         self,
         param: inspect.Parameter,
-        func: Callable[..., Any],
-    ) -> dict[str, Any]:
+        func: FunctionToolCallable,
+        resolved_annotation: object | None = None,
+    ) -> tuple[JsonObject, bool]:
         """Build schema for a function parameter."""
-        if param.annotation == inspect.Parameter.empty:
+        raw_annotation = cast(object, param.annotation)
+        if raw_annotation == inspect.Parameter.empty:
             raise ValueError(f"Parameter '{param.name}' missing type annotation")
 
-        is_required = param.default == inspect.Parameter.empty
+        # Prefer the resolved annotation (which preserves Annotated metadata)
+        # over the raw inspect annotation (which may be a string under
+        # ``from __future__ import annotations``).
+        annotation = resolved_annotation if resolved_annotation is not None else raw_annotation
+
+        raw_default = cast(object, param.default)
+        is_required = raw_default == inspect.Parameter.empty
 
         dep_schema = self._try_func_dependency_schema(param.name, func)
         if dep_schema:
-            return {"schema": dep_schema, "required": is_required}
+            return dep_schema, is_required
 
-        if is_pydantic_model(param.annotation):
-            return {
-                "schema": self._build_model_dependency(param.annotation),
-                "required": is_required,
-            }
+        if is_pydantic_model(annotation):
+            return self._build_model_dependency(annotation), is_required
 
-        return {
-            "schema": self._build_primitive_schema(param.annotation),
-            "required": is_required,
-        }
+        return self._build_primitive_schema(annotation), is_required
 
     def _try_func_dependency_schema(
         self,
         param_name: str,
-        func: Callable[..., Any],
-    ) -> dict[str, Any] | None:
+        func: FunctionToolCallable,
+    ) -> JsonObject | None:
         """Try to detect dependency from function decorator."""
-        dependencies = getattr(func, "_dependencies", [])
+        dependencies = _get_attached_dependencies(func)
         return self._dependency_detector.detect_dependency(
             dependencies=dependencies,
             arg_name=param_name,
-            context_name=func.__name__,
+            context_name=_require_callable_name(func),
         )
 
-    def _extract_return_type(self, signature: inspect.Signature) -> dict[str, Any]:
+    def _extract_return_type(
+        self,
+        signature: inspect.Signature,
+        func: FunctionToolCallable | None = None,
+    ) -> JsonObject:
         """Extract return type schema from function signature."""
-        if signature.return_annotation == inspect.Signature.empty:
+        raw_return_annotation = cast(object, signature.return_annotation)
+        if raw_return_annotation == inspect.Signature.empty:
             return {}
 
-        return_annotation = signature.return_annotation
+        return_annotation = raw_return_annotation
+        if func is not None:
+            resolved = self._resolve_type_hints(func).get("return")
+            if resolved is not None:
+                return_annotation = resolved
 
         if is_pydantic_model(return_annotation):
             return self._build_model_dependency(return_annotation)
@@ -181,7 +246,7 @@ class SchemaBuilder:
         self._processed_models[model] = tool_id
         self._model_classes[model.__name__] = model
 
-    def _register_nested_models(self, defs: dict[str, Any], context_module: str) -> None:
+    def _register_nested_models(self, defs: JsonObject, context_module: str) -> None:
         """Discover and register model classes from $defs."""
         for def_name in defs:
             if def_name not in self._model_classes:
@@ -191,21 +256,25 @@ class SchemaBuilder:
 
     def _process_model_properties(
         self,
-        model_schema: dict[str, Any],
+        model_schema: JsonObject,
         model: type[BaseModel],
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         """Process all model properties and convert nested models to dependencies."""
-        return {
-            prop_name: self._process_property(prop_schema, prop_name, model)
-            for prop_name, prop_schema in model_schema.get("properties", {}).items()
-        }
+        processed: JsonObject = {}
+        for prop_name, prop_schema in _get_object_value(model_schema, "properties").items():
+            if isinstance(prop_schema, dict):
+                processed[prop_name] = cast(
+                    JsonValue,
+                    self._process_property(cast(JsonObject, prop_schema), prop_name, model),
+                )
+        return processed
 
     def _process_property(
         self,
-        prop_schema: dict[str, Any],
+        prop_schema: JsonObject,
         prop_name: str,
         model: type[BaseModel],
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         """Process a model property, converting nested models to tool dependencies."""
         if dep_schema := self._try_model_dependency_schema(prop_name, model):
             return dep_schema
@@ -219,9 +288,9 @@ class SchemaBuilder:
         self,
         prop_name: str,
         model: type[BaseModel],
-    ) -> dict[str, Any] | None:
+    ) -> JsonObject | None:
         """Try to detect dependency from model decorator."""
-        dependencies = getattr(model, "_dependencies", [])
+        dependencies = _get_attached_dependencies(model)
         return self._dependency_detector.detect_dependency(
             dependencies=dependencies,
             arg_name=prop_name,
@@ -232,9 +301,9 @@ class SchemaBuilder:
 
     def _try_function_tool_dependency(
         self,
-        prop_schema: dict[str, Any],
+        prop_schema: JsonObject,
         prop_name: str,
-    ) -> dict[str, Any] | None:
+    ) -> JsonObject | None:
         """Try to create function tool dependency if applicable."""
         if not self._is_function_tool_candidate(prop_schema):
             return None
@@ -244,7 +313,7 @@ class SchemaBuilder:
             return None
 
         tool_id = create_uuid(function_tool)
-        tool_name = getattr(function_tool, "__name__", "unknown_function")
+        tool_name = _require_callable_name(function_tool)
 
         return {
             "type": "tool_dependency",
@@ -255,34 +324,33 @@ class SchemaBuilder:
             "output_type": "object",
         }
 
-    def _is_function_tool_candidate(self, prop_schema: dict[str, Any]) -> bool:
-        """Check if a property should be a function tool dependency."""
+    def _is_function_tool_candidate(self, prop_schema: JsonObject) -> bool:
+        """Check the legacy fallback contract for inferred function dependencies.
+
+        Explicit dependency decorators win first. This fallback only applies to
+        free-form object properties whose descriptions say they carry calculated
+        output and whose names can be stem-matched to a registered function tool.
+        """
         if prop_schema.get("type") != "object":
             return False
         if prop_schema.get("additionalProperties") is not True:
             return False
 
-        description = prop_schema.get("description", "").lower()
-        keywords = ["calculation", "calculated", "computed", "results", "output", "specs"]
+        description_value = prop_schema.get("description", "")
+        description = description_value.lower() if isinstance(description_value, str) else ""
 
-        return any(keyword in description for keyword in keywords)
+        return any(keyword in description for keyword in _FUNCTION_TOOL_CANDIDATE_KEYWORDS)
 
-    def _find_matching_function_tool(self, prop_name: str) -> Callable[..., Any] | None:
+    def _find_matching_function_tool(self, prop_name: str) -> FunctionToolCallable | None:
         """Find a function tool that matches this property."""
-        prop_normalized = prop_name.replace("_specs", "").replace("_data", "")
+        prop_normalized = _remove_tokens(prop_name, _FUNCTION_TOOL_PROPERTY_TOKENS)
 
         for tool in self._available_function_tools:
-            if not hasattr(tool, "__name__"):
+            tool_name = _get_callable_name(tool)
+            if tool_name is None:
                 continue
 
-            tool_name = tool.__name__
-            tool_normalized = (
-                tool_name.replace("calculate_", "")
-                .replace("_displacement", "")
-                .replace("_capacity", "")
-                .replace("_geometry", "")
-                .replace("_coefficient", "")
-            )
+            tool_normalized = _remove_tokens(tool_name, _FUNCTION_TOOL_NAME_TOKENS)
 
             if prop_normalized in tool_name.lower() or tool_normalized in prop_name.lower():
                 return tool
@@ -293,14 +361,15 @@ class SchemaBuilder:
 
     def _separate_data_dependencies(
         self,
-        all_properties: dict[str, Any],
-    ) -> tuple[dict[str, Any], list[str]]:
+        all_properties: JsonObject,
+    ) -> tuple[JsonObject, list[str]]:
         """Separate data_dependency fields from regular properties."""
-        properties: dict[str, Any] = {}
+        properties: JsonObject = {}
         data_dep_fields: list[str] = []
 
         for prop_name, prop_schema in all_properties.items():
-            if isinstance(prop_schema, dict) and prop_schema.get("type") == "data_dependency":
+            prop_object = cast(JsonObject, prop_schema) if isinstance(prop_schema, dict) else None
+            if prop_object is not None and prop_object.get("type") == "data_dependency":
                 data_dep_fields.append(prop_name)
             properties[prop_name] = prop_schema
 
@@ -308,7 +377,7 @@ class SchemaBuilder:
 
     # MARK: - Primitive Schema Building
 
-    def _build_model_dependency(self, model: type[BaseModel]) -> dict[str, Any]:
+    def _build_model_dependency(self, model: type[BaseModel]) -> JsonObject:
         """Build tool dependency schema for a Pydantic model."""
         tool_id = self.get_tool_id_for_model(model)
         return self._dependency_detector.build_model_tool_dependency(
@@ -318,36 +387,110 @@ class SchemaBuilder:
 
     def _build_primitive_schema(
         self,
-        annotation: Any,
+        annotation: object,
         is_return: bool = False,
-    ) -> dict[str, Any]:
-        """Build schema for primitive/non-model types."""
-        try:
-            from pydantic import TypeAdapter
+    ) -> JsonObject:
+        """Build schema for primitive/non-model types.
 
-            adapter = TypeAdapter(annotation)
-            schema = adapter.json_schema()
-            schema.pop("$defs", None)
+        Honors :pep:`593` ``Annotated`` metadata:
+
+        * ``Annotated[T, "description"]`` — a bare string is captured as the
+          parameter's ``description`` (useful shorthand).
+        * ``Annotated[T, Field(description=..., min_length=..., gt=..., ...)]``
+          — full Pydantic ``Field`` constraints flow through verbatim via
+          Pydantic's :class:`TypeAdapter`.
+
+        These descriptions and constraints land in the JSON schema that the
+        LLM sees, which is the high-leverage place to clarify what each
+        argument means (e.g. "a single vehicle_id string, not the whole
+        list").
+        """
+        bare_description = self._extract_bare_str_description(annotation)
+        try:
+            adapter: TypeAdapter[object] = TypeAdapter(annotation)
+            schema = cast(JsonObject, adapter.json_schema())
+            _ = schema.pop("$defs", None)
+            if bare_description and "description" not in schema:
+                schema["description"] = bare_description
             return schema
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - Pydantic schema generation is best-effort.
             if is_return:
                 return {
                     "type": "object",
-                    "description": "Complex return type",
+                    "description": bare_description or "Complex return type",
                     "note": f"Schema generation failed: {e!s}",
                 }
             return {
                 "type": "string",
-                "description": f"Complex type: {annotation}",
+                "description": bare_description or f"Complex type: {annotation}",
                 "note": f"Schema generation failed: {e!s}",
             }
+
+    @staticmethod
+    def _extract_bare_str_description(annotation: object) -> str | None:
+        """Return the first bare ``str`` in ``Annotated`` metadata, if any.
+
+        Pydantic ignores bare strings inside ``Annotated`` (it only picks up
+        :class:`pydantic.fields.FieldInfo`), so we extract them ourselves
+        and use the value as a fallback description.
+        """
+        if get_origin(annotation) is not Annotated:
+            return None
+        for arg in cast(tuple[object, ...], get_args(annotation))[1:]:
+            if isinstance(arg, str):
+                return arg
+        return None
 
     def _resolve_tool_id(self, model_name: str) -> str:
         """Resolve tool ID for a model name."""
         model_class = self._model_classes.get(model_name)
-        if model_class:
+        if model_class is not None:
             return self.get_tool_id_for_model(model_class)
         return f"placeholder-{model_name.lower()}-tool-id"
+
+
+# MARK: Helpers
+
+
+def _get_attached_dependencies(target: object) -> list[BaseDependency]:
+    """Return decorator-attached dependencies from the dynamic metadata slot."""
+    return cast(list[BaseDependency], getattr(target, "_dependencies", []) or [])
+
+
+def _get_callable_name(target: object) -> str | None:
+    name = getattr(target, "__name__", None)
+    return name if isinstance(name, str) else None
+
+
+def _require_callable_name(target: object) -> str:
+    name = _get_callable_name(target)
+    if name is None:
+        raise AttributeError("Callable is missing __name__")
+    return name
+
+
+def _get_doc(target: object) -> str:
+    doc = getattr(target, "__doc__", None)
+    return doc if isinstance(doc, str) else ""
+
+
+def _get_object_value(schema: JsonObject, key: str) -> JsonObject:
+    value = schema.get(key)
+    return cast(JsonObject, value) if isinstance(value, dict) else {}
+
+
+def _get_str_list_value(schema: JsonObject, key: str) -> list[str]:
+    value = schema.get(key)
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def _remove_tokens(value: str, tokens: tuple[str, ...]) -> str:
+    normalized = value
+    for token in tokens:
+        normalized = normalized.replace(token, "")
+    return normalized
 
 
 __all__ = ["SchemaBuilder"]

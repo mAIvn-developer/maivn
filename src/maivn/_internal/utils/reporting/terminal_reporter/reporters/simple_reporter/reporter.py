@@ -1,6 +1,12 @@
 """Simple terminal reporter implementation."""
 
+# pyright: strict
+
 from __future__ import annotations
+
+from collections.abc import Callable
+
+from typing_extensions import override
 
 from ..._components import EventTracker, FileWriter
 from ..._formatters import truncate_result
@@ -21,28 +27,30 @@ from .session_methods import SimpleReporterSessionMixin, SimpleReporterToolMixin
 
 
 class SimpleReporter(
-    SimpleReporterDisplayMixin,
     SimpleReporterEventMixin,
+    SimpleReporterAssistantStreamingMixin,
+    SimpleReporterDisplayMixin,
     SimpleReporterProgressMixin,
     SimpleReporterSessionMixin,
     SimpleReporterToolMixin,
-    SimpleReporterAssistantStreamingMixin,
     BaseReporter,
 ):
     """Simple terminal reporter without external dependencies."""
 
+    @override
     def __init__(self, enabled: bool = True) -> None:
         """Initialize simple reporter."""
-        self.enabled = enabled
-        self.tracker = EventTracker()
-        self.file_writer = FileWriter()
+        BaseReporter.__init__(self, enabled=enabled)
+        self.enabled: bool = enabled
+        self.tracker: EventTracker = EventTracker()
+        self.file_writer: FileWriter = FileWriter()
 
-        self._progress_state = SystemToolProgressState()
+        self._progress_state: SystemToolProgressState = SystemToolProgressState()
         self._assistant_stream_text_by_id: dict[str, str] = {}
-        self._assistant_stream_active = False
+        self._assistant_stream_active: bool = False
 
-        self._border_char = SIMPLE_BORDER_CHAR
-        self._box_corners = SIMPLE_BOX_CORNERS
-        self._box_horizontal = SIMPLE_BOX_HORIZONTAL
-        self._box_vertical = SIMPLE_BOX_VERTICAL
-        self._truncate_result = truncate_result
+        self._border_char: str = SIMPLE_BORDER_CHAR
+        self._box_corners: tuple[str, str, str, str] = SIMPLE_BOX_CORNERS
+        self._box_horizontal: str = SIMPLE_BOX_HORIZONTAL
+        self._box_vertical: str = SIMPLE_BOX_VERTICAL
+        self._truncate_result: Callable[[str], str] = truncate_result

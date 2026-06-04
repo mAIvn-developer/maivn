@@ -60,7 +60,7 @@ Always re-run `uv run pytest` after rollback to confirm the SDK behavior is rest
 
 ## Execution Context Reference
 
-The orchestrator and dependency layers share a single `ExecutionContext` dataclass (`maivn._internal.core.entities.execution_context.ExecutionContext`). Key fields:
+The orchestrator and dependency layers share a single internal execution-context object. The fields most relevant when writing dependency-aware tools:
 
 - `scope`: the active `Agent`/`Swarm` instance
 - `tool_results`: mutable map of tool_id -> raw execution result (used by `depends_on_tool`)

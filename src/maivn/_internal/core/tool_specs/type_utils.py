@@ -4,13 +4,13 @@ Provides safe type resolution helpers for forward references and string annotati
 without using eval(). Also includes Pydantic model detection utilities.
 """
 
+# pyright: strict
 from __future__ import annotations
 
 import builtins
 import inspect
 import sys
-import typing
-from typing import Any, ForwardRef, get_args, get_origin
+from typing import ForwardRef, TypeGuard, cast, get_args, get_origin
 
 from pydantic import BaseModel
 
@@ -19,8 +19,8 @@ from pydantic import BaseModel
 
 def safe_resolve_string_type(
     type_str: str,
-    module_globals: dict[str, Any],
-    module_locals: dict[str, Any] | None = None,
+    module_globals: dict[str, object],
+    module_locals: dict[str, object] | None = None,
 ) -> type | None:
     """Safely resolve a string type annotation without using eval().
 
@@ -33,10 +33,10 @@ def safe_resolve_string_type(
         The resolved type, or None if resolution fails
     """
     if type_str in module_globals:
-        return module_globals[type_str]
+        return cast(type | None, module_globals[type_str])
 
     if module_locals and type_str in module_locals:
-        return module_locals[type_str]
+        return cast(type | None, module_locals[type_str])
 
     if "." in type_str:
         resolved = resolve_dotted_name(type_str, module_globals, module_locals)
@@ -44,15 +44,15 @@ def safe_resolve_string_type(
             return resolved
 
     if hasattr(builtins, type_str):
-        return getattr(builtins, type_str)
+        return cast(type | None, getattr(builtins, type_str, None))
 
     return None
 
 
 def resolve_dotted_name(
     type_str: str,
-    module_globals: dict[str, Any],
-    module_locals: dict[str, Any] | None,
+    module_globals: dict[str, object],
+    module_locals: dict[str, object] | None,
 ) -> type | None:
     """Resolve a dotted name like 'module.ClassName'.
 
@@ -75,16 +75,16 @@ def resolve_dotted_name(
 
     try:
         for part in parts[1:]:
-            obj = getattr(obj, part)
-        return obj
+            obj = cast(object, getattr(obj, part))
+        return cast(type | None, obj)
     except AttributeError:
         return None
 
 
 def resolve_forward_ref(
     ref: ForwardRef | str,
-    module_globals: dict[str, Any],
-    module_locals: dict[str, Any] | None = None,
+    module_globals: dict[str, object],
+    module_locals: dict[str, object] | None = None,
 ) -> type | None:
     """Resolve a ForwardRef or string annotation safely.
 
@@ -103,7 +103,7 @@ def resolve_forward_ref(
 # MARK: Pydantic Model Detection
 
 
-def is_pydantic_model(annotation: Any) -> bool:
+def is_pydantic_model(annotation: object) -> TypeGuard[type[BaseModel]]:
     """Check if an annotation is a Pydantic model class.
 
     Args:
@@ -118,7 +118,7 @@ def is_pydantic_model(annotation: Any) -> bool:
         return False
 
 
-def extract_nested_models(field_type: Any) -> list[type[BaseModel]]:
+def extract_nested_models(field_type: object) -> list[type[BaseModel]]:
     """Extract Pydantic model classes from a field type annotation.
 
     Recursively inspects Union types and generic containers to find
@@ -139,9 +139,9 @@ def extract_nested_models(field_type: Any) -> list[type[BaseModel]]:
         models.append(field_type)
         return models
 
-    origin = get_origin(field_type)
-    if origin is typing.Union or origin is not None:
-        for arg in get_args(field_type):
+    origin = cast(object | None, get_origin(field_type))
+    if origin is not None:
+        for arg in cast(tuple[object, ...], get_args(field_type)):
             models.extend(extract_nested_models(arg))
 
     return models
@@ -150,7 +150,7 @@ def extract_nested_models(field_type: Any) -> list[type[BaseModel]]:
 # MARK: Module Globals Helpers
 
 
-def get_module_globals_for_callable(func: Any) -> dict[str, Any]:
+def get_module_globals_for_callable(func: object) -> dict[str, object]:
     """Get module globals for a callable.
 
     Args:
@@ -160,10 +160,10 @@ def get_module_globals_for_callable(func: Any) -> dict[str, Any]:
         Dictionary of module globals
     """
     func_module = inspect.getmodule(func)
-    return func_module.__dict__ if func_module else {}
+    return cast(dict[str, object], func_module.__dict__) if func_module else {}
 
 
-def get_module_globals_for_model(model: type[BaseModel]) -> dict[str, Any]:
+def get_module_globals_for_model(model: type[BaseModel]) -> dict[str, object]:
     """Get module globals for a Pydantic model class.
 
     Args:
@@ -174,7 +174,7 @@ def get_module_globals_for_model(model: type[BaseModel]) -> dict[str, Any]:
     """
     model_module = model.__module__
     module = sys.modules.get(model_module)
-    return module.__dict__ if module else {}
+    return cast(dict[str, object], module.__dict__) if module else {}
 
 
 __all__ = [

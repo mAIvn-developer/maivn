@@ -1,8 +1,8 @@
 # Memory
 
-Agents can remember prior turns, extract reusable skills and insights, and
-retrieve attached resources at execution time. Memory is opt-in and
-configurable per agent.
+These examples give an agent recall: remembering prior turns, extracting
+reusable skills and insights, and retrieving attached resources at execution
+time. Memory is opt-in and configurable per agent.
 
 ## Enabling memory
 
@@ -20,15 +20,19 @@ agent = Agent(
 )
 ```
 
-Memory `level` controls what gets persisted:
+Memory `level` controls how much the agent retains and recalls, ranging from
+off to the richest experience:
 
-| Level | Persists |
+| Level | Behavior |
 | --- | --- |
-| `'thread'` | Just the thread's own conversation. |
-| `'clarity'` | Thread context + extracted skills and insights. |
-| `'graph'` | Adds graph relationships for cross-thread retrieval. |
+| `'none'` | Memory disabled. |
+| `'glimpse'` | Lightweight thread context only. |
+| `'focus'` | Thread context plus moderate recall. |
+| `'clarity'` | Full thread context plus extracted skills and insights. |
 
-For day-to-day work, `clarity` is the sweet spot.
+For day-to-day work, `clarity` is the sweet spot. Pair `level` with
+`persistence_mode` (`'persist_none'`, `'vector_only'`, or
+`'vector_plus_graph'`) to control how that memory is stored and retrieved.
 
 ## A seed-and-recall pattern
 
@@ -146,7 +150,7 @@ agent = Agent(
     system_prompt='...',
     api_key='...',
     memory_config=memory_config,
-    memory_skills=BOUND_SKILLS,
+    skills=BOUND_SKILLS,
 )
 ```
 
@@ -161,7 +165,7 @@ agent = Agent(
     name='Product Analyst',
     system_prompt='You know the product deeply. Answer from the attached docs.',
     api_key='...',
-    memory_resources=[
+    resources=[
         {'path': 'docs/product_overview.pdf', 'name': 'Product Overview'},
         {'path': 'docs/user_research_2025.pdf', 'name': 'User Research 2025'},
     ],
@@ -174,20 +178,28 @@ changing a file's content automatically supersedes the prior version.
 
 ## Inspecting memory lifecycle events
 
-If you want to see what memory is doing under the hood, stream events and
-filter for the memory phases:
+If you want to see what memory is doing under the hood, attach an event
+callback that filters for the memory phases. `agent.events(...)` builds an
+invocation wrapper; chain a terminal `.invoke()` (or `.stream()`) to run it.
+Each callback dict carries `category`, `event`, and `payload`:
 
 ```python
-events = []
-for event in agent.events(messages, thread_id=thread_id):
+memory_events = []
+
+def on_event(event: dict) -> None:
     if event.get('event') == 'enrichment':
         phase = event.get('payload', {}).get('phase', '')
         if phase.startswith('memory_'):
-            events.append(event['payload'])
+            memory_events.append(event['payload'])
 
-# Now `events` contains memory_summarize / memory_retrieve / memory_index entries
-for e in events:
-    print(e['phase'], '-', e.get('message'))
+agent.events(include='enrichment', on_event=on_event).invoke(
+    messages,
+    thread_id=thread_id,
+)
+
+# Now `memory_events` holds the memory-phase enrichment payloads
+for e in memory_events:
+    print(e.get('phase'), '-', e.get('message'))
 ```
 
 ## Memory + structured final tool

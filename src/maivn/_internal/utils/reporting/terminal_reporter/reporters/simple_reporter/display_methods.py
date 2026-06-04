@@ -1,10 +1,17 @@
 """Display and summary methods for ``SimpleReporter``."""
 
+# pyright: strict
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
+from typing_extensions import override
+
+from ..._components import EventTracker, FileWriter
 from ..._formatters import format_total_time
+from ...base.interface import BaseReporterInterface
 from ...config import (
     MAX_INLINE_RESULT_LENGTH,
     SIMPLE_BORDER_LENGTH,
@@ -23,16 +30,21 @@ if TYPE_CHECKING:
 # MARK: Display Methods
 
 
-class SimpleReporterDisplayMixin:
+class SimpleReporterDisplayMixin(BaseReporterInterface, ABC):
     enabled: bool
-    tracker: Any
-    file_writer: Any
+    tracker: EventTracker
+    file_writer: FileWriter
     _assistant_stream_active: bool
     _assistant_stream_text_by_id: dict[str, str]
     _border_char: str
-    _clear_assistant_stream_state: Any
-    _has_matching_streamed_response: Any
 
+    @abstractmethod
+    def _clear_assistant_stream_state(self) -> None: ...
+
+    @abstractmethod
+    def _has_matching_streamed_response(self, response_text: str) -> bool: ...
+
+    @override
     def print_header(self, title: str, subtitle: str = "") -> None:
         """Print a header."""
         if not self.enabled:
@@ -45,7 +57,8 @@ class SimpleReporterDisplayMixin:
             print(f"{subtitle}")
         print(f"{border}\n")
 
-    def print_section(self, title: str, style: str = "") -> None:
+    @override
+    def print_section(self, title: str, style: str = "bold cyan") -> None:
         """Print a section header."""
         _ = style
         if not self.enabled:
@@ -61,7 +74,11 @@ class SimpleReporterDisplayMixin:
             corners=SIMPLE_BOX_CORNERS,
         )
 
-    def print_summary(self, token_usage: TokenUsage | None = None) -> None:
+    @override
+    def print_summary(
+        self,
+        token_usage: TokenUsage | None = None,
+    ) -> None:
         """Print execution summary."""
         if not self.enabled:
             return
@@ -90,7 +107,8 @@ class SimpleReporterDisplayMixin:
 
         print(f"{border}\n")
 
-    def print_final_result(self, result: Any) -> None:
+    @override
+    def print_final_result(self, result: object) -> None:
         """Print final result."""
         if not self.enabled:
             return
@@ -105,6 +123,7 @@ class SimpleReporterDisplayMixin:
 
         print(f"{border}\n")
 
+    @override
     def print_final_response(self, response: str) -> None:
         """Print final assistant response text."""
         if not self.enabled:
@@ -138,6 +157,7 @@ class SimpleReporterDisplayMixin:
         print(f"{border}\n")
         self._clear_assistant_stream_state()
 
+    @override
     def print_error_summary(self, error: str) -> None:
         """Print error summary."""
         if not self.enabled:

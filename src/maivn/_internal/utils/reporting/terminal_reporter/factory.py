@@ -1,20 +1,27 @@
+# pyright: strict
 """Reporter factory for terminal output.
 Detects rich availability and returns the appropriate reporter implementation.
 """
 
 from __future__ import annotations
 
-# MARK: - Imports
+from typing import Final
+
 from .base import BaseReporter
 
 # MARK: - Rich Detection
 
-try:
-    from rich.console import Console  # noqa: F401
 
-    RICH_AVAILABLE = True
-except ImportError:
-    RICH_AVAILABLE = False
+def _detect_rich_available() -> bool:
+    try:
+        from rich.console import Console as _RichConsole
+    except ImportError:
+        return False
+    _ = _RichConsole
+    return True
+
+
+RICH_AVAILABLE: Final[bool] = _detect_rich_available()
 
 # MARK: - Factory
 

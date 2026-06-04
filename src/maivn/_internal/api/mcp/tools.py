@@ -1,9 +1,10 @@
+# pyright: strict
 """MCP tool definitions and utilities."""
 
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import ClassVar, TypeAlias, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,7 +16,29 @@ DEFAULT_CLIENT_TITLE = "Maivn SDK"
 DEFAULT_CLIENT_VERSION = "unknown"
 
 
+# MARK: Types
+
+JsonPrimitive: TypeAlias = str | int | float | bool | None
+JsonValue: TypeAlias = JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"]
+JsonObject: TypeAlias = dict[str, JsonValue]
+JsonArray: TypeAlias = list[JsonValue]
+
+
 # MARK: Utility Functions
+
+
+def as_json_object(value: object) -> JsonObject | None:
+    """Return ``value`` as a JSON object when it has the expected runtime shape."""
+    if isinstance(value, dict):
+        return cast(JsonObject, value)
+    return None
+
+
+def as_json_array(value: object) -> JsonArray | None:
+    """Return ``value`` as a JSON array when it has the expected runtime shape."""
+    if isinstance(value, list):
+        return cast(JsonArray, value)
+    return None
 
 
 def sanitize_identifier(value: str) -> str:
@@ -41,14 +64,14 @@ class MCPToolDefinition(BaseModel):
     including its name, description, and input/output schemas.
     """
 
-    model_config = ConfigDict(populate_by_name=True, extra="allow")
+    model_config: ClassVar[ConfigDict] = ConfigDict(populate_by_name=True, extra="allow")
 
     name: str
     title: str | None = None
     description: str | None = None
-    input_schema: dict[str, Any] = Field(default_factory=dict, alias="inputSchema")
-    output_schema: dict[str, Any] | None = Field(default=None, alias="outputSchema")
-    annotations: dict[str, Any] | None = None
+    input_schema: dict[str, object] = Field(default_factory=dict, alias="inputSchema")
+    output_schema: dict[str, object] | None = Field(default=None, alias="outputSchema")
+    annotations: dict[str, object] | None = None
 
 
 __all__ = [

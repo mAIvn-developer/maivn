@@ -1,8 +1,13 @@
 """Rich-based terminal reporter implementation."""
 
+# pyright: strict
 from __future__ import annotations
 
 import threading
+from contextlib import AbstractContextManager
+
+from rich.console import Console
+from typing_extensions import override
 
 from ...base import BaseReporter
 from .assistant_streaming import (
@@ -37,21 +42,22 @@ class RichReporter(
 ):
     """Beautiful terminal reporter using rich library."""
 
+    @override
     def __init__(self, enabled: bool = True) -> None:
         """Initialize the reporter."""
-        self.enabled = enabled
-        self._terminal_lock = threading.RLock()
+        self.enabled: bool = enabled
+        self._terminal_lock: AbstractContextManager[bool] = threading.RLock()
 
         configure_stdout_stderr_for_windows()
-        self.console = create_console()
-        self._progress_manager = ProgressManager(self.console)
-        self._tool_reporter = ToolReporter(self.console)
-        self._input_handler = InputHandler(self.console)
-        self._display_manager = DisplayManager(
+        self.console: Console = create_console()
+        self._progress_manager: ProgressManager = ProgressManager(self.console)
+        self._tool_reporter: ToolReporter = ToolReporter(self.console)
+        self._input_handler: InputHandler = InputHandler(self.console)
+        self._display_manager: DisplayManager = DisplayManager(
             self.console,
             self._tool_reporter.tracker,
         )
         self._active_system_tool_event_ids: set[str] = set()
         self._system_tool_stream_group_event_ids: set[str] = set()
         self._assistant_stream_text_by_id: dict[str, str] = {}
-        self._assistant_stream_live_suspended = False
+        self._assistant_stream_live_suspended: bool = False

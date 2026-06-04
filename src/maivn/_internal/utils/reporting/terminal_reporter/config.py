@@ -1,3 +1,4 @@
+# pyright: strict
 """Configuration constants for terminal reporters.
 Centralizes display limits, file naming, and style constants.
 Shared by rich and simple reporter implementations.
@@ -11,14 +12,12 @@ from maivn._internal.utils.env_parsing import read_bool_env, read_int_env, read_
 
 # MARK: Display Limits
 
-# MARK: - Result Display
 MAX_RESULT_LINES: Final[int] = 40
 """Maximum lines to display inline before writing to file."""
 
 MAX_INLINE_RESULT_LENGTH: Final[int] = 25000
 """Maximum character length for inline text results."""
 
-# MARK: - Truncation
 RESULT_TRUNCATION_LENGTH: Final[int] = 200
 """Length at which to truncate tool results in display."""
 
@@ -27,11 +26,9 @@ RESULT_TRUNCATION_SUFFIX: Final[str] = "..."
 
 # MARK: File Output
 
-# MARK: - Paths
 LOGS_DIRECTORY: Final[str] = "logs"
 """Directory for output files."""
 
-# MARK: - Naming
 RESULT_FILENAME_PREFIX: Final[str] = "final_result"
 """Prefix for result output files."""
 
@@ -40,7 +37,6 @@ TIMESTAMP_FORMAT: Final[str] = "%Y%m%d_%H%M%S"
 
 # MARK: Event Types
 
-# MARK: - Colors
 EVENT_COLORS: Final[dict[str, str]] = {
     "info": "blue",
     "success": "green",
@@ -57,7 +53,6 @@ EVENT_COLORS: Final[dict[str, str]] = {
 DEFAULT_EVENT_COLOR: Final[str] = "white"
 """Default color for unknown event types."""
 
-# MARK: - Icons
 EVENT_ICONS: Final[dict[str, str]] = {
     "info": "[i]",
     "success": "[OK]",
@@ -84,7 +79,6 @@ DEFAULT_PROGRESS_DESCRIPTION: Final[str] = "Processing..."
 
 # MARK: Styling
 
-# MARK: - Border Styles
 HEADER_BORDER_STYLE: Final[str] = "cyan"
 """Border style for headers."""
 
@@ -100,7 +94,6 @@ RESULT_BORDER_STYLE: Final[str] = "magenta"
 ERROR_BORDER_STYLE: Final[str] = "red"
 """Border style for error panels."""
 
-# MARK: - Text Styles
 MODEL_TOOL_PREFIX_STYLE: Final[str] = "dim cyan"
 """Style for [MODEL] prefix."""
 
@@ -115,7 +108,6 @@ RESULT_VALUE_STYLE: Final[str] = "cyan dim"
 
 # MARK: Layout
 
-# MARK: - Padding
 HEADER_PADDING: Final[tuple[int, int]] = (1, 2)
 """Padding for header panels (vertical, horizontal)."""
 
@@ -127,14 +119,12 @@ RESULT_PADDING: Final[tuple[int, int]] = (1, 2)
 
 # MARK: Simple Reporter
 
-# MARK: - Borders
 SIMPLE_BORDER_CHAR: Final[str] = "="
 """Border character for simple reporter."""
 
 SIMPLE_BORDER_LENGTH: Final[int] = 60
 """Border length for simple reporter."""
 
-# MARK: - Box Characters
 SIMPLE_BOX_HORIZONTAL: Final[str] = "-"
 """Horizontal box character for simple reporter."""
 

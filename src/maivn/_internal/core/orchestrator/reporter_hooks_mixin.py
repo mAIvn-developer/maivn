@@ -1,14 +1,58 @@
+"""Shared reporter-hook helpers for orchestrator event consumers."""
+
+# pyright: strict
 from __future__ import annotations
 
 import inspect
-from typing import Any
+from collections.abc import Callable
+from typing import TypeAlias, cast
+
+from pydantic import JsonValue
 
 from maivn._internal.utils.reporting.terminal_reporter import BaseReporter
 
+# MARK: Types
+
+JsonObject: TypeAlias = dict[str, JsonValue]
+EnrichmentSupport: TypeAlias = tuple[bool, bool, bool, bool]
+EnrichmentValues: TypeAlias = tuple[
+    str,
+    str,
+    str | None,
+    str | None,
+    str | None,
+    JsonObject | None,
+    JsonObject | None,
+    JsonObject | None,
+]
+
+
+# MARK: Reporter Hook Helpers
+
 
 class OrchestratorReporterHooksHelperMixin:
+    _is_nested: bool
+    _allow_nested_response_stream: bool
+    _response_stream_text_by_assistant_id: dict[str, str]
+    _next_response_chunk_replaces: bool
+    _enrichment_support_by_reporter_type: dict[type[BaseReporter], EnrichmentSupport]
+    _tool_agent_lookup: Callable[[str], str | None]
+    _swarm_name_supplier: Callable[[], str | None]
+
+    def _get_swarm_name(self) -> str | None:
+        return self._swarm_name_supplier()
+
+    def __init__(self) -> None:
+        self._is_nested = False
+        self._allow_nested_response_stream = False
+        self._response_stream_text_by_assistant_id = {}
+        self._next_response_chunk_replaces = False
+        self._enrichment_support_by_reporter_type = {}
+        self._tool_agent_lookup = _no_agent_lookup
+        self._swarm_name_supplier = _no_swarm_name
+
     @staticmethod
-    def _get_sys_tool_id(payload: dict[str, Any]) -> str:
+    def _get_sys_tool_id(payload: JsonObject) -> str:
         assignment_id = str(payload.get("assignment_id", "")).strip()
         if assignment_id:
             return assignment_id
@@ -33,8 +77,8 @@ class OrchestratorReporterHooksHelperMixin:
         return status or "in_progress"
 
     def _handle_streaming_response_update(
-        self: Any,
-        payload: dict[str, Any],
+        self,
+        payload: JsonObject,
         reporter: BaseReporter,
     ) -> None:
         full_text = payload.get("streaming_content")
@@ -59,16 +103,42 @@ class OrchestratorReporterHooksHelperMixin:
         if len(self._response_stream_text_by_assistant_id) > 64:
             stale_key = next(iter(self._response_stream_text_by_assistant_id))
             if stale_key != assistant_id:
-                self._response_stream_text_by_assistant_id.pop(stale_key, None)
+                _ = self._response_stream_text_by_assistant_id.pop(stale_key, None)
 
         if not delta:
             return
 
-        reporter.report_response_chunk(
-            delta,
-            assistant_id=assistant_id,
-            full_text=full_text,
+        # Detect a divergent stream: previous had content and the new cumulative text neither
+        # extends nor retracts it. In that case the downstream UI must overwrite the current
+        # bubble with the full new text instead of appending a suffix.
+        replace_content = (
+            bool(previous)
+            and bool(full_text)
+            and not (full_text.startswith(previous) or previous.startswith(full_text))
         )
+        # A reevaluate cycle can mint a fresh assistant id, so the per-assistant cache may be
+        # empty. The one-shot flag tells the next chunk to overwrite regardless of assistant id.
+        if self._next_response_chunk_replaces:
+            replace_content = True
+            self._next_response_chunk_replaces = False
+        if replace_content:
+            delta = full_text
+
+        try:
+            reporter.report_response_chunk(
+                delta,
+                assistant_id=assistant_id,
+                full_text=full_text,
+                replace_content=replace_content,
+            )
+        except TypeError as exc:
+            if "replace_content" not in str(exc):
+                raise
+            reporter.report_response_chunk(
+                delta,
+                assistant_id=assistant_id,
+                full_text=full_text,
+            )
 
     @staticmethod
     def _compute_stream_delta(previous: str, full_text: str) -> str:
@@ -89,7 +159,7 @@ class OrchestratorReporterHooksHelperMixin:
             return full_text
         return full_text[shared:]
 
-    def _resolve_agent_name(self: Any, payload: dict[str, Any], tool_name: str) -> str | None:
+    def _resolve_agent_name(self, payload: JsonObject, tool_name: str) -> str | None:
         agent_name = payload.get("agent_name")
         if isinstance(agent_name, str) and agent_name.strip():
             return agent_name
@@ -102,14 +172,14 @@ class OrchestratorReporterHooksHelperMixin:
             return action_id
         return None
 
-    def _resolve_swarm_name(self: Any, payload: dict[str, Any]) -> str | None:
+    def _resolve_swarm_name(self, payload: JsonObject) -> str | None:
         swarm_name = payload.get("swarm_name")
         if isinstance(swarm_name, str) and swarm_name.strip():
             return swarm_name
         return self._get_swarm_name()
 
     @staticmethod
-    def _resolve_model_tool_id(payload: dict[str, Any], tool_name: str) -> str:
+    def _resolve_model_tool_id(payload: JsonObject, tool_name: str) -> str:
         assignment_id = payload.get("assignment_id")
         if isinstance(assignment_id, str) and assignment_id.strip():
             return assignment_id
@@ -120,47 +190,37 @@ class OrchestratorReporterHooksHelperMixin:
             return f"model-tool:{assignment_index}"
         return tool_name or "model-tool"
 
-    def _get_enrichment_support(self: Any, reporter: BaseReporter) -> tuple[bool, bool, bool]:
+    def _get_enrichment_support(self, reporter: BaseReporter) -> EnrichmentSupport:
         reporter_type = type(reporter)
-        supports_scope, supports_memory, supports_redaction = (
-            self._enrichment_support_by_reporter_type.get(
-                reporter_type,
-                (False, False, False),
+        supports = self._enrichment_support_by_reporter_type.get(reporter_type)
+        if supports is not None:
+            return supports
+        try:
+            params = inspect.signature(reporter.report_enrichment).parameters
+        except (TypeError, ValueError):
+            supports_scope = False
+            supports_memory = False
+            supports_redaction = False
+            supports_reevaluate = False
+        else:
+            accepts_var_kwargs = any(
+                parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in params.values()
             )
-        )
-        if reporter_type not in self._enrichment_support_by_reporter_type:
-            try:
-                params = inspect.signature(reporter.report_enrichment).parameters
-            except (TypeError, ValueError):
-                supports_scope = False
-                supports_memory = False
-                supports_redaction = False
-            else:
-                accepts_var_kwargs = any(
-                    parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in params.values()
-                )
-                supports_scope = accepts_var_kwargs or "scope_id" in params
-                supports_memory = accepts_var_kwargs or "memory" in params
-                supports_redaction = accepts_var_kwargs or "redaction" in params
-            self._enrichment_support_by_reporter_type[reporter_type] = (
-                supports_scope,
-                supports_memory,
-                supports_redaction,
+            supports_scope = accepts_var_kwargs or "scope_id" in params
+            supports_memory = accepts_var_kwargs or "memory" in params
+            supports_redaction = accepts_var_kwargs or "redaction" in params
+            supports_reevaluate = (
+                accepts_var_kwargs
+                or "reevaluate" in params
+                or "source" in params
+                or "trigger_tool" in params
             )
-        return supports_scope, supports_memory, supports_redaction
+        result = (supports_scope, supports_memory, supports_redaction, supports_reevaluate)
+        self._enrichment_support_by_reporter_type[reporter_type] = result
+        return result
 
-    @staticmethod
-    def _extract_enrichment_values(
-        payload: dict[str, Any],
-    ) -> tuple[
-        str,
-        str,
-        str | None,
-        str | None,
-        str | None,
-        dict[str, Any] | None,
-        dict[str, Any] | None,
-    ]:
+    @classmethod
+    def _extract_enrichment_values(cls, payload: JsonObject) -> EnrichmentValues:
         phase = str(payload.get("phase", "")).strip()
         message = str(payload.get("message", "")).strip()
 
@@ -183,9 +243,36 @@ class OrchestratorReporterHooksHelperMixin:
             if isinstance(scope_name_raw, str) and scope_name_raw.strip()
             else None
         )
-        memory = payload.get("memory") if isinstance(payload.get("memory"), dict) else None
-        redaction = payload.get("redaction") if isinstance(payload.get("redaction"), dict) else None
-        return phase, message, scope_type, scope_id, scope_name, memory, redaction
+        memory = cls._coerce_object_dict(payload.get("memory"))
+        redaction = cls._coerce_object_dict(payload.get("redaction"))
+        reevaluate = cls._coerce_object_dict(payload.get("reevaluate"))
+
+        # Synthesize the group from flat fields when only scalars were
+        # emitted (e.g. third-party emitters).
+        if reevaluate is None:
+            flat_reevaluate = {
+                key: payload[key]
+                for key in (
+                    "source",
+                    "trigger_tool",
+                    "target_tool",
+                    "reevaluate_count",
+                    "collected_count",
+                )
+                if key in payload
+            }
+            if flat_reevaluate:
+                reevaluate = flat_reevaluate
+        return (
+            phase,
+            message,
+            scope_type,
+            scope_id,
+            scope_name,
+            memory,
+            redaction,
+            reevaluate,
+        )
 
     @staticmethod
     def _build_enrichment_kwargs(
@@ -195,13 +282,15 @@ class OrchestratorReporterHooksHelperMixin:
         supports_scope: bool,
         supports_memory: bool,
         supports_redaction: bool,
+        supports_reevaluate: bool,
         scope_id: str | None,
         scope_name: str | None,
         scope_type: str | None,
-        memory: dict[str, Any] | None,
-        redaction: dict[str, Any] | None,
-    ) -> dict[str, Any]:
-        kwargs: dict[str, Any] = {
+        memory: JsonObject | None,
+        redaction: JsonObject | None,
+        reevaluate: JsonObject | None,
+    ) -> JsonObject:
+        kwargs: JsonObject = {
             "phase": phase,
             "message": message or phase,
         }
@@ -213,4 +302,29 @@ class OrchestratorReporterHooksHelperMixin:
             kwargs["memory"] = memory
         if supports_redaction and redaction is not None:
             kwargs["redaction"] = redaction
+        if supports_reevaluate and reevaluate:
+            for key in ("source", "trigger_tool", "target_tool"):
+                value = reevaluate.get(key)
+                if value is None:
+                    continue
+                kwargs[key] = value
+            for key in ("reevaluate_count", "collected_count"):
+                value = reevaluate.get(key)
+                if isinstance(value, int):
+                    kwargs[key] = value
         return kwargs
+
+    @staticmethod
+    def _coerce_object_dict(value: object) -> JsonObject | None:
+        if not isinstance(value, dict):
+            return None
+        raw_mapping = cast(dict[object, object], value)
+        return {str(key): cast(JsonValue, item) for key, item in raw_mapping.items()}
+
+
+def _no_agent_lookup(_name: str) -> str | None:
+    return None
+
+
+def _no_swarm_name() -> str | None:
+    return None

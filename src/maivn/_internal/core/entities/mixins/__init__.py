@@ -1,15 +1,14 @@
 """Mixin classes for domain entities.
 Provides reusable mixins shared across tools and other entity types."""
 
+# pyright: strict
 from __future__ import annotations
 
 # MARK: - Configurable Mixins
 from .configurable_mixin import (
     ConfigurableMixin,
     DescriptiveMixin,
-    MetadataMixin,
     TaggableMixin,
-    TimeStampedMixin,
 )
 
 # MARK: - Identifiable Mixins
@@ -26,9 +25,7 @@ __all__ = [
     # Configurable mixins
     "ConfigurableMixin",
     "DescriptiveMixin",
-    "MetadataMixin",
     "TaggableMixin",
-    "TimeStampedMixin",
     # Identifiable mixins
     "FunctionToolIdentifiableMixin",
     "IdentifiableMixin",

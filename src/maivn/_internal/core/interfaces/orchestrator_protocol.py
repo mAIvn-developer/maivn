@@ -1,9 +1,10 @@
+# pyright: strict
 """Protocol for agent orchestrators."""
 
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
-from typing import Any, Literal, Protocol
+from typing import Literal, Protocol, TypeAlias
 
 from maivn_shared import (
     BaseMessage,
@@ -15,9 +16,14 @@ from maivn_shared import (
     SwarmConfig,
     SystemToolsConfig,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue
 
-from maivn._internal.core import SSEEvent
+from ..entities.sse_event import SSEEvent
+from ..entities.tools.agent_tool import AgentTool
+
+# MARK: - Type Aliases
+
+JsonObject: TypeAlias = dict[str, JsonValue]
 
 # MARK: - Protocol Definition
 
@@ -37,12 +43,13 @@ class AgentOrchestratorInterface(Protocol):
         force_final_tool: bool = False,
         targeted_tools: list[str] | None = None,
         structured_output: type[BaseModel] | None = None,
-        model: Literal["fast", "balanced", "max"] | None = None,
+        model: Literal["auto", "fast", "balanced", "max"] | None = None,
+        force_model: str | None = None,
         reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
         stream_response: bool = True,
         status_messages: bool = False,
         thread_id: str | None = None,
-        metadata: dict[str, Any] | None = None,
+        metadata: JsonObject | None = None,
         memory_config: MemoryConfig | None = None,
         system_tools_config: SystemToolsConfig | None = None,
         orchestration_config: SessionOrchestrationConfig | None = None,
@@ -81,12 +88,13 @@ class AgentOrchestratorInterface(Protocol):
         force_final_tool: bool = False,
         targeted_tools: list[str] | None = None,
         structured_output: type[BaseModel] | None = None,
-        model: Literal["fast", "balanced", "max"] | None = None,
+        model: Literal["auto", "fast", "balanced", "max"] | None = None,
+        force_model: str | None = None,
         reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
         stream_response: bool = True,
         thread_id: str | None = None,
         verbose: bool = False,
-        metadata: dict[str, Any] | None = None,
+        metadata: JsonObject | None = None,
         memory_config: MemoryConfig | None = None,
         system_tools_config: SystemToolsConfig | None = None,
         orchestration_config: SessionOrchestrationConfig | None = None,
@@ -122,13 +130,14 @@ class AgentOrchestratorInterface(Protocol):
         messages: Sequence[BaseMessage],
         force_final_tool: bool = False,
         targeted_tools: list[str] | None = None,
-        model: Literal["fast", "balanced", "max"] | None = None,
+        model: Literal["auto", "fast", "balanced", "max"] | None = None,
+        force_model: str | None = None,
         reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
         stream_response: bool = True,
         status_messages: bool = False,
         thread_id: str | None = None,
         verbose: bool = False,
-        metadata: dict[str, Any] | None = None,
+        metadata: JsonObject | None = None,
         memory_config: MemoryConfig | None = None,
         system_tools_config: SystemToolsConfig | None = None,
         orchestration_config: SessionOrchestrationConfig | None = None,
@@ -180,7 +189,7 @@ class AgentOrchestratorInterface(Protocol):
 
     # MARK: - Swarm Agent Tools
 
-    def _register_swarm_agent_tools(self, agent_tools: list) -> None:
+    def register_swarm_agent_tools(self, agent_tools: list[AgentTool]) -> None:
         """Register swarm agent invocation tools for SDK-side execution.
 
         Args:

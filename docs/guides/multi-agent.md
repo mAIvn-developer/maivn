@@ -1,151 +1,303 @@
-# Multi-Agent Guide
+# Multi-Agent Swarms
 
-Coordinate multiple specialized agents using Swarms for complex workflows.
+A swarm is a team of specialist agents that hand work to each other. You describe who does what, who depends on whom, and which member writes the final answer — the runtime handles the coordination.
 
-## Overview
+## What a Swarm Is
 
-Multi-agent systems are useful when:
-- Tasks require different areas of expertise
-- Work can be parallelized across specialized agents
-- Complex workflows need coordination
+Think of a swarm the way you would think of a small project team. One person kicks things off, others contribute their specialty, and one person is responsible for the finished deliverable. A `Swarm` models exactly that:
 
-The maivn SDK provides:
-- `Swarm` class for agent coordination
-- `swarm.member` for declarative swarm member registration
-- `@depends_on_agent` for agent-to-agent dependencies
-- `use_as_final_output` for designating the final agent
+- Each **member** is an `Agent` with a focused role (research, analysis, writing, review).
+- The **first agent** in the swarm is the **entry agent** — the one that receives the incoming request, like a team lead who reads the brief first.
+- Members **hand work to each other** through declared dependencies, so an analyst can wait for the researcher's output before starting.
+- One member (or one swarm-level tool) is designated to produce the **final output** the caller receives.
 
-## Creating a Swarm
+Why use a swarm instead of one big agent? Splitting work across specialists keeps each agent's instructions and tools narrow and easy to reason about, lets independent work run in parallel, and makes multi-step workflows explicit instead of buried in one long prompt.
 
-### Basic Swarm
+> **A swarm is an `Agent` sibling.** Both `Agent` and `Swarm` are scopes — they share tool registration, structured output, events, batching, and scheduling. If you already know how to drive an `Agent`, a `Swarm` will feel familiar.
+
+## Building a Swarm
+
+Create the member agents first, then group them. The first agent in the `agents` list is the entry agent.
 
 ```python
 from maivn import Agent, Swarm
 from maivn.messages import HumanMessage
 
-# Create specialized agents
 researcher = Agent(
     name='researcher',
-    description='Expert at finding information',
-    system_prompt='You research topics thoroughly.',
-    api_key='...',
+    description='Finds and gathers information on a topic',
+    system_prompt='You research topics thoroughly and cite what you find.',
+    api_key='your-api-key',
 )
 
 analyst = Agent(
     name='analyst',
-    description='Expert at analyzing data',
-    system_prompt='You analyze data and extract insights.',
-    api_key='...',
+    description='Turns research into insights',
+    system_prompt='You analyze findings and extract the key takeaways.',
+    api_key='your-api-key',
 )
 
 writer = Agent(
     name='writer',
-    description='Expert at writing content',
-    system_prompt='You write clear, engaging content.',
-    api_key='...',
-    use_as_final_output=True,
-    included_nested_synthesis='auto',
+    description='Writes the final article',
+    system_prompt='You write clear, well-structured content.',
+    api_key='your-api-key',
+    use_as_final_output=True,  # this member owns the final answer
 )
 
-# Create swarm
 swarm = Swarm(
     name='content_team',
-    description='Team for creating research-based content',
-    agents=[researcher, analyst, writer],
+    description='Researches a topic and writes an article about it',
+    agents=[researcher, analyst, writer],  # researcher is the entry agent
 )
 ```
 
-### Member Registration
+Every member needs credentials the same way a standalone `Agent` does — pass an `api_key` or a shared `client` to each agent.
 
-Use `swarm.member` when you want the swarm to register agents near their definitions and attach
-member-level dependency metadata.
+### Managing members after construction
+
+You can also build a swarm incrementally:
+
+```python
+swarm = Swarm(name='content_team', agents=[])
+
+swarm.add_agent(researcher)   # the first agent added becomes the entry agent
+swarm.add_agent(analyst)
+swarm.add_agent(writer)
+```
+
+Inspect or look up members at any time:
+
+```python
+for agent in swarm.list_agents():
+    print(f'{agent.name}: {agent.description}')
+
+# Look up a member by its deterministic id
+member = swarm.get_agent(writer.agent_id)
+```
+
+`get_agent` takes an `agent_id` (a stable identifier derived from the agent's class name and `name`) and returns the matching member, or `None` if it is not in the swarm. From inside a member's own code you can reach the parent swarm with `agent.get_swarm()`, which returns the swarm it belongs to or `None` if the agent is running standalone.
+
+## Member Registration with Dependencies
+
+Adding an agent to the list registers it as a member. To declare *how* members depend on each other, use the `swarm.member` decorator builder. It registers the agent and attaches dependency metadata to the generated agent-invocation tool — the same vocabulary you already use for tools, applied at the member level.
 
 ```python
 from maivn import Agent, Swarm, depends_on_tool
 
 swarm = Swarm(name='content_team')
 
+# A swarm-level tool every member can use
 @swarm.toolify(description='Load editorial context')
 def load_context() -> dict:
     return {'audience': 'technical leaders'}
 
+# Register a member whose invocation depends on a swarm tool's output
 @swarm.member
 @depends_on_tool(load_context, arg_name='context')
 def researcher() -> Agent:
-    return Agent(name='researcher', api_key='...')
+    return Agent(name='researcher', api_key='your-api-key')
 
+# Register a member that depends on another member's output
 writer = swarm.member.depends_on_agent(
     researcher,
     arg_name='research_notes',
-)(Agent(name='writer', api_key='...', use_as_final_output=True))
+)(Agent(name='writer', api_key='your-api-key', use_as_final_output=True))
 ```
 
-The decorated factory returns the registered `Agent`, so it can be passed to
-`swarm.member.depends_on_agent(...)` or normal `@depends_on_agent(...)` dependencies.
+The decorated factory returns the registered `Agent`, so the value you get back (`researcher` above) can be referenced by later members' dependencies.
 
-## Agent Dependencies
+The member builder is chainable and supports the full dependency vocabulary:
 
-Use `@depends_on_agent` to chain agent outputs:
+| Builder method                     | What it does                                                              |
+| ---------------------------------- | ------------------------------------------------------------------------- |
+| `swarm.member.depends_on_agent`    | Wait for another member and inject its output                             |
+| `swarm.member.depends_on_tool`     | Wait for a tool and inject its result before the member runs              |
+| `swarm.member.depends_on_await_for`| Enforce ordering without injecting any data                               |
+| `swarm.member.depends_on_reevaluate`| Insert a planning boundary before this member runs                       |
+| `swarm.member.depends_on_interrupt`| Collect user input before the member is invoked                           |
 
 ```python
-from maivn import depends_on_agent
+from maivn import Agent, Swarm
 
-# Researcher's tool
-@researcher.toolify(description='Research a topic')
-def research(topic: str) -> dict:
-    return {'findings': f'Research findings about {topic}'}
-
-# Analyst depends on researcher
-@analyst.toolify(description='Analyze research findings')
-@depends_on_agent(researcher, arg_name='research_data')
-def analyze(research_data: dict) -> dict:
-    return {'analysis': f'Analysis of {research_data}'}
-
-# Writer depends on analyst
-@writer.toolify(description='Write article from analysis')
-@depends_on_agent(analyst, arg_name='analysis_data')
-def write_article(analysis_data: dict) -> dict:
-    return {'article': f'Article based on {analysis_data}'}
+reviewer = swarm.member.depends_on_agent(
+    writer, arg_name='draft',
+).depends_on_await_for(
+    researcher, timing='after',
+)(Agent(name='reviewer', api_key='your-api-key'))
 ```
 
-### Execution Flow
+> **Private data on members.** Private-data dependencies are not attached directly to member agents. Put the secret access behind a swarm-level tool and have the member depend on that tool. See the cross-links below for the shared dependency vocabulary — it is intentionally not re-explained here.
 
-1. `researcher` is invoked first (no dependencies)
-2. `analyst` runs after receiving researcher's output
-3. `writer` runs last and produces the final output
+## Designated Final Output
 
-## Invoking a Swarm
+A swarm produces one final answer. You decide which member owns it.
 
-### Basic Invocation
+### One member owns the answer
+
+Set `use_as_final_output=True` on exactly one member. That agent's output becomes the user-facing response.
 
 ```python
-response = swarm.invoke(
-    HumanMessage(content='Write about AI trends in 2024'),
+writer = Agent(
+    name='writer',
+    api_key='your-api-key',
+    use_as_final_output=True,
 )
 ```
 
-### With Force Final Tool
+At most one member across the swarm may carry this flag. If two do, validation fails when you invoke the swarm.
+
+### A swarm-scope final tool
+
+Instead of designating an agent, you can define a single typed report at the swarm level with `final_tool=True`. The swarm coordinates its members and emits this structured object as the result:
+
+```python
+from pydantic import BaseModel
+
+@swarm.toolify(final_tool=True)
+class TeamReport(BaseModel):
+    """Combined output from the whole team."""
+    research_summary: str
+    analysis_insights: list[str]
+    final_article: str
+```
+
+### When you need both
+
+If more than one scope declares a `final_tool` (for example, several members each define one, or a member plus a swarm-scope tool), you must mark exactly one agent `use_as_final_output=True` so the swarm knows whose output is the final response. If only a single scope declares a `final_tool`, that scope automatically owns the answer and no flag is required.
+
+Validation runs when the swarm is invoked. Common errors:
+
+- Two agents both marked `use_as_final_output=True`.
+- Multiple scopes declare a `final_tool` but none is designated as the final-output agent.
+- The swarm has no agents at all.
+
+### Forcing structured output per member
+
+A member can be required to return a typed report every time it is deployed. Set `force_final_tool=True` on that `Agent` and register its report model with `final_tool=True`. This per-member flag is honored when the member runs inside a swarm.
+
+```python
+report_agent = Agent(
+    name='report_agent',
+    api_key='your-api-key',
+    force_final_tool=True,
+)
+
+@report_agent.toolify(final_tool=True)
+class MemberReport(BaseModel):
+    headline: str
+    bullets: list[str]
+```
+
+## Running a Swarm
+
+A swarm is invoked the same four ways an agent is: `invoke`, `stream`, `ainvoke`, and `astream`. They accept a single message or a sequence of messages.
+
+```python
+# Synchronous, returns a SessionResponse
+response = swarm.invoke(HumanMessage(content='Write about AI trends in 2026'))
+
+print(response.response)   # final assistant text
+print(response.result)     # structured / final-tool output, when present
+```
+
+To request a structured final result, pass `force_final_tool=True`. The swarm resolves it against the `use_as_final_output` member or the swarm-scope final tool:
 
 ```python
 response = swarm.invoke(
     HumanMessage(content='Write about AI trends'),
     force_final_tool=True,
 )
+report = response.result
 ```
 
-### With Thread ID
+Continue a conversation across calls with a `thread_id`:
 
 ```python
 response = swarm.invoke(
-    HumanMessage(content='Continue the article'),
+    HumanMessage(content='Now make it shorter'),
     thread_id='article-session-123',
 )
 ```
 
-### Supervised Multi-Pass Workflows
+### Keyword-only config
 
-For repair, validation, cleanup, and other workflows where the first pass may expose
-new work, configure the swarm with `SessionOrchestrationConfig`:
+> **Swarm config kwargs are keyword-only.** Unlike `Agent.invoke()`, every option after `messages` on `Swarm.invoke()` / `stream()` / `ainvoke()` / `astream()` must be passed by keyword. Call them as `swarm.invoke(messages, force_final_tool=True)`, never positionally.
+
+The keyword options include `model`, `reasoning`, `force_final_tool`, `stream_response`, `thread_id`, `verbose`, `metadata`, `memory_config`, `system_tools_config`, and `orchestration_config`. Scope-level defaults set on the `Swarm(...)` constructor are merged with any per-call overrides you pass to an invocation.
+
+### Streaming and async
+
+`stream()` yields raw server-sent events as the swarm executes. Pass `status_messages=True` to also receive normalized status-message events for a progress display.
+
+```python
+for event in swarm.stream(
+    HumanMessage(content='Run the multi-agent workflow'),
+    status_messages=True,
+):
+    handle(event)
+```
+
+The async variants mirror the synchronous ones:
+
+```python
+response = await swarm.ainvoke(HumanMessage(content='Plan the launch'))
+
+async for event in swarm.astream(HumanMessage(content='Run the workflow')):
+    handle(event)
+```
+
+For filtered, higher-level event reporting, wrap any invocation with `events()` (inherited from the shared scope):
+
+```python
+response = swarm.events(
+    include=['enrichment', 'agent', 'model'],
+    on_event=lambda payload: post_to_ui(payload),
+).invoke(HumanMessage(content='Run the multi-agent workflow'))
+```
+
+### How coordination works
+
+Conceptually, the runtime reads each member's declared dependencies and runs the team accordingly: members with no dependencies start first (and run in parallel when they are independent), and a member that depends on another waits for that member's output before it begins. The designated final-output member runs with the upstream results available and produces the answer the caller receives. You declare the data flow; the runtime sequences the work.
+
+```python
+from maivn import Agent, Swarm, depends_on_agent
+
+# data_collector and trend_analyzer are independent -> they can run in parallel
+# synthesizer depends on both -> it waits for them, then produces the final output
+data_collector = Agent(name='data_collector', api_key='your-api-key')
+trend_analyzer = Agent(name='trend_analyzer', api_key='your-api-key')
+synthesizer = Agent(name='synthesizer', api_key='your-api-key', use_as_final_output=True)
+
+@synthesizer.toolify()
+@depends_on_agent(data_collector, arg_name='data')
+@depends_on_agent(trend_analyzer, arg_name='trends')
+def synthesize(data: dict, trends: dict) -> dict:
+    return {'synthesis': 'Combined insights'}
+
+swarm = Swarm(
+    name='analysis_team',
+    agents=[data_collector, trend_analyzer, synthesizer],
+)
+```
+
+## Shared Tools and Config Across Members
+
+Tools registered on the swarm itself are available to every member. Use this for utilities the whole team needs, or to wrap private-data access behind a tool that members can depend on.
+
+```python
+swarm = Swarm(name='team', agents=[agent1, agent2])
+
+@swarm.toolify(description='Shared utility used by every member')
+def shared_utility(data: dict) -> dict:
+    return {'processed': True}
+```
+
+A `Swarm` also accepts the same typed configuration objects an `Agent` does, applied as defaults for every run and overridable per invocation:
+
+- `memory_config` — default memory behavior for the swarm.
+- `system_tools_config` — allowlists and approval controls for system tools.
+- `orchestration_config` — orchestration-loop controls.
 
 ```python
 from maivn import SessionOrchestrationConfig
@@ -163,212 +315,34 @@ repair_swarm = Swarm(
 )
 ```
 
-In supervised mode, `use_as_final_output=True` means "this member can produce the
-user-facing answer"; it does not necessarily mean "stop immediately." The orchestrator
-can inspect that output and schedule more work until the objective is satisfied or the
-cycle limit is reached.
-
-A supervised swarm can deploy the same agent multiple times. Treat each deployment as
-a distinct invocation keyed by its assignment/action ID, not by the agent name.
-
-## Final Output Patterns
-
-### Pattern 1: Final Output Agent
-
-Designate one agent to produce the final output:
-
-```python
-writer = Agent(
-    name='writer',
-    api_key='...',
-    use_as_final_output=True,  # Only ONE agent can have this
-)
-```
-
-### Pattern 2: Swarm-Level Final Tool
-
-Define a final tool at the swarm level:
-
-```python
-from pydantic import BaseModel, Field
-
-@swarm.toolify(final_tool=True)
-class TeamReport(BaseModel):
-    """Combined output from all agents."""
-    research_summary: str
-    analysis_insights: list[str]
-    final_article: str
-```
-
-**Note**: You cannot use both patterns in the same swarm.
-
-## Nested Synthesis Control
-
-For swarm member agents, `included_nested_synthesis` controls whether nested synthesis text is included or only raw tool results are passed:
-
-```python
-researcher = Agent(
-    name='researcher',
-    api_key='...',
-    included_nested_synthesis=False,  # Prefer raw tool results
-)
-
-analyst = Agent(
-    name='analyst',
-    api_key='...',
-    included_nested_synthesis='auto',  # Let swarm orchestrator/runtime decide
-)
-```
-
-- `True`: always include synthesized nested response
-- `False`: skip nested synthesis
-- `'auto'` (default): root swarm orchestration/runtime decides based on context and payload size
-
-## Parallel Agent Execution
-
-When agents don't depend on each other, they run in parallel:
-
-```python
-# These agents can run simultaneously
-data_collector = Agent(name='data_collector', api_key='...')
-trend_analyzer = Agent(name='trend_analyzer', api_key='...')
-
-# This agent depends on both
-synthesizer = Agent(
-    name='synthesizer',
-    api_key='...',
-    use_as_final_output=True,
-)
-
-@data_collector.toolify()
-def collect_data() -> dict:
-    return {'data': [...]}
-
-@trend_analyzer.toolify()
-def analyze_trends() -> dict:
-    return {'trends': [...]}
-
-@synthesizer.toolify()
-@depends_on_agent(data_collector, arg_name='data')
-@depends_on_agent(trend_analyzer, arg_name='trends')
-def synthesize(data: dict, trends: dict) -> dict:
-    return {'synthesis': 'Combined insights'}
-
-swarm = Swarm(
-    name='analysis_team',
-    agents=[data_collector, trend_analyzer, synthesizer],
-)
-
-# data_collector and trend_analyzer run in parallel
-# synthesizer waits for both to complete
-```
-
-## Swarm-Level Tools
-
-Tools registered on the swarm are available to all agents:
-
-```python
-swarm = Swarm(name='team', agents=[agent1, agent2])
-
-@swarm.toolify(description='Shared utility function')
-def shared_utility(data: dict) -> dict:
-    return {'processed': True}
-
-# Both agent1 and agent2 can use shared_utility
-```
-
-## Managing Agents
-
-### Adding Agents
-
-```python
-swarm = Swarm(name='team', agents=[])
-
-# Add agents after creation
-swarm.add_agent(researcher)
-swarm.add_agent(analyst)
-
-# Or register agents declaratively
-@swarm.member
-def writer() -> Agent:
-    return Agent(name='writer', api_key='...')
-```
-
-### Listing Agents
-
-```python
-for agent in swarm.list_agents():
-    print(f'{agent.name}: {agent.description}')
-```
-
-### Getting an Agent
-
-```python
-agent = swarm.get_agent(agent_id)
-```
-
-## Validation
-
-### Single Final Output
-
-When more than one agent (or the swarm itself) declares a `final_tool`, exactly one
-agent must be marked `use_as_final_output=True` to disambiguate which agent owns the
-swarm's final response. The check runs at swarm validation time:
-
-```python
-# Error: two agents marked use_as_final_output, validated when swarm.invoke runs
-agent1 = Agent(..., use_as_final_output=True)
-agent2 = Agent(..., use_as_final_output=True)
-
-swarm = Swarm(agents=[agent1, agent2])
-swarm.invoke(...)  # Error: Multiple swarm agents marked use_as_final_output=True
-```
-
-If only one agent declares a `final_tool`, no `use_as_final_output` flag is required —
-that agent automatically owns the final response.
-
-### Swarm Must Have Agents
-
-```python
-swarm = Swarm(name='empty', agents=[])
-swarm.invoke(...)  # Error: Swarm.invoke requires at least one Agent in the swarm.
-```
+In supervised mode, `use_as_final_output=True` means "this member *can* produce the user-facing answer" — not necessarily "stop immediately." The orchestrator can inspect that output and schedule more work until the objective is satisfied or the cycle limit is reached. A supervised swarm may deploy the same member more than once; treat each deployment as a distinct invocation keyed by its assignment id, not by the agent name. Use `final_output_mode='terminal'` for reporting-only swarms whose final-output member should end the run immediately.
 
 ## Complete Example
 
 ```python
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from maivn import Agent, Swarm, depends_on_agent
 from maivn.messages import HumanMessage
 
-# Research agent
 researcher = Agent(
     name='researcher',
     description='Researches topics and finds relevant information',
-    system_prompt='''You are a research specialist.
-    Use the research tool to gather information about topics.''',
+    system_prompt='You are a research specialist. Gather information and cite sources.',
     api_key='your-api-key',
 )
 
 @researcher.toolify(description='Research a topic thoroughly')
-def research_topic(topic: str, depth: str = 'comprehensive') -> dict:
+def research_topic(topic: str) -> dict:
     return {
         'topic': topic,
-        'depth': depth,
-        'findings': [
-            f'Finding 1 about {topic}',
-            f'Finding 2 about {topic}',
-            f'Finding 3 about {topic}',
-        ],
+        'findings': [f'Finding about {topic}'],
         'sources': ['source1.com', 'source2.com'],
     }
 
-# Writer agent
 writer = Agent(
     name='writer',
     description='Writes articles based on research',
-    system_prompt='''You are a content writer.
-    Use the write_article tool to create content from research.''',
+    system_prompt='You are a content writer. Turn research into an article.',
     api_key='your-api-key',
     use_as_final_output=True,
 )
@@ -382,15 +356,12 @@ def write_article(research: dict, style: str = 'professional') -> dict:
         'style': style,
     }
 
-# Create the swarm
 content_team = Swarm(
     name='content_team',
     description='A team that researches and writes articles',
-    system_prompt='Coordinate research and writing tasks.',
     agents=[researcher, writer],
 )
 
-# Invoke the swarm
 response = content_team.events().invoke(
     HumanMessage(content='Write an article about quantum computing'),
     force_final_tool=True,
@@ -401,56 +372,18 @@ print(response.result)
 
 ## Best Practices
 
-### 1. Clear Agent Responsibilities
-
-Each agent should have a clear, focused role:
-
-```python
-# Good: clear responsibilities
-researcher = Agent(name='researcher', description='Finds information', api_key='...')
-analyst = Agent(name='analyst', description='Analyzes data', api_key='...')
-writer = Agent(name='writer', description='Writes content', api_key='...')
-
-# Avoid: overlapping responsibilities
-agent1 = Agent(name='agent1', description='Does research and analysis', api_key='...')
-agent2 = Agent(name='agent2', description='Does analysis and writing', api_key='...')
-```
-
-### 2. Minimal Dependencies
-
-Keep dependency chains as short as practical:
-
-```python
-# Prefer this
-A -> B -> C (3 agents)
-
-# Over this
-A -> B -> C -> D -> E -> F (6 agents)
-```
-
-### 3. Descriptive System Prompts
-
-```python
-researcher = Agent(
-    name='researcher',
-    system_prompt='''You are a research specialist.
-    Your job is to find accurate, relevant information.
-    Always cite your sources.
-    Use the research_topic tool for all research tasks.''',
-    api_key='...',
-)
-```
-
-### 4. Use Event Tracing for Debugging
-
-```python
-response = swarm.events().invoke(
-    message,
-)
-```
+- **Give each member one clear job.** Overlapping responsibilities make coordination ambiguous; narrow roles keep prompts and tools focused.
+- **Keep dependency chains short.** Prefer a shallow graph (`A -> B -> C`) over a long pipeline; independent members run in parallel and finish sooner.
+- **Designate the final output explicitly** whenever more than one scope could produce it.
+- **Use event tracing while developing.** `swarm.events().invoke(...)` surfaces what each member is doing and makes coordination easy to follow.
 
 ## See Also
 
-- [Swarm API](../api/swarm.md) - Swarm class reference
-- [Agent API](../api/agent.md) - Agent class reference
-- [Dependencies Guide](dependencies.md) - `@depends_on_agent` details
+- [Tools](tools.md) — how to define and register the tools your members use.
+- [Dependencies](dependencies.md) — the shared dependency vocabulary (`depends_on_agent`, `depends_on_tool`, `depends_on_await_for`, `depends_on_reevaluate`, `depends_on_interrupt`) used by both tools and `swarm.member`.
+- [Structured Output](structured-output.md) — typed results via `final_tool` + `force_final_tool` and the `structured_output()` fast path.
+
+## Next steps
+
+- [Swarm API](../api/swarm.md) — the full `Swarm` class reference.
+- [Agent API](../api/agent.md) — the `Agent` class your members are built from.

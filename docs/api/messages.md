@@ -175,7 +175,7 @@ message = RedactedMessage(
 )
 ```
 
-When `name` is provided, the private_data key uses your custom name (e.g., `patient_name`) instead of auto-generated keys like `pii_person_1`. The `label`, `description`, and `format` fields are included in the `private_data_schema` the LLM sees, giving it richer context about each field.
+When `name` is provided, the private_data key uses your custom name (e.g., `patient_name`) instead of an auto-generated key. The `label`, `description`, and `format` fields are included in the `private_data_schema` the LLM sees, giving it richer context about each field.
 
 ### Using PrivateData with Scope private_data
 
@@ -197,7 +197,7 @@ This is equivalent to `private_data={'patient_name': 'Maria Santos', 'member_id'
 
 ## RedactedMessage
 
-Message type for handling sensitive data with automatic PII detection. When you use `RedactedMessage`, the server automatically detects and redacts PII before sending to the LLM.
+Message type for handling sensitive data with automatic PII detection. When you use `RedactedMessage`, the mAIvn service automatically detects and redacts PII before sending to the LLM.
 
 ```python
 RedactedMessage(
@@ -213,7 +213,7 @@ The optional `pii_whitelist` field carries a `PIIWhitelist` describing
 entity categories, literal values, or regex patterns whose detected spans
 should be left in cleartext (audited end-to-end). See
 [PIIWhitelist](#piiwhitelist) below or the
-[Private Data Guide](../guides/private-data.md#suppressing-redaction-with-piiwhitelist)
+[Private Data Guide](../guides/private-data.md#allow-listing-safe-values)
 for usage and HIPAA `phi_mode` semantics.
 
 ### Automatic PII Detection
@@ -221,39 +221,44 @@ for usage and HIPAA `phi_mode` semantics.
 When you send a `RedactedMessage` containing sensitive data, the runtime automatically:
 
 1. **Detects PII** in the message content
-2. **Stores original values** in `private_data` (server-side only)
+2. **Stores original values** in `private_data` (retained only within the mAIvn service, never sent to the model)
 3. **Replaces raw values with placeholders** before any LLM-visible context is built
-4. **Re-checks outbound payloads** before runtime handoff, blocking known-value leaks
+4. **Re-checks outbound context** before it reaches the model, as a safety net against known values slipping through
 
 Model-visible runtimes only see the redacted version with placeholders unless the user has explicitly authorized a supported system-tool flow.
 
 ### Detected PII Types
 
 The detection pipeline targets HIPAA Safe Harbor identifiers plus the
-common PCI / banking / governmental categories. Each pattern is paired
+common PCI / banking / governmental categories. Each category is paired
 with a structural validator so structurally-similar non-PII (order
-numbers, internal product codes) is not flagged.
+numbers, internal product codes) is less likely to be flagged. Detection
+is a best-effort safety net, not a guarantee of completeness.
 
-| Type | Examples | Validator |
+The table below lists the supported categories and the broad kind of
+validation each uses — a structured-format check, a label/context
+anchor, or NLP-based detection with per-entity confidence.
+
+| Type | Examples | Validation kind |
 | --- | --- | --- |
-| `email` | `user@example.com` | structural |
-| `phone` | `+1-555-123-4567`, `(555) 123-4567` | NANP / E.164 boundaries |
-| `ssn` | `123-45-6789`, `123 45 6789`, `123.45.6789` | reject reserved areas (`000`, `666`, `9xx`) |
-| `credit_card` | `4111-1111-1111-1111` | Luhn (mod-10) checksum |
-| `iban` | `DE89370400440532013000` | per-country length + ISO 13616 mod-97 |
-| `swift` | `DEUTDEFF`, `DEUTDEFF500` | ISO 3166 country code + length 8 / 11 |
+| `email` | `user@example.com` | structured-format check |
+| `phone` | `+1-555-123-4567`, `(555) 123-4567` | structured-format check |
+| `ssn` | `123-45-6789`, `123 45 6789`, `123.45.6789` | structured-format check |
+| `credit_card` | `4111-1111-1111-1111` | structured-format check |
+| `iban` | `DE89370400440532013000` | structured-format check |
+| `swift` | `DEUTDEFF`, `DEUTDEFF500` | structured-format check |
 | `account_id` | `account id: ABC123` | label-anchored |
 | `medical_record_number` | `MRN: AB-12345` | label-anchored |
-| `vehicle_id` | `1HGCM82633A004352` (VIN) | ISO 3779 alphabet, 17 chars |
+| `vehicle_id` | `1HGCM82633A004352` (VIN) | structured-format check |
 | `health_plan_id` | `Member ID: HP-994221` | label-anchored |
-| `person` | Names detected by NLP | per-entity confidence |
-| `location` | Addresses, cities | per-entity confidence |
-| `date` / `datetime` | `2025-04-29` | per-entity confidence |
-| `ip_address` | `192.168.1.1` | per-entity confidence |
-| `url` | `https://...` | per-entity confidence |
-| `license_id` | Driver / professional license | Presidio |
-| `passport_id` | US passport numbers | Presidio |
-| `bank_account` | US bank account / routing numbers | Presidio |
+| `person` | Names detected by NLP | NLP, per-entity confidence |
+| `location` | Addresses, cities | NLP, per-entity confidence |
+| `date` / `datetime` | `2025-04-29` | NLP, per-entity confidence |
+| `ip_address` | `192.168.1.1` | NLP, per-entity confidence |
+| `url` | `https://...` | NLP, per-entity confidence |
+| `license_id` | Driver / professional license | NLP, per-entity confidence |
+| `passport_id` | US passport numbers | NLP, per-entity confidence |
+| `bank_account` | US bank account / routing numbers | NLP, per-entity confidence |
 
 ### Example
 
@@ -325,9 +330,9 @@ When you use `events().invoke(...)` or `events().stream(...)`, the SDK can also 
 
 Redacted values are automatically added to the session's `private_data`:
 
-- **Auto-detected PII**: Key format `pii_{type}_{counter}` (e.g., `pii_email_1`, `pii_phone_2`)
-- **PrivateData with name**: Uses the custom name as the key (e.g., `patient_name`, `member_id`)
-- Values are stored server-side only
+- **Auto-detected PII**: Stored under a stable, auto-generated key. Declare the value in `known_pii_values` with a `name` when you need a predictable key to reference.
+- **PrivateData with name**: Uses your custom name verbatim as the key (e.g., `patient_name`, `member_id`)
+- Values are retained only within the mAIvn service, never sent to the model
 - Same value appearing multiple times uses the same key
 - Values can be injected into tools using `@depends_on_private_data`
 
@@ -337,7 +342,8 @@ Redacted values are automatically added to the session's `private_data`:
 from maivn import depends_on_private_data
 
 @agent.toolify(description='Send email to user')
-@depends_on_private_data(data_key='pii_email_1', arg_name='email')
+# 'customer_email' is the key you chose via PrivateData(value=..., name='customer_email').
+@depends_on_private_data(data_key='customer_email', arg_name='email')
 def send_email(message: str, email: str) -> dict:
     # 'email' contains the original value 'john@example.com'
     return {'sent': True, 'to': email}
@@ -374,8 +380,8 @@ PIIWhitelistEntry(
 - `phi_mode=True` refuses entity_type whitelist entries for any HIPAA
   Safe Harbor identifier category (raises `ValueError` at construction).
   Use `value` / `pattern` entries for individual approved instances.
-- `justification` is required (≥8 chars) and recorded in every
-  `WHITELIST_SUPPRESSED` audit emission (SOC-2 / ISO 27001 evidence).
+- `justification` is required (≥8 chars) and recorded alongside the
+  suppression so there is an auditable record of why a span was approved.
 - Both `PIIWhitelist` and `PIIWhitelistEntry` are frozen Pydantic
   models — immutable post-construction.
 
@@ -412,7 +418,7 @@ message = RedactedMessage(
 )
 ```
 
-See [Private Data Guide § Suppressing Redaction with PIIWhitelist](../guides/private-data.md#suppressing-redaction-with-piiwhitelist)
+See [Private Data Guide § Allow-Listing Safe Values](../guides/private-data.md#allow-listing-safe-values)
 for full usage and compliance posture.
 
 ## BaseMessage
