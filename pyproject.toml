@@ -53,7 +53,7 @@ fastapi = ["fastapi>=0.136.1", "sse-starlette>=2.1.3"]
 
 [project.urls]
 Homepage = "https://maivn.io"
-Documentation = "https://github.com/mAIvn-developer/maivn/tree/master/docs"
+Documentation = "https://developer.maivn.io/docs"
 Repository = "https://github.com/mAIvn-developer/maivn"
 Issues = "https://github.com/mAIvn-developer/maivn/issues"
 Changelog = "https://github.com/mAIvn-developer/maivn/blob/master/CHANGELOG.md"
