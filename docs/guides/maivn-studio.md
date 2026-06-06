@@ -23,6 +23,18 @@ invoke its entry point directly if you prefer:
 maivn-studio
 ```
 
+> **Using uv?** With a uv-managed project the `maivn` command lives in the
+> project's `.venv`, which uv does not put on your `PATH` automatically. Either
+> run it through uv:
+>
+> ```bash
+> uv run maivn studio
+> ```
+>
+> or activate the virtual environment first (`.venv\Scripts\activate` on
+> Windows, `source .venv/bin/activate` on macOS/Linux) and then `maivn studio`
+> works directly. This is expected uv behavior, not a Studio bug.
+
 Optional CLI overrides:
 
 - `--config` / `-c`: explicit `maivn_studio.json` path

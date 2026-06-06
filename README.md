@@ -65,7 +65,11 @@ To install the public Studio companion and enable `maivn studio` from a normal s
 
 ```bash
 pip install maivn maivn-studio
+maivn studio
 ```
+
+With a uv-managed project the command lives in the project `.venv`, which uv does
+not auto-activate — use `uv run maivn studio` (or activate the venv first).
 
 `maivn-studio` pins a compatible `maivn` version, so installing them together always resolves a matching pair.
 
