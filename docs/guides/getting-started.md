@@ -29,6 +29,18 @@ To install the public Studio companion and enable `maivn studio` from a normal s
 
 ```bash
 pip install maivn maivn-studio
+maivn studio
+```
+
+> **Using uv?** A `uv add`/`uv pip install` puts the `maivn` command inside the
+> project's `.venv`, which uv does not auto-activate. Launch Studio with
+> `uv run maivn studio`, or activate the environment first
+> (`.venv\Scripts\activate` on Windows, `source .venv/bin/activate` elsewhere)
+> and then run `maivn studio` directly.
+
+```bash
+uv add maivn maivn-studio
+uv run maivn studio
 ```
 
 ## Step 1: Set Up Your API Key
