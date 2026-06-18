@@ -148,7 +148,7 @@ def test_schema_builder_creates_model_schema_with_dependencies() -> None:
 
     list_schema = _prop(schema, "children")
     assert list_schema["type"] == "array"
-    assert _obj(list_schema["items"])["type"] == "tool_dependency"
+    assert _obj(list_schema["items"])["$ref"] == "#/$defs/Child"
 
     child_specs_schema = _prop(schema, "child_specs")
     assert child_specs_schema["type"] == "tool_dependency"

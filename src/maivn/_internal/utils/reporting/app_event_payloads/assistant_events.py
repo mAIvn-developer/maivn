@@ -93,6 +93,38 @@ def build_status_message_payload(*, assistant_id: str, message: str) -> JsonObje
     )
 
 
+def build_status_message_chunk_payload(
+    *,
+    assistant_id: str,
+    status_id: str,
+    text: str,
+    final: bool = False,
+) -> JsonObject:
+    """Build the payload for an incremental status-message chunk."""
+    assistant: JsonObject = {"id": assistant_id}
+    status_payload: JsonObject = {
+        "id": status_id,
+        "delta": text,
+        "final": final,
+    }
+    payload: JsonObject = {
+        "assistant_id": assistant_id,
+        "status_id": status_id,
+        "text": text,
+        "assistant": assistant,
+        "status": status_payload,
+    }
+    if final:
+        payload["final"] = True
+    return attach_common_fields(
+        payload,
+        event_name="status_message_chunk",
+        event_kind="status",
+        scope=None,
+        participant=None,
+    )
+
+
 # MARK: Interrupt and Assignment Payloads
 
 

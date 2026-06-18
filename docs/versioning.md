@@ -124,7 +124,7 @@ The boundary is simple and mechanical: **the public surface is what you can impo
 **Stable — import and rely on these:**
 
 - The core classes: `Agent`, `Swarm`, `Client`, `ClientBuilder`, `BaseScope`, `MCPServer`, `MCPAutoSetup`, `ToolOverride`.
-- The decorators: `toolify`, `toolset`, `depends_on_tool`, `depends_on_agent`, `depends_on_private_data`, `depends_on_interrupt`, `depends_on_await_for`, `depends_on_reevaluate`, `compose_artifact_policy`.
+- The decorators: `tool_output`, `toolify`, `toolset`, `depends_on_tool`, `depends_on_agent`, `depends_on_private_data`, `depends_on_interrupt`, `depends_on_await_for`, `depends_on_reevaluate`, `compose_artifact_policy`.
 - The public models from `maivn_shared` re-exported through `maivn`: `PrivateData`, `RedactedMessage`, the `*Config` models, permission and provider models, and so on. Result shapes like `SessionResponse` and `TokenUsage` are documented in [Shared Data Models](api/data-models.md).
 - The events surface: `AppEvent`, `RawSSEEvent`, `EventBridge`, `normalize_stream`, the `build_*_payload` helpers, and `APP_EVENT_CONTRACT_VERSION`.
 - Configuration, logging, scheduling, and interrupt helpers exported at the top level.

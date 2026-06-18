@@ -7,7 +7,7 @@ from collections.abc import Callable
 from typing import Final
 
 from maivn_shared import BaseDependency, ToolType
-from pydantic import Field
+from pydantic import Field, JsonValue, SkipValidation
 
 from ..mixins import (
     ConfigurableMixin,
@@ -53,6 +53,10 @@ class BaseTool(
     final_tool: bool = Field(
         default=False,
         description="Flag indicating the tool's output is final",
+    )
+    output_schema: SkipValidation[dict[str, JsonValue] | None] = Field(
+        default=None,
+        description="Optional JSON schema describing the tool result",
     )
     metadata: dict[str, object] = Field(
         default_factory=dict,

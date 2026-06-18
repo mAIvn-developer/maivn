@@ -24,6 +24,10 @@ def _identity(value: int) -> int:
     return value
 
 
+def _payload_result(value: int) -> _Payload:
+    return _Payload(value=value)
+
+
 def test_tool_spec_factory_creates_function_tool_specs_and_applies_flags() -> None:
     factory = ToolSpecFactory()
     dependency = DataDependency(arg_name="payload", data_key="payload")
@@ -91,6 +95,38 @@ def test_tool_spec_factory_creates_model_tool_specs() -> None:
     assert spec.name == "payload"
     args_schema = cast(dict[str, dict[str, object]], spec.args_schema)
     assert "value" in args_schema["properties"]
+    output_schema = cast(dict[str, object], spec.output_schema)
+    properties = cast(dict[str, object], output_schema["properties"])
+    assert "value" in properties
+
+
+def test_tool_spec_factory_rejects_output_schema_override_on_model_tool() -> None:
+    factory = ToolSpecFactory()
+    tool = ModelTool(
+        name="payload",
+        description="Payload model",
+        model=_Payload,
+        output_schema={"type": "object", "properties": {"other": {"type": "string"}}},
+    )
+
+    with pytest.raises(ValueError, match="output_schema.*model tools"):
+        _ = factory.create(agent_id="agent-1", tool=tool)
+
+
+def test_tool_spec_factory_carries_function_return_schema_as_output_schema() -> None:
+    factory = ToolSpecFactory()
+    tool = FunctionTool(
+        name="payload_result",
+        description="Payload result tool",
+        tool_id="payload-result",
+        func=_payload_result,
+    )
+
+    spec = factory.create(agent_id="agent-1", tool=tool)
+
+    output_schema = cast(dict[str, object], spec.output_schema)
+    properties = cast(dict[str, object], output_schema["properties"])
+    assert "value" in properties
 
 
 def test_nested_pydantic_models_do_not_inherit_always_execute_or_final_tool() -> None:
@@ -132,6 +168,7 @@ def test_nested_pydantic_models_do_not_inherit_always_execute_or_final_tool() ->
     assert "outer_report" in by_name, "Outer model must be registered"
     assert by_name["outer_report"].always_execute is True
     assert by_name["outer_report"].final_tool is True
+    assert by_name["outer_report"].schema_only is False
 
     # Inner nested model should be present (for schema $defs purposes) but
     # MUST NOT carry the parent's always_execute/final_tool flags.
@@ -145,6 +182,11 @@ def test_nested_pydantic_models_do_not_inherit_always_execute_or_final_tool() ->
         )
         assert nested.final_tool is False, (
             f"Nested model {nested.name!r} inherited final_tool=True from parent."
+        )
+        assert nested.schema_only is True, (
+            f"Nested model {nested.name!r} was not marked schema_only. Nested "
+            f"model specs are schema definitions, not independently schedulable "
+            f"tools."
         )
 
 
@@ -175,6 +217,7 @@ def test_tool_spec_factory_creates_mcp_tool_spec_with_metadata() -> None:
         "output_schema": {"type": "object"},
         "annotations": {"scope": "read"},
     }
+    assert spec.output_schema == {"type": "object"}
 
 
 def test_tool_spec_factory_rejects_unsupported_tool_types() -> None:

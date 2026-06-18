@@ -13,6 +13,7 @@ from maivn import (
     depends_on_interrupt,
     depends_on_await_for,
     depends_on_reevaluate,
+    tool_output,
     # Toolset class pattern
     toolify,
     toolset,
@@ -26,6 +27,57 @@ from maivn import (
     ProviderMetadata,
 )
 ```
+
+## tool_output
+
+Declare the output schema for a function or method tool when the Python return type is
+too generic to describe the public result contract.
+
+```python
+def tool_output(
+    schema: type[BaseModel] | dict[str, object],
+) -> Callable
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `schema` | `type[BaseModel] \| dict[str, object]` | Pydantic model class or JSON Schema object describing the tool result |
+
+### Example
+
+```python
+from pydantic import BaseModel
+
+from maivn import Agent, tool_output
+
+
+class SearchMessagesResult(BaseModel):
+    message_ids: list[str]
+    next_page_token: str | None = None
+
+
+agent = Agent(name='mail', api_key='...')
+
+
+@tool_output(SearchMessagesResult)
+def search_messages(query: str) -> dict[str, object]:
+    """Search recent messages."""
+    return {'message_ids': ['m-1'], 'next_page_token': None}
+
+
+agent.add_tool(search_messages)
+```
+
+`@tool_output(...)` is not a registration marker. It works with direct
+`agent.add_tool(fn)` registration, and with toolset methods that are already
+discovered through `@toolify` or `@toolset(require_marker=False)`. It does not expose
+an otherwise unmarked toolset method.
+
+`ToolOverride(output_schema=...)` can replace a decorator-declared schema at
+registration time. Model tools reject output-schema overrides because their contract is
+the Pydantic model class.
 
 ## depends_on_tool
 
@@ -668,10 +720,18 @@ If filters drop every method and the toolset has `require_marker=True` (the defa
 
 `overrides` uses the same `ToolOverride` type accepted by `agent.add_tool(...)`
 and `MCPServer(tool_overrides=...)`. Use it to retarget a generic toolset for
-one app without changing the provider class:
+one app without changing the provider class. `ToolOverride(output_schema=...)`
+replaces the method tool's output contract and wins over `@tool_output(...)`:
 
 ```python
+from pydantic import BaseModel
+
 from maivn import ToolOverride
+
+
+class CustomerSearchResult(BaseModel):
+    customer_ids: list[str]
+
 
 agent.add_toolset(
     instance,
@@ -680,6 +740,7 @@ agent.add_toolset(
             description='Search only the current customer account.',
             default_args={'limit': 10},
             tags=['customer-support'],
+            output_schema=CustomerSearchResult,
         ),
     },
 )

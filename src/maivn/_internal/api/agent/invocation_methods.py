@@ -360,7 +360,11 @@ class AgentInvocationMethodsMixin:
         }
 
         if not scope_hooks_enabled(invocation_state):
-            return orchestrator.invoke(invocation_state.prepared_messages, **orchestrator_kwargs)
+            response = orchestrator.invoke(
+                invocation_state.prepared_messages,
+                **orchestrator_kwargs,
+            )
+            return self._coerce_typed_result(response, structured_output, force_final_tool)
 
         reporter = self._resolve_hook_reporter(orchestrator)
         payload = build_scope_hook_payload(self, invocation_state)
@@ -392,7 +396,48 @@ class AgentInvocationMethodsMixin:
             stage="after",
             reporter=reporter,
         )
-        return result
+        return self._coerce_typed_result(result, structured_output, force_final_tool)
+
+    def _final_tool_model(self) -> type[PydanticBaseModel] | None:
+        scope = cast(_AgentInvocationScope, cast(object, self))
+        try:
+            for tool in scope.list_tools():
+                if not getattr(tool, "final_tool", False):
+                    continue
+                model = getattr(tool, "model", None)
+                if isinstance(model, type) and issubclass(model, PydanticBaseModel):
+                    return model
+        except Exception:  # noqa: BLE001 - final-tool introspection is best-effort.
+            return None
+        return None
+
+    def _coerce_typed_result(
+        self,
+        response: SessionResponse,
+        structured_output: type[PydanticBaseModel] | None,
+        force_final_tool: bool,
+    ) -> SessionResponse:
+        if structured_output is not None:
+            target: type[PydanticBaseModel] | None = structured_output
+            strict = True
+        elif force_final_tool:
+            target = self._final_tool_model()
+            strict = False
+        else:
+            target = None
+            strict = False
+
+        if target is None or not isinstance(response.result, dict):
+            return response
+
+        raw_result = cast(dict[str, object], response.result)
+        try:
+            response.result = target.model_validate(raw_result)
+        except Exception as exc:
+            if strict:
+                _add_structured_output_validation_note(exc, target, raw_result)
+                raise
+        return response
 
     def stream(
         self,
@@ -688,6 +733,73 @@ class AgentInvocationMethodsMixin:
                 getattr(self, "_system_message"),  # noqa: B009 - Pydantic PrivateAttr.
             ),
         )
+
+
+def _add_structured_output_validation_note(
+    exc: Exception,
+    target: type[PydanticBaseModel],
+    raw_result: dict[str, object],
+) -> None:
+    """Attach a developer-facing hint while preserving the original exception type."""
+    exc.add_note(_structured_output_validation_note(target, raw_result))
+
+
+def _structured_output_validation_note(
+    target: type[PydanticBaseModel],
+    raw_result: dict[str, object],
+) -> str:
+    expected_fields = list(target.model_fields.keys())
+    received_fields = list(raw_result.keys())
+    parts = [
+        f"Structured output validation failed for {target.__name__}.",
+        "Expected top-level fields: "
+        + f"{_format_field_names(expected_fields)}; received: "
+        + f"{_format_field_names(received_fields)}.",
+    ]
+    nested_hints = _nested_structured_output_hints(set(expected_fields), raw_result)
+    parts.extend(nested_hints)
+    parts.append(
+        "Return the requested structured-output model fields at the top-level "
+        + "SessionResponse.result value."
+    )
+    return " ".join(parts)
+
+
+def _nested_structured_output_hints(
+    expected_fields: set[str],
+    raw_result: dict[str, object],
+) -> list[str]:
+    hints: list[str] = []
+    for key, value in raw_result.items():
+        if not isinstance(value, dict):
+            continue
+        nested_payload = cast(dict[object, object], value)
+        nested_keys = {str(nested_key) for nested_key in nested_payload}
+        overlap = sorted(expected_fields.intersection(nested_keys))
+        if not overlap:
+            continue
+        overlap_text = _format_field_names(overlap)
+        if key in expected_fields:
+            hints.append(
+                f"Field {key!r} contains nested structured-output fields "
+                + f"({overlap_text}); flatten that object or return the scalar "
+                + f"expected by {key!r}."
+            )
+        elif expected_fields.issubset(nested_keys):
+            hints.append(
+                f"Nested key {key!r} contains all expected fields ({overlap_text}); "
+                + "return those fields at the top-level result instead of wrapping them."
+            )
+        else:
+            hints.append(
+                f"Nested key {key!r} overlaps expected fields ({overlap_text}); "
+                + "check whether a nested agent or tool result was returned without extraction."
+            )
+    return hints
+
+
+def _format_field_names(fields: Sequence[str]) -> str:
+    return ", ".join(fields) if fields else "(none)"
 
 
 __all__ = ["AgentInvocationMethodsMixin"]

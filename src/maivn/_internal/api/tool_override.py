@@ -27,6 +27,12 @@ from typing import TypeAlias
 
 from maivn_shared import BaseDependency
 
+from maivn._internal.core.output_schema import (
+    JsonObject,
+    OutputSchemaInput,
+    normalize_output_schema,
+)
+
 # MARK: Types
 
 ToolHook: TypeAlias = Callable[..., object]
@@ -73,6 +79,11 @@ class ToolOverride:
             dependency list. Accepts the existing decorator helpers'
             output (e.g. ``depends_on_tool(...)``,
             ``depends_on_private_data(...)``).
+        output_schema: Replace the tool's output contract when supported.
+            Function and method tools use this as an explicit result
+            schema; MCP tools use it to correct the server-advertised
+            output schema. Model tools reject this because their schema is
+            derived from the Pydantic model class.
         before_execute: Replace the tool's pre-execution hook.
         after_execute: Replace the tool's post-execution hook.
     """
@@ -85,6 +96,7 @@ class ToolOverride:
     final_tool: bool | None = None
     default_args: ToolMapping | None = None
     dependencies: Sequence[BaseDependency] | None = None
+    output_schema: OutputSchemaInput | None = None
     before_execute: ToolHook | None = None
     after_execute: ToolHook | None = None
 
@@ -99,6 +111,7 @@ class ToolOverride:
             and self.final_tool is None
             and not self.default_args
             and not self.dependencies
+            and self.output_schema is None
             and self.before_execute is None
             and self.after_execute is None
         )
@@ -116,6 +129,7 @@ class _AppliedOverride:
     final_tool: bool
     default_args: dict[str, object]
     dependencies: list[BaseDependency] = field(default_factory=list)
+    output_schema: JsonObject | None = None
     before_execute: ToolHook | None = None
     after_execute: ToolHook | None = None
 
@@ -134,6 +148,7 @@ def apply_override(
     base_final_tool: bool,
     base_default_args: ToolMapping | None = None,
     base_dependencies: Sequence[BaseDependency] | None = None,
+    base_output_schema: OutputSchemaInput | None = None,
     base_before_execute: ToolHook | None = None,
     base_after_execute: ToolHook | None = None,
 ) -> _AppliedOverride:
@@ -149,6 +164,11 @@ def apply_override(
     merged_metadata: dict[str, object] = dict(base_metadata or {})
     merged_default_args: dict[str, object] = dict(base_default_args or {})
     merged_dependencies: list[BaseDependency] = list(base_dependencies or [])
+    output_schema = (
+        normalize_output_schema(base_output_schema, context="base output_schema")
+        if base_output_schema is not None
+        else None
+    )
 
     name = base_name
     description = base_description
@@ -178,6 +198,11 @@ def apply_override(
             for dep in override.dependencies:
                 if dep not in merged_dependencies:
                     merged_dependencies.append(dep)
+        if override.output_schema is not None:
+            output_schema = normalize_output_schema(
+                override.output_schema,
+                context="ToolOverride.output_schema",
+            )
         if override.before_execute is not None:
             before_execute = override.before_execute
         if override.after_execute is not None:
@@ -192,6 +217,7 @@ def apply_override(
         final_tool=final_tool,
         default_args=merged_default_args,
         dependencies=merged_dependencies,
+        output_schema=output_schema,
         before_execute=before_execute,
         after_execute=after_execute,
     )

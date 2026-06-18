@@ -268,7 +268,15 @@ Keys are the raw MCP tool names reported by the server, before maivn applies
 typos do not silently create dead configuration.
 
 ```python
+from pydantic import BaseModel
+
 from maivn import MCPServer, ToolOverride
+
+
+class InboxSearchResult(BaseModel):
+    message_ids: list[str]
+    next_page_token: str | None = None
+
 
 mcp_server = MCPServer(
     name='gmail',
@@ -282,6 +290,7 @@ mcp_server = MCPServer(
             tags=['email', 'read'],
             metadata={'audit_zone': 'mail'},
             default_args={'max_results': 10},
+            output_schema=InboxSearchResult,
             always_execute=False,
         ),
     },
@@ -289,9 +298,12 @@ mcp_server = MCPServer(
 ```
 
 `ToolOverride` supports `name`, `description`, `tags`, `metadata`,
-`default_args`, `dependencies`, `always_execute`, `final_tool`,
+`default_args`, `dependencies`, `output_schema`, `always_execute`, `final_tool`,
 `before_execute`, and `after_execute`. Scalar fields replace the MCP-provided
-value; tags/dependencies append; metadata/default args merge.
+value; tags/dependencies append; metadata/default args merge. `output_schema`
+replaces the MCP server's advertised `outputSchema`, which is useful when the
+server omits a result schema or exposes a looser schema than this app can rely on.
+Pass either a Pydantic model class or a JSON Schema object.
 
 ## Rate Limiting
 

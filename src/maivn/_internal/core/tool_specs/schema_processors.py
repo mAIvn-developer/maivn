@@ -44,22 +44,31 @@ class SchemaTypeProcessor:
 
     # MARK: - Dispatch
 
-    def process_schema_by_type(self, prop_schema: JsonObject) -> JsonObject:
+    def process_schema_by_type(
+        self,
+        prop_schema: JsonObject,
+        *,
+        inline_model_refs: bool = False,
+    ) -> JsonObject:
         """Process schema based on its type."""
         if "$ref" in prop_schema:
-            return self._process_ref(prop_schema)
+            return prop_schema if inline_model_refs else self._process_ref(prop_schema)
 
         for union_key in ("anyOf", "oneOf"):
             if union_key in prop_schema and isinstance(prop_schema[union_key], list):
-                return self._process_union(prop_schema, union_key)
+                return self._process_union(
+                    prop_schema,
+                    union_key,
+                    inline_model_refs=inline_model_refs,
+                )
 
         schema_type = prop_schema.get("type")
 
         if schema_type == "array":
-            return self._process_array(prop_schema)
+            return self._process_array(prop_schema, inline_model_refs=inline_model_refs)
 
         if schema_type == "object" and "additionalProperties" in prop_schema:
-            return self._process_object(prop_schema)
+            return self._process_object(prop_schema, inline_model_refs=inline_model_refs)
 
         return prop_schema
 
@@ -82,10 +91,10 @@ class SchemaTypeProcessor:
 
     # MARK: - Array Processing
 
-    def _process_array(self, prop_schema: JsonObject) -> JsonObject:
+    def _process_array(self, prop_schema: JsonObject, *, inline_model_refs: bool) -> JsonObject:
         """Process an array property that may contain model items."""
         if "prefixItems" in prop_schema:
-            return self._process_tuple(prop_schema)
+            return self._process_tuple(prop_schema, inline_model_refs=inline_model_refs)
 
         if "items" not in prop_schema:
             return prop_schema
@@ -95,10 +104,13 @@ class SchemaTypeProcessor:
             return prop_schema
 
         result = prop_schema.copy()
-        result["items"] = self.process_schema_by_type(cast(JsonObject, items_schema))
+        result["items"] = self.process_schema_by_type(
+            cast(JsonObject, items_schema),
+            inline_model_refs=True,
+        )
         return result
 
-    def _process_tuple(self, prop_schema: JsonObject) -> JsonObject:
+    def _process_tuple(self, prop_schema: JsonObject, *, inline_model_refs: bool) -> JsonObject:
         """Process a tuple property with prefixItems."""
         prefix_items = cast(list[JsonValue], prop_schema.get("prefixItems", []))
         processed_items: list[JsonValue] = []
@@ -107,7 +119,12 @@ class SchemaTypeProcessor:
             if not isinstance(item_schema, dict):
                 processed_items.append(item_schema)
                 continue
-            processed_items.append(self.process_schema_by_type(cast(JsonObject, item_schema)))
+            processed_items.append(
+                self.process_schema_by_type(
+                    cast(JsonObject, item_schema),
+                    inline_model_refs=True,
+                )
+            )
 
         result = prop_schema.copy()
         result["prefixItems"] = processed_items
@@ -115,7 +132,7 @@ class SchemaTypeProcessor:
 
     # MARK: - Object Processing
 
-    def _process_object(self, prop_schema: JsonObject) -> JsonObject:
+    def _process_object(self, prop_schema: JsonObject, *, inline_model_refs: bool) -> JsonObject:
         """Process an object property with additionalProperties."""
         additional_schema = prop_schema["additionalProperties"]
 
@@ -124,18 +141,28 @@ class SchemaTypeProcessor:
 
         result = prop_schema.copy()
         result["additionalProperties"] = self.process_schema_by_type(
-            cast(JsonObject, additional_schema)
+            cast(JsonObject, additional_schema),
+            inline_model_refs=True,
         )
         return result
 
     # MARK: - Union Processing
 
-    def _process_union(self, prop_schema: JsonObject, union_key: str) -> JsonObject:
+    def _process_union(
+        self,
+        prop_schema: JsonObject,
+        union_key: str,
+        *,
+        inline_model_refs: bool,
+    ) -> JsonObject:
         """Process anyOf/oneOf variants recursively, preserving non-model branches."""
         result = prop_schema.copy()
         variants = cast(list[JsonValue], prop_schema.get(union_key, []))
         result[union_key] = [
-            self.process_schema_by_type(cast(JsonObject, variant))
+            self.process_schema_by_type(
+                cast(JsonObject, variant),
+                inline_model_refs=True,
+            )
             if isinstance(variant, dict)
             else variant
             for variant in variants

@@ -89,6 +89,35 @@ response = agent.structured_output(MyModel).invoke(
 - **No Swarm support**: Cannot use `.structured_output()` with Swarms
 - **No orchestration**: Complex multi-step planning is skipped
 
+### Troubleshooting Validation Errors
+
+Structured output returns a `SessionResponse`, with the typed object on
+`response.result`. If the returned payload does not match your Pydantic model,
+the SDK raises Pydantic's `ValidationError`.
+
+When the payload looks like a nested or wrapped structured result, the SDK adds
+a note to the exception. The note lists the model's expected top-level fields,
+the fields actually received, and any nested key that appears to contain the
+model fields. In normal Python tracebacks this note is printed after the
+validation error.
+
+If you catch the error yourself, inspect `exc.__notes__`:
+
+```python
+from pydantic import ValidationError
+
+try:
+    response = agent.structured_output(SentimentAnalysis).invoke(messages)
+except ValidationError as exc:
+    for note in getattr(exc, "__notes__", []):
+        print(note)
+    raise
+```
+
+The most common fix is to return the model fields directly at
+`response.result`, not wrapped under an extra key such as `payload`, `output`, or
+an agent/tool name.
+
 ---
 
 ## Approach 2: `final_tool` Pattern (Full Orchestration)

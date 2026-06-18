@@ -51,6 +51,7 @@ _REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "system_tool_complete": ("tool_id", "result"),
     "assistant_chunk": ("assistant_id", "text"),
     "status_message": ("assistant_id", "message"),
+    "status_message_chunk": ("assistant_id", "status_id", "text"),
     "interrupt_required": ("interrupt_id", "data_key", "prompt"),
     "agent_assignment": ("agent_name", "status"),
     "enrichment": ("phase", "message"),

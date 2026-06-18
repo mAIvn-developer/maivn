@@ -94,6 +94,9 @@ class McpRegistry:
             base_always_execute=False,
             base_final_tool=False,
             base_default_args=default_args,
+            base_output_schema=(
+                _json_object(tool_def.output_schema) if tool_def.output_schema is not None else None
+            ),
         )
 
         tool = McpTool(
@@ -104,9 +107,7 @@ class McpRegistry:
             mcp_tool_name=tool_def.name,
             args_schema=_json_object(tool_def.input_schema or {}),
             default_args=_json_object(applied.default_args) if applied.default_args else None,
-            output_schema=(
-                _json_object(tool_def.output_schema) if tool_def.output_schema is not None else None
-            ),
+            output_schema=applied.output_schema,
             annotations=(
                 _json_object(tool_def.annotations) if tool_def.annotations is not None else None
             ),

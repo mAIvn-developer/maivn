@@ -90,7 +90,13 @@ agent.add_tool(
 reframe a generic tool for one app without editing the provider code.
 
 ```python
+from pydantic import BaseModel
+
 from maivn import ToolOverride
+
+
+class InboxSearchResult(BaseModel):
+    message_ids: list[str]
 
 agent.add_tool(
     search,
@@ -99,14 +105,16 @@ agent.add_tool(
         description='Search recent inbox messages for triage.',
         tags=['email', 'read'],
         default_args={'max_results': 10},
+        output_schema=InboxSearchResult,
     ),
 )
 ```
 
 `ToolOverride` fields are optional. Scalars (`name`, `description`, `always_execute`,
 `final_tool`) replace the registered value; `tags` and `dependencies` append;
-`metadata` and `default_args` merge. Model-supplied arguments always win over defaults
-at execution time.
+`metadata` and `default_args` merge. `output_schema` replaces the registered output
+contract for function, method, and MCP tools. Model-supplied arguments always win over
+defaults at execution time.
 
 ## Tool Types
 
@@ -129,6 +137,43 @@ Two things make a function a good tool:
   constraints the agent can read and that Pydantic enforces at call time.
 - **A clear description.** Pass `description=` or rely on the docstring. Say _when_ to
   use the tool, what the arguments mean, and what shape it returns.
+
+#### Declaring Function Output Schemas
+
+When a function returns a precise Pydantic model, the SDK can infer its output schema
+from the return annotation. If the runtime return type is generic, such as
+`dict[str, object]`, use `@tool_output(...)` to declare the public result contract
+without changing registration options:
+
+```python
+from pydantic import BaseModel
+
+from maivn import tool_output
+
+
+class SearchMessagesResult(BaseModel):
+    message_ids: list[str]
+    next_page_token: str | None = None
+
+
+@tool_output(SearchMessagesResult)
+def search_messages(query: str) -> dict[str, object]:
+    """Search recent messages."""
+    return {'message_ids': ['m-1'], 'next_page_token': None}
+
+
+agent.add_tool(search_messages)
+```
+
+`@tool_output(...)` is independent of `@toolify(...)`: direct `add_tool(fn)`
+registration consumes it. For toolsets, the decorator is consumed only for methods
+that are discovered as tools; `@tool_output(...)` by itself does not expose a method
+from a `@toolset(require_marker=True)` class.
+
+Use `ToolOverride(output_schema=...)` when the app registering the tool must replace
+the provider's declared contract. Override schemas win over `@tool_output(...)`.
+Model tools reject output-schema overrides because their contract is the Pydantic model
+class itself.
 
 ```python
 from typing import Annotated
@@ -242,7 +287,7 @@ are merged on top. `include` / `exclude` match the **unprefixed** method name (o
 
 Toolsets accept `overrides={...}` with the same `ToolOverride` shape used by direct
 tools and MCP tools. Keep provider classes generic, then retarget names, descriptions,
-defaults, dependencies, and tags for the app using them.
+defaults, dependencies, tags, and output schemas for the app using them.
 
 ```python
 from maivn import ToolOverride

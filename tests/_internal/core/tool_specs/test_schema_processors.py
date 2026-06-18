@@ -81,7 +81,7 @@ class TestProcessSchemaByType:
         }
         result = processor.process_schema_by_type(schema)
         assert result["type"] == "object"
-        assert _obj(result["additionalProperties"])["tool_name"] == "Item"
+        assert _obj(result["additionalProperties"]) == {"$ref": "#/$defs/Item"}
 
     def test_object_without_additional_properties_passes_through(self) -> None:
         processor = _make_processor()
@@ -99,8 +99,7 @@ class TestProcessSchemaByType:
         }
         result = processor.process_schema_by_type(schema)
         any_of = _arr(result["anyOf"])
-        assert _obj(any_of[0])["type"] == "tool_dependency"
-        assert _obj(any_of[0])["tool_name"] == "Alpha"
+        assert _obj(any_of[0]) == {"$ref": "#/$defs/Alpha"}
         assert any_of[1] == {"type": "null"}
 
 
@@ -139,14 +138,13 @@ class TestProcessRef:
 class TestProcessArray:
     """Tests for array processing (lines 73-99)."""
 
-    def test_array_with_ref_items_resolves_dependency(self) -> None:
+    def test_array_with_ref_items_preserves_ref(self) -> None:
         processor = _make_processor()
         schema: JsonObject = {"type": "array", "items": {"$ref": "#/$defs/Task"}}
         result = processor.process_schema_by_type(schema)
         assert result["type"] == "array"
         items = _obj(result["items"])
-        assert items["type"] == "tool_dependency"
-        assert items["tool_name"] == "Task"
+        assert items == {"$ref": "#/$defs/Task"}
 
     def test_array_with_non_defs_ref_items_passes_through(self) -> None:
         processor = _make_processor()
@@ -154,7 +152,7 @@ class TestProcessArray:
         result = processor.process_schema_by_type(schema)
         assert result == schema
 
-    def test_array_with_anyof_items_resolves_dependencies(self) -> None:
+    def test_array_with_anyof_items_preserves_refs(self) -> None:
         """Lines 94-98: array items with anyOf containing $ref variants."""
         processor = _make_processor()
         schema: JsonObject = {
@@ -170,10 +168,10 @@ class TestProcessArray:
         assert result["type"] == "array"
         items = _obj(result["items"])
         assert "anyOf" in items
-        deps = _arr(items["anyOf"])
-        assert len(deps) == 2
-        assert _obj(deps[0])["tool_name"] == "Cat"
-        assert _obj(deps[1])["tool_name"] == "Dog"
+        variants = _arr(items["anyOf"])
+        assert len(variants) == 2
+        assert _obj(variants[0]) == {"$ref": "#/$defs/Cat"}
+        assert _obj(variants[1]) == {"$ref": "#/$defs/Dog"}
 
     def test_array_with_empty_anyof_passes_through(self) -> None:
         """Lines 96-98: anyOf with no $ref variants returns original schema."""
@@ -208,8 +206,7 @@ class TestProcessArray:
         }
         result = processor.process_schema_by_type(schema)
         prefix_items = _arr(result["prefixItems"])
-        assert _obj(prefix_items[0])["type"] == "tool_dependency"
-        assert _obj(prefix_items[0])["tool_name"] == "First"
+        assert _obj(prefix_items[0]) == {"$ref": "#/$defs/First"}
         assert prefix_items[1] == {"type": "string"}
 
 
@@ -232,8 +229,8 @@ class TestProcessTuple:
         result = processor.process_schema_by_type(schema)
         prefix_items = _arr(result["prefixItems"])
         assert len(prefix_items) == 2
-        assert _obj(prefix_items[0])["tool_name"] == "Alpha"
-        assert _obj(prefix_items[1])["tool_name"] == "Beta"
+        assert _obj(prefix_items[0]) == {"$ref": "#/$defs/Alpha"}
+        assert _obj(prefix_items[1]) == {"$ref": "#/$defs/Beta"}
 
     def test_tuple_with_mixed_items(self) -> None:
         """Lines 107-108: non-ref items are kept as-is."""
@@ -249,7 +246,7 @@ class TestProcessTuple:
         result = processor.process_schema_by_type(schema)
         prefix_items = _arr(result["prefixItems"])
         assert prefix_items[0] == {"type": "integer"}
-        assert _obj(prefix_items[1])["tool_name"] == "Config"
+        assert _obj(prefix_items[1]) == {"$ref": "#/$defs/Config"}
         assert prefix_items[2] == "not_a_dict"
 
     def test_tuple_with_non_defs_ref(self) -> None:
@@ -301,8 +298,7 @@ class TestProcessObject:
         result = processor.process_schema_by_type(schema)
         assert result["type"] == "object"
         additional = _obj(result["additionalProperties"])
-        assert additional["type"] == "tool_dependency"
-        assert additional["tool_name"] == "Value"
+        assert additional == {"$ref": "#/$defs/Value"}
 
     def test_object_with_non_defs_ref_additional_properties(self) -> None:
         processor = _make_processor()
@@ -338,10 +334,10 @@ class TestProcessObject:
         result = processor.process_schema_by_type(schema)
         assert result["type"] == "object"
         additional = _obj(result["additionalProperties"])
-        deps = _arr(additional["anyOf"])
-        assert len(deps) == 2
-        assert _obj(deps[0])["tool_name"] == "Foo"
-        assert _obj(deps[1])["tool_name"] == "Bar"
+        variants = _arr(additional["anyOf"])
+        assert len(variants) == 2
+        assert _obj(variants[0]) == {"$ref": "#/$defs/Foo"}
+        assert _obj(variants[1]) == {"$ref": "#/$defs/Bar"}
 
     def test_object_with_empty_anyof_additional_properties_passes_through(self) -> None:
         """Lines 156-157: anyOf with no refs returns original."""
@@ -374,8 +370,8 @@ class TestProcessObject:
 class TestProcessAnyOf:
     """Tests for anyOf variant processing (lines 163-185)."""
 
-    def test_anyof_extracts_all_ref_variants(self) -> None:
-        """Lines 165-183: multiple $ref variants are resolved."""
+    def test_anyof_preserves_all_ref_variants(self) -> None:
+        """Lines 165-183: multiple nested $ref variants are preserved."""
         processor = _make_processor()
         schema: JsonObject = {
             "type": "array",
@@ -389,12 +385,16 @@ class TestProcessAnyOf:
         }
         result = processor.process_schema_by_type(schema)
         items = _obj(result["items"])
-        deps = _arr(items["anyOf"])
-        assert len(deps) == 3
-        assert [_obj(d)["tool_name"] for d in deps] == ["A", "B", "C"]
+        variants = _arr(items["anyOf"])
+        assert len(variants) == 3
+        assert [_obj(variant)["$ref"] for variant in variants] == [
+            "#/$defs/A",
+            "#/$defs/B",
+            "#/$defs/C",
+        ]
 
     def test_anyof_preserves_non_dict_variants(self) -> None:
-        """Non-dict variants are preserved while refs are resolved."""
+        """Non-dict variants and nested refs are preserved."""
         processor = _make_processor()
         schema: JsonObject = {
             "type": "array",
@@ -409,10 +409,10 @@ class TestProcessAnyOf:
         items = _obj(result["items"])
         variants = _arr(items["anyOf"])
         assert variants[0] == "not_a_dict"
-        assert _obj(variants[1])["tool_name"] == "Valid"
+        assert _obj(variants[1]) == {"$ref": "#/$defs/Valid"}
 
     def test_anyof_preserves_non_ref_dicts(self) -> None:
-        """Non-ref dict variants are preserved while refs are resolved."""
+        """Non-ref dict variants and nested refs are preserved."""
         processor = _make_processor()
         schema: JsonObject = {
             "type": "array",
@@ -427,10 +427,10 @@ class TestProcessAnyOf:
         items = _obj(result["items"])
         variants = _arr(items["anyOf"])
         assert variants[0] == {"type": "string"}
-        assert _obj(variants[1])["tool_name"] == "Model"
+        assert _obj(variants[1]) == {"$ref": "#/$defs/Model"}
 
     def test_anyof_preserves_non_defs_refs(self) -> None:
-        """Non-#/$defs refs are preserved while model refs are resolved."""
+        """Non-#/$defs refs and nested model refs are preserved."""
         processor = _make_processor()
         schema: JsonObject = {
             "type": "array",
@@ -445,7 +445,7 @@ class TestProcessAnyOf:
         items = _obj(result["items"])
         variants = _arr(items["anyOf"])
         assert variants[0] == {"$ref": "#/definitions/Old"}
-        assert _obj(variants[1])["tool_name"] == "New"
+        assert _obj(variants[1]) == {"$ref": "#/$defs/New"}
 
     def test_anyof_returns_empty_when_no_valid_refs(self) -> None:
         """Lines 165, 185: returns empty list when no valid refs found."""

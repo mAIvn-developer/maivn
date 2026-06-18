@@ -215,6 +215,10 @@ Use `Agent(..., tools=[...])` for simple constructor registration and `add_tool(
 when you need options such as `name`, `description`, `tags`, or `final_tool`.
 Use `override=ToolOverride(...)` when you want the same per-tool override shape
 used by `add_toolset(..., overrides=...)` and `MCPServer(tool_overrides=...)`.
+For function tools with generic return types, use `@tool_output(...)` to declare the
+result contract near the provider, or `ToolOverride(output_schema=...)` to replace it
+at registration time. Model tools reject output-schema overrides because their
+contract is the Pydantic model class itself.
 
 ```python
 def load_profile(customer_id: str) -> dict:

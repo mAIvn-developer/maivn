@@ -110,12 +110,15 @@ to stay within the provider tool-name rules, so they are always safe to expose t
 model.
 
 A generic MCP tool sometimes needs app-specific framing — a clearer name, a tighter
-description, default arguments. You reframe it at registration time with the same
+description, default arguments, or a stricter output contract. You reframe it at
+registration time with the same
 `ToolOverride` shape you use for your own tools via `add_tool(..., override=...)`,
 keyed by the server's **raw** tool name (before prefixing). An override key that does
 not match any tool the server reports raises `ValueError`, so a renamed tool never
 silently leaves dead configuration behind. Defaults you set never beat the model —
-model-supplied arguments win at execution time.
+model-supplied arguments win at execution time. `ToolOverride(output_schema=...)`
+replaces the MCP server's advertised `outputSchema` when the server omits one or
+reports a looser schema than your app expects.
 
 See [Tools and Dependencies](tools.md) for how `ToolOverride` works across both MCP and
 your own functions, and the [API reference](../api/mcp.md#tool-overrides) for the exact
