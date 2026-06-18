@@ -11,6 +11,7 @@ from .decorators import (
     depends_on_private_data,
     depends_on_reevaluate,
     depends_on_tool,
+    tool_output,
 )
 from .logging import configure_logging, get_logger
 from .toolset import (
@@ -38,6 +39,7 @@ __all__ = [
     "get_logger",
     "get_toolify_options",
     "get_toolset_options",
+    "tool_output",
     "toolify",
     "toolset",
 ]

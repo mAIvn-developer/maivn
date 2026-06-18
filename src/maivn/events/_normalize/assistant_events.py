@@ -6,6 +6,7 @@ from __future__ import annotations
 from ..._internal.utils.reporting.app_event_payloads import (
     build_agent_assignment_payload,
     build_assistant_chunk_payload,
+    build_status_message_chunk_payload,
     build_status_message_payload,
 )
 from .._models import JsonObject, NormalizedStreamState
@@ -130,5 +131,27 @@ def handle_status_message_event(
         build_status_message_payload(
             assistant_id=clean_text(payload.get("assistant_id")) or "assistant",
             message=message,
+        )
+    ]
+
+
+def handle_status_message_chunk_event(
+    payload: JsonObject,
+    _state: NormalizedStreamState,
+    _options: NormalizationOptions,
+) -> list[JsonObject]:
+    text = clean_stream_text(payload.get("text"))
+    final = payload.get("final") is True or payload.get("is_final") is True
+    if text is None and not final:
+        return []
+
+    assistant_id = clean_text(payload.get("assistant_id")) or "assistant"
+    status_id = clean_text(payload.get("status_id")) or f"status:{assistant_id}"
+    return [
+        build_status_message_chunk_payload(
+            assistant_id=assistant_id,
+            status_id=status_id,
+            text=text or "",
+            final=final,
         )
     ]

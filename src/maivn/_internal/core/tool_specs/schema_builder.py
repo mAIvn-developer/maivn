@@ -103,7 +103,13 @@ class SchemaBuilder:
         }
         return schema
 
-    def create_from_model(self, model: type[BaseModel], tool_id: str) -> ArgsSchema:
+    def create_from_model(
+        self,
+        model: type[BaseModel],
+        tool_id: str,
+        *,
+        inline_model_refs: bool = False,
+    ) -> ArgsSchema:
         """Create schema from Pydantic model with flattened dependencies.
 
         Args:
@@ -117,7 +123,11 @@ class SchemaBuilder:
         model_schema = cast(JsonObject, model.model_json_schema())
         self._register_nested_models(_get_object_value(model_schema, "$defs"), model.__module__)
 
-        all_properties = self._process_model_properties(model_schema, model)
+        all_properties = self._process_model_properties(
+            model_schema,
+            model,
+            inline_model_refs=inline_model_refs,
+        )
         properties, data_dep_fields = self._separate_data_dependencies(all_properties)
         required = [
             field_name
@@ -132,6 +142,12 @@ class SchemaBuilder:
             "properties": cast(JsonValue, properties),
             "required": cast(JsonValue, required),
         }
+        if inline_model_refs or _contains_local_ref(properties):
+            processed_defs = self._process_model_definitions(
+                _get_object_value(model_schema, "$defs")
+            )
+            if processed_defs:
+                schema["$defs"] = cast(JsonValue, processed_defs)
         return schema
 
     # MARK: - Function Schema Building
@@ -258,6 +274,8 @@ class SchemaBuilder:
         self,
         model_schema: JsonObject,
         model: type[BaseModel],
+        *,
+        inline_model_refs: bool = False,
     ) -> JsonObject:
         """Process all model properties and convert nested models to dependencies."""
         processed: JsonObject = {}
@@ -265,15 +283,59 @@ class SchemaBuilder:
             if isinstance(prop_schema, dict):
                 processed[prop_name] = cast(
                     JsonValue,
-                    self._process_property(cast(JsonObject, prop_schema), prop_name, model),
+                    self._process_property(
+                        cast(JsonObject, prop_schema),
+                        prop_name,
+                        model,
+                        inline_model_refs=inline_model_refs,
+                    ),
                 )
         return processed
+
+    def _process_model_definitions(self, defs: JsonObject) -> JsonObject:
+        """Process nested model definitions while keeping them inline."""
+        processed_defs: JsonObject = {}
+
+        for def_name, def_schema in defs.items():
+            if not isinstance(def_schema, dict):
+                processed_defs[def_name] = def_schema
+                continue
+
+            def_schema_obj = cast(JsonObject, def_schema)
+            model_class = self._model_classes.get(def_name)
+            if model_class is None:
+                processed_defs[def_name] = cast(JsonValue, def_schema_obj)
+                continue
+
+            all_properties = self._process_model_properties(
+                def_schema_obj,
+                model_class,
+                inline_model_refs=True,
+            )
+            properties, data_dep_fields = self._separate_data_dependencies(all_properties)
+            required = [
+                field_name
+                for field_name in _get_str_list_value(def_schema_obj, "required")
+                if field_name not in data_dep_fields
+            ]
+
+            processed_def = dict(def_schema_obj)
+            processed_def["properties"] = cast(JsonValue, properties)
+            if required:
+                processed_def["required"] = cast(JsonValue, required)
+            else:
+                processed_def.pop("required", None)
+            processed_defs[def_name] = cast(JsonValue, processed_def)
+
+        return processed_defs
 
     def _process_property(
         self,
         prop_schema: JsonObject,
         prop_name: str,
         model: type[BaseModel],
+        *,
+        inline_model_refs: bool = False,
     ) -> JsonObject:
         """Process a model property, converting nested models to tool dependencies."""
         if dep_schema := self._try_model_dependency_schema(prop_name, model):
@@ -282,7 +344,10 @@ class SchemaBuilder:
         if dep_schema := self._try_function_tool_dependency(prop_schema, prop_name):
             return dep_schema
 
-        return self._schema_processor.process_schema_by_type(prop_schema)
+        return self._schema_processor.process_schema_by_type(
+            prop_schema,
+            inline_model_refs=inline_model_refs,
+        )
 
     def _try_model_dependency_schema(
         self,
@@ -484,6 +549,21 @@ def _get_str_list_value(schema: JsonObject, key: str) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, str)]
+
+
+def _contains_local_ref(value: object) -> bool:
+    if isinstance(value, dict):
+        value_obj = cast(dict[str, object], value)
+        ref = value_obj.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/$defs/"):
+            return True
+        return any(_contains_local_ref(item) for item in value_obj.values())
+
+    if isinstance(value, list):
+        items = cast(list[object], value)
+        return any(_contains_local_ref(item) for item in items)
+
+    return False
 
 
 def _remove_tokens(value: str, tokens: tuple[str, ...]) -> str:

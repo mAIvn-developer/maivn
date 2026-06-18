@@ -306,6 +306,7 @@ class BaseScopeToolingMixin:
             final_tool=applied.final_tool,
             tags=applied.tags,
             metadata=dict(cast(Mapping[str, object], applied.metadata)) or None,
+            output_schema=applied.output_schema,
             before_execute=applied.before_execute,
             after_execute=applied.after_execute,
         )
@@ -505,6 +506,13 @@ class BaseScopeToolingMixin:
             tool.always_execute = True
         if options.final_tool:
             tool.final_tool = True
+        if options.output_schema is not None:
+            if isinstance(tool, ModelTool):
+                raise ValueError(
+                    "ToolOverride(output_schema=...) is not supported for model tools. "
+                    "Model tools derive their contract from the Pydantic model class."
+                )
+            tool.output_schema = options.output_schema
         if options.tags:
             tool.tags = list(options.tags)
         if options.before_execute is not None:
@@ -692,6 +700,7 @@ class BaseScopeToolingMixin:
             final_tool=applied.final_tool,
             metadata=applied_metadata,
             tags=applied.tags,
+            output_schema=applied.output_schema,
             before_execute=applied.before_execute,
             after_execute=applied.after_execute,
         )

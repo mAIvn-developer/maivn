@@ -43,6 +43,7 @@ from maivn import (
     MCPSoftErrorHandling,
 
     # Decorators
+    tool_output,
     toolify,
     toolset,
     depends_on_tool,
@@ -202,7 +203,7 @@ The objects you instantiate and call. `Agent` and `Swarm` are the two entry poin
 | [`Client`](client.md) | Connection manager that carries credentials and connects an `Agent` or `Swarm` to the mAIvn service. Usually created for you from an `api_key`. | Core |
 | [`ClientBuilder`](client.md#clientbuilder) | Factory for constructing `Client` instances with explicit settings. | Core |
 | [Events](events.md) | Public event models, payload builders, and stream-normalization helpers for surfacing execution state to your backend and frontend. | Core |
-| [`ToolOverride`](mcp.md) | Per-tool registration override (name, description, tags, metadata) applied via `add_tool` / `add_toolset` or MCP `tool_overrides`. | Core |
+| [`ToolOverride`](mcp.md) | Per-tool registration override (name, description, tags, metadata, output schema) applied via `add_tool` / `add_toolset` or MCP `tool_overrides`. | Core |
 | [`MCPServer`](mcp.md) | Configuration for connecting an external MCP server (stdio or HTTP transport) as a tool provider. MCP tools run locally in your environment. | MCP |
 | [`MCPAutoSetup`](mcp.md#mcpautosetup) | Auto-setup helper for `uvx`-based MCP servers. | MCP |
 | [`MCPSoftErrorHandling`](mcp.md#mcpsofterrorhandling) | Tolerant retry policy for transient MCP soft errors. | MCP |

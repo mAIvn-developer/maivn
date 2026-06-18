@@ -209,6 +209,7 @@ class ToolSpecFactory:
             final_tool=final_tool or tool.final_tool,
             metadata=tool.metadata,
             tags=tool.tags,
+            output_schema=tool.output_schema,
             tool_id=tool.tool_id,
             target_agent_id=target_agent_id,
         )
@@ -241,6 +242,7 @@ class ToolSpecFactory:
             final_tool=final_tool or tool.final_tool,
             metadata=tool.metadata,
             tags=tool.tags,
+            output_schema=tool.output_schema,
             tool_id=tool.tool_id,
             target_agent_id=None,
             tool_type_override="method",
@@ -255,6 +257,11 @@ class ToolSpecFactory:
         final_tool: bool,
     ) -> list[ToolSpec]:
         """Create ToolSpecs for a model tool."""
+        if tool.output_schema is not None:
+            raise ValueError(
+                "ToolOverride(output_schema=...) is not supported for model tools. "
+                "Model tools derive their contract from the Pydantic model class."
+            )
         return self._tool_flattener.flatten_model_tool(
             model=tool.model,
             agent_id=agent_id,
@@ -302,6 +309,7 @@ class ToolSpecFactory:
                 args_schema=args_schema,
                 always_execute=always_execute or tool.always_execute,
                 final_tool=final_tool or tool.final_tool,
+                output_schema=tool.output_schema,
                 metadata=metadata,
             )
         ]

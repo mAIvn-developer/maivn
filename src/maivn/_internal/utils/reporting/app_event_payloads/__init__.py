@@ -7,6 +7,7 @@ from .assistant_events import (
     build_agent_assignment_payload,
     build_assistant_chunk_payload,
     build_interrupt_required_payload,
+    build_status_message_chunk_payload,
     build_status_message_payload,
 )
 from .common import APP_EVENT_CONTRACT_VERSION
@@ -36,6 +37,7 @@ __all__ = [
     "build_hook_fired_payload",
     "build_interrupt_required_payload",
     "build_session_start_payload",
+    "build_status_message_chunk_payload",
     "build_status_message_payload",
     "build_system_tool_chunk_payload",
     "build_system_tool_complete_payload",

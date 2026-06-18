@@ -9,11 +9,13 @@ from typing import cast
 
 import pytest
 from maivn_shared import DataDependency
+from pydantic import BaseModel
 
-from maivn import ToolOverride, toolify, toolset
+from maivn import ToolOverride, tool_output, toolify, toolset
 from maivn._internal.api.agent import Agent
 from maivn._internal.api.client import Client
-from maivn._internal.core.entities.tools import MethodTool
+from maivn._internal.core.entities.tools import BaseTool, MethodTool
+from maivn._internal.core.tool_specs.factory import ToolSpecFactory
 from maivn._internal.utils.configuration import MaivnConfiguration, ServerConfiguration
 from maivn._internal.utils.decorators import depends_on_tool
 from maivn._internal.utils.toolset import (
@@ -25,6 +27,14 @@ from maivn._internal.utils.toolset import (
 # MARK: - Helpers
 
 
+class _SearchOutput(BaseModel):
+    message_id: str
+
+
+class _OverrideOutput(BaseModel):
+    thread_id: str
+
+
 def _make_agent() -> Agent:
     config = MaivnConfiguration(
         server=ServerConfiguration(
@@ -34,6 +44,12 @@ def _make_agent() -> Agent:
     )
     client = Client.from_configuration(api_key="key", configuration=config)
     return Agent(name="t", client=client)
+
+
+def _output_properties(tool: object, *, agent: Agent) -> dict[str, object]:
+    spec = ToolSpecFactory().create(agent_id=agent.id, tool=cast(BaseTool, tool))
+    output_schema = cast(dict[str, object], spec.output_schema)
+    return cast(dict[str, object], output_schema["properties"])
 
 
 # MARK: - Decorator unit tests
@@ -662,6 +678,71 @@ def test_add_tool_override_replaces_kwargs() -> None:
     assert registered.always_execute is True
     assert "custom" in registered.tags
     assert registered.metadata["default_args"] == {"query": "status"}
+
+
+def test_tool_output_decorator_applies_to_direct_add_tool_without_toolify() -> None:
+    @tool_output(_SearchOutput)
+    def search(query: str) -> dict[str, object]:
+        """Search messages."""
+        return {"query": query}
+
+    agent = _make_agent()
+    registered = agent.add_tool(search)
+
+    properties = _output_properties(registered, agent=agent)
+    assert set(properties) == {"message_id"}
+
+
+def test_tool_override_output_schema_wins_over_tool_output_decorator() -> None:
+    @tool_output(_SearchOutput)
+    def search(query: str) -> dict[str, object]:
+        """Search messages."""
+        return {"query": query}
+
+    agent = _make_agent()
+    registered = agent.add_tool(
+        search,
+        override=ToolOverride(output_schema=_OverrideOutput),
+    )
+
+    properties = _output_properties(registered, agent=agent)
+    assert set(properties) == {"thread_id"}
+
+
+def test_tool_output_decorator_applies_to_discovered_toolset_method() -> None:
+    @toolset(prefix="ov")
+    class OV:
+        @toolify
+        @tool_output(_SearchOutput)
+        def search(self, query: str) -> dict[str, object]:
+            """Search messages."""
+            return {"query": query}
+
+    agent = _make_agent()
+    registered = agent.add_toolset(OV())
+
+    properties = _output_properties(registered[0], agent=agent)
+    assert set(properties) == {"message_id"}
+
+
+def test_tool_output_decorator_does_not_make_toolset_method_discoverable() -> None:
+    @toolset(prefix="ov")
+    class OV:
+        @tool_output(_SearchOutput)
+        def search(self, query: str) -> dict[str, object]:
+            """Search messages."""
+            return {"query": query}
+
+    agent = _make_agent()
+    with pytest.raises(ValueError, match="no @toolify-marked methods"):
+        _ = agent.add_toolset(OV())
+
+
+def test_tool_override_output_schema_rejects_model_tool_registration() -> None:
+    agent = _make_agent()
+
+    with pytest.raises(ValueError, match="output_schema.*model tools"):
+        _ = agent.add_tool(_SearchOutput, override=ToolOverride(output_schema=_OverrideOutput))
 
 
 _ = _T_Mixed  # silence unused private alias kept for documentation purposes

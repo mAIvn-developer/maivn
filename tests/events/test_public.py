@@ -7,6 +7,7 @@ from maivn.events import (
     FINAL_EVENT_NAME,
     INTERRUPT_REQUIRED_EVENT_NAME,
     MODEL_TOOL_COMPLETE_EVENT_NAME,
+    STATUS_MESSAGE_CHUNK_EVENT_NAME,
     STATUS_MESSAGE_EVENT_NAME,
     SYSTEM_TOOL_CHUNK_EVENT_NAME,
     TOOL_EVENT_NAME,
@@ -242,3 +243,25 @@ def test_normalize_stream_converts_enrichment_status_and_interrupt_events() -> N
     assert normalized[2].interrupt.id == "int-1"
     assert normalized[2].interrupt.data_key == "email"
     assert normalized[2].interrupt.tool_name == "collect_email"
+
+
+def test_normalize_stream_converts_status_message_chunk_event() -> None:
+    normalized = normalize_stream_event(
+        RawSSEEvent(
+            name=STATUS_MESSAGE_CHUNK_EVENT_NAME,
+            payload={
+                "assistant_id": "assistant-1",
+                "status_id": "status-1",
+                "text": "Dispatching ",
+            },
+        )
+    )
+
+    assert _names(normalized) == ["status_message_chunk"]
+    assert normalized[0].assistant is not None
+    assert normalized[0].assistant.id == "assistant-1"
+    assert normalized[0].model_dump(mode="json")["status"] == {
+        "id": "status-1",
+        "delta": "Dispatching ",
+        "final": False,
+    }

@@ -8,6 +8,7 @@ from .artifact_policy import compose_artifact_policy
 from .dependencies import depends_on_agent, depends_on_private_data, depends_on_tool
 from .execution_control import depends_on_await_for, depends_on_reevaluate
 from .interrupt import depends_on_interrupt
+from .tool_output import tool_output
 
 # MARK: Public API
 
@@ -22,4 +23,5 @@ __all__ = [
     "depends_on_private_data",
     "depends_on_reevaluate",
     "depends_on_tool",
+    "tool_output",
 ]

@@ -15,6 +15,7 @@ from maivn_shared import BaseDependency
 from pydantic import BaseModel
 
 from maivn._internal.core.entities.tools import BaseTool, FunctionTool, MethodTool, ModelTool
+from maivn._internal.core.output_schema import JsonObject, collect_output_schema
 from maivn._internal.core.services.dependency_collector import DependencyCollector
 
 from .policies import (
@@ -50,6 +51,7 @@ class CommonToolKwargs(TypedDict):
     final_tool: bool
     metadata: dict[str, object]
     tags: list[str]
+    output_schema: JsonObject | None
     before_execute: ToolHook | None
     after_execute: ToolHook | None
     dependencies: list[BaseDependency]
@@ -67,6 +69,7 @@ class ToolifyOptions:
     final_tool: bool
     metadata: dict[str, object]
     tags: list[str]
+    output_schema: JsonObject | None
     before_execute: ToolHook | None
     after_execute: ToolHook | None
 
@@ -77,6 +80,7 @@ class ToolifyOptions:
         "final_tool",
         "metadata",
         "tags",
+        "output_schema",
         "before_execute",
         "after_execute",
     )
@@ -89,6 +93,7 @@ class ToolifyOptions:
         final_tool: bool = False,
         metadata: dict[str, object] | None = None,
         tags: list[str] | None = None,
+        output_schema: JsonObject | None = None,
         before_execute: ToolHook | None = None,
         after_execute: ToolHook | None = None,
     ) -> None:
@@ -98,6 +103,7 @@ class ToolifyOptions:
         self.final_tool = final_tool
         self.metadata = dict(metadata or {})
         self.tags = tags or []
+        self.output_schema = output_schema
         self.before_execute = before_execute
         self.after_execute = after_execute
 
@@ -136,6 +142,11 @@ class ToolifyService:
             ValueError: If name or description is missing
             TypeError: If obj is not a callable or Pydantic model
         """
+        if _is_pydantic_model_target(obj) and options.output_schema is not None:
+            raise ValueError(
+                "ToolOverride(output_schema=...) is not supported for model tools. "
+                "Model tools derive their contract from the Pydantic model class."
+            )
         common_kwargs = self._build_common_kwargs(obj, options)
         tool = self._create_tool_instance(obj, common_kwargs)
         tool.model_post_init(None)
@@ -240,6 +251,7 @@ class ToolifyService:
             "final_tool": options.final_tool,
             "metadata": self._build_metadata(obj, options.metadata),
             "tags": options.tags,
+            "output_schema": options.output_schema or collect_output_schema(obj),
             "before_execute": options.before_execute,
             "after_execute": options.after_execute,
             "dependencies": self._dependency_collector.collect_all(obj),
@@ -292,7 +304,12 @@ class ToolifyService:
         common_kwargs: CommonToolKwargs,
     ) -> FunctionTool | ModelTool:
         """Create the appropriate tool instance based on object type."""
-        if isinstance(obj, type) and issubclass(obj, BaseModel):
+        if _is_pydantic_model_target(obj):
+            if common_kwargs["output_schema"] is not None:
+                raise ValueError(
+                    "ToolOverride(output_schema=...) is not supported for model tools. "
+                    "Model tools derive their contract from the Pydantic model class."
+                )
             return ModelTool(**common_kwargs, model=obj)
 
         obj_candidate = cast(object, obj)
@@ -336,6 +353,10 @@ class ToolifyService:
 def _is_callable_tool_target(obj: object) -> TypeGuard[Callable[..., object]]:
     """Return whether an object can be wrapped as a callable tool."""
     return callable(obj)
+
+
+def _is_pydantic_model_target(obj: object) -> TypeGuard[type[BaseModel]]:
+    return isinstance(obj, type) and issubclass(obj, BaseModel)
 
 
 def _set_dynamic_attr(target: object, attr_name: str, value: object) -> None:

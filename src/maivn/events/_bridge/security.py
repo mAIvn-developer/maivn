@@ -30,6 +30,7 @@ _KNOWN_FRONTEND_SAFE_EVENT_TYPES: frozenset[str] = frozenset(
         "error",
         "assistant_chunk",
         "status_message",
+        "status_message_chunk",
         "interrupt_required",
         "hook_fired",
         "session_start",

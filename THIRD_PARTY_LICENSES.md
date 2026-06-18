@@ -2,7 +2,7 @@
 
 **Package**: maivn
 **Distribution**: Public PyPI SDK
-**Report Date**: 2026-06-06
+**Report Date**: 2026-06-18
 **Report Version**: 2.1
 
 ---
@@ -17,7 +17,7 @@ First-party `maivn-*` packages are excluded from the third-party inventory.
 | Scope | Packages | Permissive | Weak Copyleft | Strong Copyleft | Non-OSI | Unknown |
 |-------|----------|------------|----------------|------------------|---------|---------|
 | Runtime | 40 | 38 | 2 | 0 | 0 | 0 |
-| Dev-only | 15 | 15 | 0 | 0 | 0 | 0 |
+| Dev-only | 18 | 18 | 0 | 0 | 0 | 0 |
 
 ---
 
@@ -43,7 +43,7 @@ First-party `maivn-*` packages are excluded from the third-party inventory.
 | idna | 3.18 | BSD-3-Clause | Permissive |   |
 | jsonpatch | 1.33 | BSD License | Permissive |   |
 | jsonpointer | 3.1.0 | BSD License | Permissive |   |
-| langchain-core | 1.4.0 | MIT License | Permissive |   |
+| langchain-core | 1.4.7 | MIT License | Permissive |   |
 | langchain-protocol | 0.0.15 | MIT License | Permissive |   |
 | langsmith | 0.8.8 | MIT | Permissive |   |
 | markdown-it-py | 4.0.0 | MIT License | Permissive |   |
@@ -84,6 +84,8 @@ These packages are not part of the production runtime image.
 | basedpyright | 1.39.5 | MIT License | Permissive |   |
 | click | 8.3.1 | BSD-3-Clause | Permissive |   |
 | fastapi | 0.136.3 | MIT | Permissive |   |
+| httpcore2 | 2.4.0 | BSD-3-Clause | Permissive |   |
+| httpx2 | 2.4.0 | BSD-3-Clause | Permissive |   |
 | iniconfig | 2.3.0 | MIT | Permissive |   |
 | nodeenv | 1.10.0 | BSD License | Permissive |   |
 | nodejs-wheel-binaries | 24.15.0 | MIT License | Permissive |   |
@@ -93,7 +95,8 @@ These packages are not part of the production runtime image.
 | pytest-asyncio | 1.3.0 | Apache-2.0 | Permissive |   |
 | ruff | 0.15.12 | MIT | Permissive |   |
 | sse-starlette | 2.1.3 | BSD License | Permissive |   |
-| starlette | 1.0.1 | BSD-3-Clause | Permissive |   |
+| starlette | 1.3.1 | BSD-3-Clause | Permissive |   |
+| truststore | 0.10.4 | MIT | Permissive |   |
 | uvicorn | 0.46.0 | BSD-3-Clause | Permissive |   |
 
 ---

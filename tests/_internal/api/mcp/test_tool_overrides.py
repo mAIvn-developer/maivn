@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import pytest
 from maivn_shared import DataDependency
+from pydantic import BaseModel
 
 from maivn import MCPServer, ToolOverride
 from maivn._internal.api.agent import Agent
@@ -39,6 +40,10 @@ def _pin_tool_defs(
         return tool_defs
 
     object.__setattr__(server, "list_tools", _static)
+
+
+class _SearchOutput(BaseModel):
+    message_id: str
 
 
 def test_mcp_tool_override_matches_toolset_override_shape() -> None:
@@ -88,6 +93,43 @@ def test_mcp_tool_override_matches_toolset_override_shape() -> None:
     assert tool.always_execute is True
     assert tool.final_tool is True
     assert len(tool.dependencies) == 1
+
+
+def test_mcp_tool_override_replaces_server_output_schema() -> None:
+    server = MCPServer(
+        name="remote",
+        transport="http",
+        url="https://mcp.example.test",
+        tool_overrides={
+            "search": ToolOverride(
+                output_schema=_SearchOutput,
+            )
+        },
+    )
+    _pin_tool_defs(
+        server,
+        [
+            MCPToolDefinition(
+                name="search",
+                description="Generic remote search.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                },
+                outputSchema={"type": "object", "properties": {"raw": {"type": "string"}}},
+            )
+        ],
+    )
+    agent = _make_agent()
+
+    agent.register_mcp_servers(server)
+
+    tool = agent.list_tools()[0]
+    assert isinstance(tool, McpTool)
+    output_schema = tool.output_schema or {}
+    properties = output_schema.get("properties")
+    assert isinstance(properties, dict)
+    assert set(properties) == {"message_id"}
 
 
 def test_mcp_tool_override_unknown_key_raises() -> None:

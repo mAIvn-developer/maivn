@@ -7,6 +7,7 @@ emitting explicit dependency references in generated schemas.
 # pyright: strict
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable, Mapping
 from typing import ForwardRef, TypeAlias, cast, get_type_hints
 
@@ -25,6 +26,7 @@ from .schema_builder import SchemaBuilder
 from .type_utils import (
     extract_nested_models,
     get_module_globals_for_model,
+    is_pydantic_model,
     resolve_forward_ref,
 )
 
@@ -64,6 +66,7 @@ class ToolFlattener:
         final_tool: bool = False,
         metadata: Mapping[str, object] | None = None,
         tags: list[str] | None = None,
+        output_schema: JsonObject | None = None,
         tool_id: str | None = None,
         target_agent_id: str | None = None,
         tool_type_override: ToolType | None = None,
@@ -124,6 +127,12 @@ class ToolFlattener:
             resolved_metadata["target_agent_id"] = target_agent_id
         apply_arg_policies_to_schema(func_schema, resolved_metadata)
         apply_team_dependency_arg_schemas(func_schema, resolved_metadata)
+        output_schema = _resolve_function_output_schema(
+            func=func,
+            func_schema=func_schema,
+            metadata=resolved_metadata,
+            explicit_schema=output_schema,
+        )
 
         func_tool_spec = ToolSpec(
             tool_id=resolved_tool_id,
@@ -135,6 +144,7 @@ class ToolFlattener:
             args_schema=func_schema,
             always_execute=always_execute,
             final_tool=final_tool,
+            output_schema=output_schema,
             metadata=resolved_metadata,
         )
 
@@ -153,6 +163,7 @@ class ToolFlattener:
         final_tool: bool = False,
         metadata: Mapping[str, object] | None = None,
         tags: list[str] | None = None,
+        _schema_only: bool = False,
     ) -> list[ToolSpec]:
         """Flatten a Pydantic model tool into ToolSpecs.
 
@@ -181,6 +192,7 @@ class ToolFlattener:
                 final_tool=final_tool,
                 metadata=metadata,
                 tags=tags,
+                schema_only=_schema_only,
             )
             return [cached]
 
@@ -210,15 +222,26 @@ class ToolFlattener:
                     always_execute=False,
                     final_tool=False,
                     tags=tags,
+                    _schema_only=True,
                 )
                 tool_specs.extend(nested_tool_specs)
 
             model_schema = cast(
                 JsonObject,
-                self.schema_builder.create_from_model(model, model_tool_id),
+                self.schema_builder.create_from_model(
+                    model,
+                    model_tool_id,
+                    # Emit first-level nested-model refs as `tool_dependency` nodes
+                    # instead of inlining the full $defs subtree. Inlining collapsed
+                    # the dependency graph so a structured-output model (e.g. the
+                    # automobile demo) no longer fanned out into per-system JobSpecs
+                    # -> one monolithic complex-tier LLM call (the ~100s regression).
+                    inline_model_refs=False,
+                ),
             )
             resolved_metadata = _json_metadata(metadata)
             apply_arg_policies_to_schema(model_schema, resolved_metadata)
+            output_schema = _model_output_schema(model)
 
             tool_name = name or model.__name__
             tool_description = description or (model.__doc__ or "").strip() or "Model tool"
@@ -233,6 +256,8 @@ class ToolFlattener:
                 args_schema=model_schema,
                 always_execute=always_execute,
                 final_tool=final_tool,
+                schema_only=_schema_only,
+                output_schema=output_schema,
                 metadata=resolved_metadata,
             )
 
@@ -280,6 +305,7 @@ class ToolFlattener:
         final_tool: bool,
         metadata: Mapping[str, object] | None,
         tags: list[str] | None,
+        schema_only: bool,
     ) -> None:
         """Promote flags/tags when the same model is flattened multiple times."""
         default_name = model.__name__
@@ -297,6 +323,9 @@ class ToolFlattener:
 
         if always_execute and not cached.always_execute:
             cached.always_execute = True
+
+        if not schema_only and cached.schema_only:
+            cached.schema_only = False
 
         if tags:
             existing_tags = list(cached.tags or [])
@@ -365,6 +394,45 @@ class ToolFlattener:
 def _json_metadata(metadata: Mapping[str, object] | None) -> JsonObject:
     """Convert object-valued metadata to the JSON-shaped ToolSpec boundary type."""
     return cast(JsonObject, dict(metadata or {}))
+
+
+def _json_schema_or_none(value: object) -> JsonObject | None:
+    return cast(JsonObject, value) if isinstance(value, dict) and value else None
+
+
+def _resolve_function_output_schema(
+    *,
+    func: Callable[..., object],
+    func_schema: JsonObject,
+    metadata: JsonObject,
+    explicit_schema: JsonObject | None,
+) -> JsonObject | None:
+    if explicit_schema is not None:
+        return explicit_schema
+
+    metadata_schema = _json_schema_or_none(metadata.get("output_schema"))
+    if metadata_schema is not None:
+        return metadata_schema
+
+    return_annotation = _resolve_return_annotation(func)
+    if is_pydantic_model(return_annotation):
+        return _model_output_schema(return_annotation)
+
+    return _json_schema_or_none(func_schema.get("return_type"))
+
+
+def _resolve_return_annotation(func: Callable[..., object]) -> object:
+    try:
+        return get_type_hints(func, include_extras=True).get("return", inspect.Signature.empty)
+    except Exception:  # noqa: BLE001 - annotation resolution can execute imports or forward refs.
+        return inspect.signature(func).return_annotation
+
+
+def _model_output_schema(model: type[BaseModel]) -> JsonObject | None:
+    try:
+        return cast(JsonObject, model.model_json_schema())
+    except Exception:  # noqa: BLE001 - malformed user models may fail schema generation.
+        return None
 
 
 def _get_resolved_type_hints(model: type[BaseModel]) -> dict[str, object]:

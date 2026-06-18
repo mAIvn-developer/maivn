@@ -13,6 +13,7 @@ from maivn_shared.core.events import (
     INTERRUPT_REQUIRED_EVENT_NAME,
     MODEL_TOOL_COMPLETE_EVENT_NAME,
     PROGRESS_UPDATE_EVENT_NAME,
+    STATUS_MESSAGE_CHUNK_EVENT_NAME,
     STATUS_MESSAGE_EVENT_NAME,
     SYSTEM_TOOL_CHUNK_EVENT_NAME,
     SYSTEM_TOOL_COMPLETE_EVENT_NAME,
@@ -25,6 +26,7 @@ from maivn_shared.core.events import (
 from .._models import JsonObject, NormalizedStreamState
 from .assistant_events import (
     handle_progress_update_event,
+    handle_status_message_chunk_event,
     handle_status_message_event,
     handle_update_event,
 )
@@ -66,6 +68,7 @@ EVENT_HANDLERS: dict[str, EventHandler] = {
     SYSTEM_TOOL_COMPLETE_EVENT_NAME: handle_system_tool_complete_event,
     SYSTEM_TOOL_ERROR_EVENT_NAME: handle_system_tool_error_event,
     MODEL_TOOL_COMPLETE_EVENT_NAME: handle_model_tool_complete_event,
+    STATUS_MESSAGE_CHUNK_EVENT_NAME: handle_status_message_chunk_event,
     STATUS_MESSAGE_EVENT_NAME: handle_status_message_event,
     ENRICHMENT_EVENT_NAME: handle_enrichment_event,
     INTERRUPT_REQUIRED_EVENT_NAME: handle_interrupt_required_event,
