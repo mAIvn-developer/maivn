@@ -6,19 +6,22 @@ Used by state compilation to augment an agent's tool list."""
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
-from typing import Literal, Protocol, TypeAlias, TypeGuard
+from collections.abc import Iterable, Sequence
+from typing import Literal, Protocol, TypeAlias, TypeGuard, cast
 
 from maivn_shared import (
+    FINAL_EVENT_NAME,
+    UPDATE_EVENT_NAME,
     AgentDependency,
     BaseDependency,
     HumanMessage,
     InterruptDependency,
+    SessionResponse,
     create_uuid,
 )
 from maivn_shared.domain.entities.session_config import NestedSynthesisMode
 
-from maivn._internal.core.entities import AgentTool, BaseTool, FunctionTool
+from maivn._internal.core.entities import AgentTool, BaseTool, FunctionTool, SSEEvent
 from maivn._internal.core.services.team_dependencies import (
     SWARM_AGENT_DEPENDENCY_CONTEXT_KEYS_METADATA_KEY,
     TEAM_DEPENDENCY_ARG_SCHEMAS_METADATA_KEY,
@@ -40,6 +43,7 @@ from .response import DynamicToolFactoryResponseMixin
 ModelSelection: TypeAlias = Literal["fast", "balanced", "max"]
 
 logger = logging.getLogger(__name__)
+_NESTED_FINAL_RESPONSE_ASSISTANT_IDS = frozenset({"chat_agent", "orchestrator_agent"})
 
 
 class DynamicInvocationAgent(Protocol):
@@ -59,6 +63,7 @@ class DynamicInvocationAgent(Protocol):
     def force_final_tool(self) -> bool: ...
 
     def invoke(self, **kwargs: object) -> object: ...
+    def stream(self, **kwargs: object) -> Iterable[object]: ...
 
     def get_swarm(self) -> DynamicInvocationSwarm | None: ...
 
@@ -268,11 +273,10 @@ class DynamicToolFactory(
                 current_sdk_delivery_mode,
             )
 
-            # Nested agent responses should only stream live when the outer SDK call
-            # itself is in stream mode. For invoke mode, reporter consumers receive
-            # only the completed nested result.
+            # Nested agent responses should only stream live when this nested call
+            # is explicitly serving as the final user-facing output.
             stream_token = allow_nested_response_stream.set(
-                current_sdk_delivery_mode.get() == "stream"
+                use_as_final_output and current_sdk_delivery_mode.get() == "stream"
             )
             # Honor explicit per-agent opt-in via `agent.force_final_tool`. The
             # caller's `force_final_tool` argument always wins; otherwise we fall
@@ -293,14 +297,21 @@ class DynamicToolFactory(
                     agent_name,
                 )
             try:
-                response = agent.invoke(
-                    messages=[HumanMessage(content=nested_prompt)],
-                    force_final_tool=effective_force_final_tool,
-                    memory_config=nested_memory_config,
-                    memory_assets_config=memory_assets_config,
-                    swarm_config=swarm_config,
-                    model=model,
-                )
+                invocation_kwargs: dict[str, object] = {
+                    "messages": [HumanMessage(content=nested_prompt)],
+                    "force_final_tool": effective_force_final_tool,
+                    "memory_config": nested_memory_config,
+                    "memory_assets_config": memory_assets_config,
+                    "swarm_config": swarm_config,
+                    "model": model,
+                }
+                if current_sdk_delivery_mode.get() == "stream":
+                    response = self._consume_nested_agent_stream(
+                        agent.stream(**invocation_kwargs),
+                        agent_id=agent_id,
+                    )
+                else:
+                    response = agent.invoke(**invocation_kwargs)
             finally:
                 allow_nested_response_stream.reset(stream_token)
             return self.extract_agent_response(
@@ -327,6 +338,70 @@ class DynamicToolFactory(
             target_agent_id=target_agent.id,
             metadata=metadata,
         )
+
+    def _consume_nested_agent_stream(
+        self,
+        events: Iterable[object],
+        *,
+        agent_id: str,
+    ) -> SessionResponse:
+        """Consume a nested streamed agent run and return its terminal response."""
+        final_payload: object | None = None
+        streamed_live = False
+        for event in events:
+            if getattr(event, "name", None) != FINAL_EVENT_NAME:
+                streamed_live = self._forward_nested_streaming_update(event) or streamed_live
+                continue
+            final_payload = getattr(event, "payload", None)
+
+        if not isinstance(final_payload, dict):
+            raise RuntimeError(
+                f"Nested streamed agent '{agent_id}' completed without final payload"
+            )
+        response = SessionResponse.model_validate(final_payload)
+        if not streamed_live:
+            return response
+
+        metadata = dict(response.metadata or {})
+        metadata["response_streamed_live"] = True
+        return response.model_copy(update={"metadata": metadata})
+
+    @staticmethod
+    def _forward_nested_streaming_update(event: object) -> bool:
+        """Forward nested assistant stream chunks into the active outer stream."""
+        if not isinstance(event, SSEEvent):
+            return False
+        if getattr(event, "name", None) != UPDATE_EVENT_NAME:
+            return False
+        payload = getattr(event, "payload", None)
+        if not isinstance(payload, dict):
+            return False
+        payload_dict = cast(dict[str, object], payload)
+        streaming_content = payload_dict.get("streaming_content")
+        if not isinstance(streaming_content, str) or not streaming_content:
+            return False
+        if not DynamicToolFactory._is_nested_final_response_assistant(payload_dict):
+            return False
+
+        from maivn._internal.utils.reporting.context import (
+            allow_nested_response_stream,
+            current_stream_event_forwarder,
+        )
+
+        if not allow_nested_response_stream.get():
+            return False
+        forwarder = current_stream_event_forwarder.get()
+        if forwarder is None:
+            return False
+        forwarder(event)
+        return True
+
+    @staticmethod
+    def _is_nested_final_response_assistant(payload: dict[str, object]) -> bool:
+        assistant_id = payload.get("assistant_id")
+        if not isinstance(assistant_id, str):
+            return False
+        return assistant_id.strip() in _NESTED_FINAL_RESPONSE_ASSISTANT_IDS
 
     def _build_team_invocation_tool_metadata(
         self,

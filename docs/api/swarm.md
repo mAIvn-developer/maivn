@@ -7,6 +7,8 @@ The `Swarm` class coordinates multiple agents for multi-agent workflows, providi
 ```python
 from maivn import (
     MemoryConfig,
+    ModelChoice,
+    ModelConfig,
     SessionOrchestrationConfig,
     Swarm,
     SystemToolsConfig,
@@ -153,7 +155,7 @@ Invoke the swarm with messages.
 def invoke(
     messages: Sequence[BaseMessage] | BaseMessage,
     *,
-    model: Any = None,
+    model: Literal['auto', 'fast', 'balanced', 'max'] | ModelConfig | None = None,
     force_model: str | None = None,
     reasoning: Any = None,
     force_final_tool: bool = False,
@@ -173,8 +175,8 @@ def invoke(
 | Parameter                       | Type                                         | Default  | Description                                                                            |
 | ------------------------------- | -------------------------------------------- | -------- | -------------------------------------------------------------------------------------- |
 | `messages`                      | `Sequence[BaseMessage] \| BaseMessage`       | Required | Messages to send                                                                       |
-| `model`                         | `Any`                                        | `None`   | LLM selection hint                                                                     |
-| `force_model`                   | `str \| None`                                | `None`   | Pin a specific model by name, bypassing the selection hint                             |
+| `model`                         | `Literal['auto', 'fast', 'balanced', 'max'] \| ModelConfig \| None` | `None` | LLM selection: a tier for broad routing, or a scoped `ModelConfig` for configurable framework parts |
+| `force_model`                   | `str \| None`                                | `None`   | Deprecated compatibility path for globally pinning a model. Use `model=ModelConfig.for_all(model_id=...)` or a scoped `ModelConfig` instead |
 | `reasoning`                     | `Any`                                        | `None`   | Reasoning level                                                                        |
 | `force_final_tool`              | `bool`                                       | `False`  | Force final tool output                                                                |
 | `stream_response`               | `bool`                                       | `True`   | Request streamed model output from the server transport                                |
@@ -189,6 +191,30 @@ def invoke(
 #### Returns
 
 `SessionResponse` with the swarm's coordinated response.
+
+#### Model selection
+
+`Swarm.invoke()` accepts the same model selection surface as `Agent.invoke()`:
+a tier string (`'auto'`, `'fast'`, `'balanced'`, or `'max'`) or a `ModelConfig`.
+
+`ModelConfig` only applies to configurable framework parts: `response`,
+`thinking`, `compose_artifact`, and `repl`. Internal swarm planning, assignment,
+and generated-action nodes keep their pinned runtime defaults.
+
+```python
+from maivn import ModelChoice, ModelConfig
+
+response = swarm.invoke(
+    HumanMessage(content='Research and write the brief.'),
+    model=ModelConfig(
+        response=ModelChoice(tier='max'),
+        thinking=ModelChoice(tier='balanced'),
+    ),
+)
+```
+
+`force_model` is deprecated, emits a `DeprecationWarning`, and cannot be combined
+with `ModelConfig`.
 
 #### Raises
 
@@ -315,7 +341,7 @@ Stream raw SSE events while the swarm executes.
 def stream(
     messages: Sequence[BaseMessage] | BaseMessage,
     *,
-    model: Any = None,
+    model: Literal['auto', 'fast', 'balanced', 'max'] | ModelConfig | None = None,
     force_model: str | None = None,
     reasoning: Any = None,
     force_final_tool: bool = False,
@@ -336,8 +362,8 @@ def stream(
 | Parameter                       | Type                                                   | Default  | Description                                                              |
 | ------------------------------- | ------------------------------------------------------ | -------- | ------------------------------------------------------------------------ |
 | `messages`                      | `Sequence[BaseMessage] \| BaseMessage`                 | Required | Messages to send to the swarm                                            |
-| `model`                         | `Any`                                                  | `None`   | LLM selection hint                                                       |
-| `force_model`                   | `str \| None`                                          | `None`   | Pin a specific model by name, bypassing the selection hint               |
+| `model`                         | `Literal['auto', 'fast', 'balanced', 'max'] \| ModelConfig \| None` | `None` | LLM selection: a tier or scoped `ModelConfig` |
+| `force_model`                   | `str \| None`                                          | `None`   | Deprecated compatibility path for globally pinning a model. Use `model=ModelConfig.for_all(model_id=...)` or a scoped `ModelConfig` instead |
 | `reasoning`                     | `Any`                                                  | `None`   | Reasoning level                                                          |
 | `force_final_tool`              | `bool`                                                 | `False`  | Force the final tool or final-output agent result                        |
 | `stream_response`               | `bool`                                                 | `True`   | Request streamed model output from the server transport                  |

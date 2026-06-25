@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Literal, Protocol, TypeAlias, cast
 from maivn_shared import (
     BaseMessage,
     MemoryConfig,
+    ModelConfig,
+    ModelTier,
     SessionOrchestrationConfig,
     SessionRequest,
     SessionResponse,
@@ -50,7 +52,7 @@ if TYPE_CHECKING:
 
 # MARK: Types
 
-ModelSelection: TypeAlias = Literal["auto", "fast", "balanced", "max"]
+ModelSelection: TypeAlias = ModelTier | ModelConfig
 ReasoningLevel: TypeAlias = Literal["minimal", "low", "medium", "high"]
 ConfigOverride: TypeAlias = dict[str, object]
 

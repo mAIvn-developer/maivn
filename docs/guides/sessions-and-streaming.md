@@ -168,10 +168,11 @@ For per-call token accounting, read `response.token_usage`; see
 ## Tuning a run without internals
 
 Two knobs let you shape the trade-off between speed and depth on a per-call
-basis. You set the intent; the runtime handles the rest. You never choose a
-specific provider or model — these are intent hints, not selectors.
+basis. Most calls should use broad intent hints and let the runtime handle the
+details. When you need stricter control, `ModelConfig` lets you scope tier or
+exact-model choices to the public configurable framework parts.
 
-### model — how much capability to apply
+### model - tier or scoped model config
 
 ```python
 response = agent.invoke(
@@ -188,8 +189,50 @@ response = agent.invoke(
 | `'max'`      | Favor maximum capability for hard requests                      |
 
 Leave `model` unset (or `'auto'`) and the runtime chooses for you. The selection
-logic is intentionally internal; from the SDK you express *intent*, not a
-specific model.
+logic is intentionally internal for the broad tier path.
+
+For scoped control, pass a `ModelConfig`:
+
+```python
+from maivn import ModelChoice, ModelConfig
+
+response = agent.invoke(
+    [HumanMessage(content='Review this incident report and draft the response.')],
+    model=ModelConfig(
+        response=ModelChoice(model_id='claude-haiku-4-5-20251001'),
+        thinking=ModelChoice(tier='max'),
+        compose_artifact=ModelChoice(tier='balanced'),
+        repl=ModelChoice(tier='fast'),
+    ),
+)
+```
+
+`ModelConfig` supports these parts:
+
+| Part | What it controls |
+| ---- | ---------------- |
+| `response` | Final/direct assistant response generation |
+| `thinking` | The think system tool |
+| `compose_artifact` | The compose_artifact system tool |
+| `repl` | REPL code generation and repair |
+
+Each part can use `ModelChoice(tier='fast')`, `ModelChoice(tier='balanced')`,
+`ModelChoice(tier='max')`, `ModelChoice(tier='auto')`, or
+`ModelChoice(model_id='...')`. Unspecified parts keep the runtime default.
+Internal nodes such as assignment planning and generated-action planning are
+not configurable through `ModelConfig`.
+
+To apply one exact model id to every configurable part, use:
+
+```python
+response = agent.invoke(
+    [HumanMessage(content='Summarize the account.')],
+    model=ModelConfig.for_all(model_id='claude-haiku-4-5-20251001'),
+)
+```
+
+The older `force_model='...'` argument is deprecated. It emits a
+`DeprecationWarning` and cannot be combined with `ModelConfig`.
 
 ### reasoning — how much deliberation to allow
 

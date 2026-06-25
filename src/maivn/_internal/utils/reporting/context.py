@@ -8,10 +8,12 @@ nested sessions are displayed in the terminal.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from maivn._internal.core.entities import SSEEvent
     from maivn._internal.utils.reporting.terminal_reporter import BaseReporter
 
 # MARK: - Context Variables
@@ -58,6 +60,12 @@ Nested agent invocations inherit this value so internal live streaming can be
 suppressed for ``invoke`` while remaining enabled for ``stream``.
 """
 
+current_stream_event_forwarder: ContextVar[Callable[[SSEEvent], None] | None] = ContextVar(
+    "current_stream_event_forwarder",
+    default=None,
+)
+"""Forward selected nested stream events to the active outer raw stream."""
+
 
 # MARK: - Public API
 
@@ -84,6 +92,7 @@ __all__ = [
     "allow_nested_response_stream",
     "current_sdk_delivery_mode",
     "current_reporter",
+    "current_stream_event_forwarder",
     "get_current_reporter",
     "inside_orchestrator",
     "set_current_reporter",

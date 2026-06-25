@@ -139,12 +139,15 @@ async def test_pause_resume_and_stop_drain() -> None:
     # Let any fire that was already in-flight when pause was called finish so
     # the post-pause snapshot reflects only steady-state paused behaviour.
     await asyncio.sleep(0.15)
-    paused_count = len(scope.calls)
+    with scope.lock:
+        paused_count = len(scope.calls)
     await asyncio.sleep(0.25)
-    assert len(scope.calls) == paused_count
+    with scope.lock:
+        assert len(scope.calls) == paused_count
     job.resume()
-    await asyncio.sleep(0.3)
-    assert len(scope.calls) > paused_count
+    await _wait_for_call_count(scope, paused_count + 1, timeout_seconds=2.0)
+    with scope.lock:
+        assert len(scope.calls) > paused_count
     job.stop(drain=True, timeout=2)
     assert job.is_done
 

@@ -156,7 +156,9 @@ def execute_stream(
 ) -> Iterator[SSEEvent]:
     """Execute a pre-compiled state and stream raw SSE events."""
     from maivn._internal.utils.reporting.context import (
+        allow_nested_response_stream,
         current_sdk_delivery_mode,
+        current_stream_event_forwarder,
         get_current_reporter,
         inside_orchestrator,
     )
@@ -182,6 +184,7 @@ def execute_stream(
 
     stream_queue: queue.Queue[SSEEvent | BaseException | object] = queue.Queue()
     stream_done = object()
+    nested_response_stream_allowed = allow_nested_response_stream.get()
 
     def _on_event(event: SSEEvent) -> None:
         stream_queue.put(event)
@@ -190,11 +193,15 @@ def execute_stream(
         token = None
         delivery_token = None
         orch_token = None
+        nested_stream_token = None
+        forwarder_token = None
         try:
             if reporter is not None:
                 from maivn._internal.utils.reporting.context import current_reporter
 
                 token = current_reporter.set(reporter)
+            forwarder_token = current_stream_event_forwarder.set(_on_event)
+            nested_stream_token = allow_nested_response_stream.set(nested_response_stream_allowed)
             delivery_token = current_sdk_delivery_mode.set("stream")
             orch_token = inside_orchestrator.set(True)
 
@@ -218,6 +225,10 @@ def execute_stream(
                 inside_orchestrator.reset(orch_token)
             if delivery_token is not None:
                 current_sdk_delivery_mode.reset(delivery_token)
+            if nested_stream_token is not None:
+                allow_nested_response_stream.reset(nested_stream_token)
+            if forwarder_token is not None:
+                current_stream_event_forwarder.reset(forwarder_token)
             if token is not None:
                 from maivn._internal.utils.reporting.context import current_reporter
 

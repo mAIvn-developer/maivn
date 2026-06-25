@@ -2,7 +2,7 @@
 
 **Package**: maivn
 **Distribution**: Public PyPI SDK
-**Report Date**: 2026-06-18
+**Report Date**: 2026-06-24
 **Report Version**: 2.1
 
 ---
@@ -16,7 +16,7 @@ First-party `maivn-*` packages are excluded from the third-party inventory.
 
 | Scope | Packages | Permissive | Weak Copyleft | Strong Copyleft | Non-OSI | Unknown |
 |-------|----------|------------|----------------|------------------|---------|---------|
-| Runtime | 40 | 38 | 2 | 0 | 0 | 0 |
+| Runtime | 42 | 40 | 2 | 0 | 0 | 0 |
 | Dev-only | 18 | 18 | 0 | 0 | 0 | 0 |
 
 ---
@@ -36,6 +36,7 @@ First-party `maivn-*` packages are excluded from the third-party inventory.
 | certifi | 2026.2.25 | Mozilla Public License 2.0 (MPL 2.0) | Weak Copyleft |   |
 | charset-normalizer | 3.4.6 | MIT | Permissive |   |
 | croniter | 6.2.2 | MIT | Permissive |   |
+| distro | 1.9.0 | Apache Software License | Permissive |   |
 | docstring-parser | 0.17.0 | MIT License | Permissive |   |
 | h11 | 0.16.0 | MIT License | Permissive |   |
 | httpcore | 1.0.9 | BSD-3-Clause | Permissive |   |
@@ -44,8 +45,8 @@ First-party `maivn-*` packages are excluded from the third-party inventory.
 | jsonpatch | 1.33 | BSD License | Permissive |   |
 | jsonpointer | 3.1.0 | BSD License | Permissive |   |
 | langchain-core | 1.4.7 | MIT License | Permissive |   |
-| langchain-protocol | 0.0.15 | MIT License | Permissive |   |
-| langsmith | 0.8.8 | MIT | Permissive |   |
+| langchain-protocol | 0.0.18 | MIT License | Permissive |   |
+| langsmith | 0.9.1 | MIT | Permissive |   |
 | markdown-it-py | 4.0.0 | MIT License | Permissive |   |
 | mdurl | 0.1.2 | MIT License | Permissive |   |
 | orjson | 3.11.9 | MPL-2.0 AND (Apache-2.0 OR MIT) | Weak Copyleft |   |
@@ -61,6 +62,7 @@ First-party `maivn-*` packages are excluded from the third-party inventory.
 | requests-toolbelt | 1.0.0 | Apache Software License | Permissive |   |
 | rich | 14.3.4 | MIT License | Permissive |   |
 | six | 1.17.0 | MIT License | Permissive |   |
+| sniffio | 1.3.1 | MIT License OR Apache Software License | Permissive |   |
 | tenacity | 9.1.4 | Apache Software License | Permissive |   |
 | typing-extensions | 4.15.0 | PSF-2.0 | Permissive |   |
 | typing-inspection | 0.4.2 | MIT | Permissive |   |
