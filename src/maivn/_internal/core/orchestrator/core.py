@@ -15,6 +15,8 @@ from maivn_shared import (
     BaseMessage,
     MemoryAssetsConfig,
     MemoryConfig,
+    ModelConfig,
+    ModelTier,
     SessionClientProtocol,
     SessionExecutionConfig,
     SessionOrchestrationConfig,
@@ -72,6 +74,7 @@ logger = logging.getLogger(__name__)
 # MARK: Types
 
 JsonObject: TypeAlias = dict[str, JsonValue]
+ModelSelection: TypeAlias = ModelTier | ModelConfig
 ProgressTask: TypeAlias = object
 
 
@@ -192,7 +195,7 @@ class AgentOrchestrator:
         force_final_tool: bool = False,
         targeted_tools: list[str] | None = None,
         structured_output: type[BaseModel] | None = None,
-        model: Literal["auto", "fast", "balanced", "max"] | None = None,
+        model: ModelSelection | None = None,
         force_model: str | None = None,
         reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
         stream_response: bool = True,
@@ -258,7 +261,7 @@ class AgentOrchestrator:
         force_final_tool: bool = False,
         targeted_tools: list[str] | None = None,
         structured_output: type[BaseModel] | None = None,
-        model: Literal["auto", "fast", "balanced", "max"] | None = None,
+        model: ModelSelection | None = None,
         force_model: str | None = None,
         reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
         stream_response: bool = True,
@@ -301,7 +304,7 @@ class AgentOrchestrator:
         messages: Sequence[BaseMessage],
         force_final_tool: bool = False,
         targeted_tools: list[str] | None = None,
-        model: Literal["auto", "fast", "balanced", "max"] | None = None,
+        model: ModelSelection | None = None,
         force_model: str | None = None,
         reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
         stream_response: bool = True,
@@ -452,7 +455,7 @@ class AgentOrchestrator:
         force_final_tool: bool = False,
         targeted_tools: list[str] | None = None,
         structured_output: type[BaseModel] | None = None,
-        model: Literal["auto", "fast", "balanced", "max"] | None = None,
+        model: ModelSelection | None = None,
         force_model: str | None = None,
         reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
         stream_response: bool = True,

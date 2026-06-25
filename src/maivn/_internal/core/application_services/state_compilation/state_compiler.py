@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import threading
+import warnings
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Literal, Protocol, TypeAlias, cast
@@ -13,6 +14,8 @@ from maivn_shared import (
     InterruptDependency,
     MemoryAssetsConfig,
     MemoryConfig,
+    ModelConfig,
+    ModelTier,
     SessionExecutionConfig,
     SessionOrchestrationConfig,
     SessionRequest,
@@ -33,12 +36,17 @@ from maivn._internal.core.tool_specs import ToolSpecFactory
 from ..helpers import get_optimal_worker_count
 from .dependency_updates import deduplicate_tool_specs, update_tool_dependency_references
 from .dynamic_tool_factory import DynamicToolFactory
+from .tool_cache import (
+    CompiledToolSpecCache,
+    compilation_fingerprint,
+    toolspec_cache_enabled,
+)
 from .tool_normalization import normalize_tools_for_structured_output
 
 # MARK: - Types
 
 JsonObject: TypeAlias = dict[str, JsonValue]
-ModelSelection: TypeAlias = Literal["auto", "fast", "balanced", "max"]
+ModelSelection: TypeAlias = ModelTier | ModelConfig
 ReasoningLevel: TypeAlias = Literal["minimal", "low", "medium", "high"]
 
 
@@ -64,6 +72,7 @@ class StateCompiler:
         )
         self._dynamic_tools: list[FunctionTool] = []
         self._tool_spec_lock: threading.Lock = threading.Lock()
+        self._compiled_cache: CompiledToolSpecCache = CompiledToolSpecCache()
 
     # MARK: - Public API
 
@@ -120,6 +129,15 @@ class StateCompiler:
             Compiled SessionRequest.
         """
         active_config = config or self._config
+        if force_model is not None:
+            if isinstance(model, ModelConfig):
+                raise ValueError("force_model cannot be combined with ModelConfig")
+            warnings.warn(
+                "force_model is deprecated and will be removed soon. "
+                "Use model=ModelConfig.for_all(model_id=...) or scoped ModelConfig fields.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         try:
             self._tool_spec_factory.reset_cache()
@@ -144,10 +162,7 @@ class StateCompiler:
             )
             all_tools = normalize_tools_for_structured_output(all_tools, structured_tool)
 
-        tool_specs = self._create_tool_specs_parallel(
-            all_tools, scope.id, max_workers=min(len(all_tools), get_optimal_worker_count())
-        )
-        update_tool_dependency_references(tool_specs, all_tools)
+        tool_specs = self._compile_tool_specs(all_tools, scope.id)
 
         metadata = self._build_metadata(active_config, metadata)
         execution_config = self._build_execution_config(
@@ -254,6 +269,33 @@ class StateCompiler:
                 existing_ids.add(tool.tool_id)
 
     # MARK: - Tool Spec Creation
+
+    def _compile_tool_specs(self, all_tools: list[BaseTool], agent_id: str) -> list[ToolSpec]:
+        """Compile tool specs, reusing a content-addressed cache when possible.
+
+        The cache key is a fingerprint of the tools' resolved schemas + agent id
+        (see ``tool_cache``). On a hit we skip the flatten / dedup / dependency-
+        rewrite entirely; an uncacheable tool set (fingerprint ``None``) or a
+        disabled cache always recompiles, preserving the original behavior.
+        """
+        cache_key = (
+            compilation_fingerprint(all_tools, agent_id) if toolspec_cache_enabled() else None
+        )
+        if cache_key is not None:
+            with self._tool_spec_lock:
+                cached = self._compiled_cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+        tool_specs = self._create_tool_specs_parallel(
+            all_tools, agent_id, max_workers=min(len(all_tools), get_optimal_worker_count())
+        )
+        update_tool_dependency_references(tool_specs, all_tools)
+
+        if cache_key is not None:
+            with self._tool_spec_lock:
+                self._compiled_cache.put(cache_key, tool_specs)
+        return tool_specs
 
     def _create_tool_specs_parallel(
         self, tools: list[BaseTool], agent_id: str, max_workers: int | None = None

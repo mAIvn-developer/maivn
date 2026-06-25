@@ -10,6 +10,8 @@ from maivn_shared import (
     BaseMessage,
     MemoryAssetsConfig,
     MemoryConfig,
+    ModelConfig,
+    ModelTier,
     SessionOrchestrationConfig,
     SessionRequest,
     SessionResponse,
@@ -24,6 +26,7 @@ from ..entities.tools.agent_tool import AgentTool
 # MARK: - Type Aliases
 
 JsonObject: TypeAlias = dict[str, JsonValue]
+ModelSelection: TypeAlias = ModelTier | ModelConfig
 
 # MARK: - Protocol Definition
 
@@ -43,7 +46,7 @@ class AgentOrchestratorInterface(Protocol):
         force_final_tool: bool = False,
         targeted_tools: list[str] | None = None,
         structured_output: type[BaseModel] | None = None,
-        model: Literal["auto", "fast", "balanced", "max"] | None = None,
+        model: ModelSelection | None = None,
         force_model: str | None = None,
         reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
         stream_response: bool = True,
@@ -88,7 +91,7 @@ class AgentOrchestratorInterface(Protocol):
         force_final_tool: bool = False,
         targeted_tools: list[str] | None = None,
         structured_output: type[BaseModel] | None = None,
-        model: Literal["auto", "fast", "balanced", "max"] | None = None,
+        model: ModelSelection | None = None,
         force_model: str | None = None,
         reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
         stream_response: bool = True,
@@ -130,7 +133,7 @@ class AgentOrchestratorInterface(Protocol):
         messages: Sequence[BaseMessage],
         force_final_tool: bool = False,
         targeted_tools: list[str] | None = None,
-        model: Literal["auto", "fast", "balanced", "max"] | None = None,
+        model: ModelSelection | None = None,
         force_model: str | None = None,
         reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
         stream_response: bool = True,

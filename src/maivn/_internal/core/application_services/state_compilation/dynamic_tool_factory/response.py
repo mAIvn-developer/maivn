@@ -155,6 +155,12 @@ class DynamicToolFactoryResponseMixin:
         if isinstance(assistant_id, str) and assistant_id.strip():
             payload["assistant_id"] = assistant_id.strip()
 
+        metadata = _optional_attr(response, "metadata")
+        if isinstance(metadata, dict):
+            metadata_map = cast(Mapping[str, object], metadata)
+            if metadata_map.get("response_streamed_live") is True:
+                payload["response_streamed_live"] = True
+
         token_usage = _optional_attr(response, "token_usage")
         if token_usage is not None:
             token_usage_payload = _model_dump_json(token_usage)
@@ -165,7 +171,6 @@ class DynamicToolFactoryResponseMixin:
 
         detailed_usage = _optional_attr(response, "detailed_token_usage")
         if detailed_usage is None:
-            metadata = _optional_attr(response, "metadata")
             if isinstance(metadata, dict):
                 detailed_usage = cast(Mapping[str, object], metadata).get("detailed_token_usage")
         if detailed_usage is not None:

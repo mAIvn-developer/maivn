@@ -9,6 +9,8 @@ from maivn import (
     Agent,
     MemoryAssetsConfig,
     MemoryConfig,
+    ModelChoice,
+    ModelConfig,
     SessionOrchestrationConfig,
     SwarmConfig,
     SystemToolsConfig,
@@ -245,7 +247,7 @@ def invoke(
     force_final_tool: bool = False,
     targeted_tools: list[str] | None = None,
     structured_output: type[BaseModel] | None = None,
-    model: Literal['auto', 'fast', 'balanced', 'max'] | None = None,
+    model: Literal['auto', 'fast', 'balanced', 'max'] | ModelConfig | None = None,
     force_model: str | None = None,
     reasoning: Literal['minimal', 'low', 'medium', 'high'] | None = None,
     stream_response: bool = True,
@@ -269,8 +271,8 @@ def invoke(
 | `force_final_tool`              | `bool`                                   | `False`  | Force this invocation to return the `final_tool=True` tool. The agent constructor can also set this as a default |
 | `targeted_tools`                | `list[str] \| None`                      | `None`   | Run only these tools (plus dependencies)                                                  |
 | `structured_output`             | `type[BaseModel] \| None`                | `None`   | Advanced direct structured-output schema. Prefer `agent.structured_output(Model).invoke(...)` for public use. |
-| `model`                         | `Literal`                                | `None`   | LLM selection hint: `'auto'`, `'fast'`, `'balanced'`, `'max'`                             |
-| `force_model`                   | `str \| None`                            | `None`   | Pin a specific model by name, overriding the `model` selection hint                       |
+| `model`                         | `Literal['auto', 'fast', 'balanced', 'max'] \| ModelConfig \| None` | `None` | LLM selection: a tier for broad routing, or a scoped `ModelConfig` for configurable framework parts |
+| `force_model`                   | `str \| None`                            | `None`   | Deprecated compatibility path for globally pinning a model. Use `model=ModelConfig.for_all(model_id=...)` or a scoped `ModelConfig` instead |
 | `reasoning`                     | `Literal`                                | `None`   | Reasoning level: `'minimal'` to `'high'`                                                  |
 | `stream_response`               | `bool`                                   | `True`   | Request streamed model output from the server transport                                   |
 | `thread_id`                     | `str \| None`                            | `None`   | Thread ID for multi-turn conversations                                                    |
@@ -308,6 +310,58 @@ Use typed config fields for runtime controls:
 
 The SDK still returns response metadata, but request `metadata` is for application-specific
 labels and correlation data only.
+
+#### Model selection
+
+Use a tier string when you only want to express a broad speed/capability trade-off:
+
+```python
+response = agent.invoke(
+    [HumanMessage(content='Draft a launch plan.')],
+    model='balanced',
+)
+```
+
+Use `ModelConfig` when you need scoped control over the configurable framework
+parts. Each part can choose either a tier or a concrete model id:
+
+```python
+from maivn import ModelChoice, ModelConfig
+
+response = agent.invoke(
+    [HumanMessage(content='Analyze this asset inventory.')],
+    model=ModelConfig(
+        response=ModelChoice(model_id='claude-haiku-4-5-20251001'),
+        thinking=ModelChoice(tier='max'),
+        compose_artifact=ModelChoice(tier='balanced'),
+        repl=ModelChoice(tier='fast'),
+    ),
+)
+```
+
+Configurable parts:
+
+| Part | What it controls |
+| ---- | ---------------- |
+| `response` | Final/direct assistant response generation |
+| `thinking` | The think system tool |
+| `compose_artifact` | The compose_artifact system tool |
+| `repl` | REPL code generation and repair |
+
+Unspecified parts keep the runtime default. Internal framework nodes such as
+assignment planning and generated-action nodes are intentionally not configurable.
+
+For a whole-request exact model override during the deprecation window, prefer:
+
+```python
+response = agent.invoke(
+    [HumanMessage(content='Summarize the ticket.')],
+    model=ModelConfig.for_all(model_id='claude-haiku-4-5-20251001'),
+)
+```
+
+`force_model` is deprecated, emits a `DeprecationWarning`, and cannot be combined
+with `ModelConfig`.
 
 #### Raises
 
@@ -498,7 +552,7 @@ def stream(
     messages: Sequence[BaseMessage],
     force_final_tool: bool = False,
     targeted_tools: list[str] | None = None,
-    model: Literal['auto', 'fast', 'balanced', 'max'] | None = None,
+    model: Literal['auto', 'fast', 'balanced', 'max'] | ModelConfig | None = None,
     force_model: str | None = None,
     reasoning: Literal['minimal', 'low', 'medium', 'high'] | None = None,
     stream_response: bool = True,
@@ -522,8 +576,8 @@ def stream(
 | `messages`                      | `Sequence[BaseMessage]`                  | Required | Messages to send to the agent                                                          |
 | `force_final_tool`              | `bool`                                   | `False`  | Force this stream invocation to return the `final_tool=True` tool. The agent constructor can also set this as a default |
 | `targeted_tools`                | `list[str] \| None`                      | `None`   | Run only these tools, plus dependencies                                                 |
-| `model`                         | `Literal['auto', 'fast', 'balanced', 'max'] \| None` | `None` | LLM selection hint                                                              |
-| `force_model`                   | `str \| None`                            | `None`   | Pin a specific model by name, overriding the `model` selection hint                     |
+| `model`                         | `Literal['auto', 'fast', 'balanced', 'max'] \| ModelConfig \| None` | `None` | LLM selection: a tier or scoped `ModelConfig` |
+| `force_model`                   | `str \| None`                            | `None`   | Deprecated compatibility path for globally pinning a model. Use `model=ModelConfig.for_all(model_id=...)` or a scoped `ModelConfig` instead |
 | `reasoning`                     | `Literal['minimal', 'low', 'medium', 'high'] \| None` | `None` | Reasoning level                                                        |
 | `stream_response`               | `bool`                                   | `True`   | Request streamed model output from the server transport                                 |
 | `status_messages`               | `bool`                                   | `False`  | Opt into normalized status-message events for frontend progress displays                |
