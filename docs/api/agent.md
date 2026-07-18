@@ -247,7 +247,7 @@ def invoke(
     force_final_tool: bool = False,
     targeted_tools: list[str] | None = None,
     structured_output: type[BaseModel] | None = None,
-    model: Literal['auto', 'fast', 'balanced', 'max'] | ModelConfig | None = None,
+    model: Literal['auto', 'fast', 'balanced', 'max', 'ultra'] | ModelConfig | None = None,
     force_model: str | None = None,
     reasoning: Literal['minimal', 'low', 'medium', 'high'] | None = None,
     stream_response: bool = True,
@@ -271,7 +271,7 @@ def invoke(
 | `force_final_tool`              | `bool`                                   | `False`  | Force this invocation to return the `final_tool=True` tool. The agent constructor can also set this as a default |
 | `targeted_tools`                | `list[str] \| None`                      | `None`   | Run only these tools (plus dependencies)                                                  |
 | `structured_output`             | `type[BaseModel] \| None`                | `None`   | Advanced direct structured-output schema. Prefer `agent.structured_output(Model).invoke(...)` for public use. |
-| `model`                         | `Literal['auto', 'fast', 'balanced', 'max'] \| ModelConfig \| None` | `None` | LLM selection: a tier for broad routing, or a scoped `ModelConfig` for configurable framework parts |
+| `model`                         | `Literal['auto', 'fast', 'balanced', 'max', 'ultra'] \| ModelConfig \| None` | `None` | Provider-neutral model tier, or a scoped `ModelConfig`; `None` uses `auto` |
 | `force_model`                   | `str \| None`                            | `None`   | Deprecated compatibility path for globally pinning a model. Use `model=ModelConfig.for_all(model_id=...)` or a scoped `ModelConfig` instead |
 | `reasoning`                     | `Literal`                                | `None`   | Reasoning level: `'minimal'` to `'high'`                                                  |
 | `stream_response`               | `bool`                                   | `True`   | Request streamed model output from the server transport                                   |
@@ -552,7 +552,7 @@ def stream(
     messages: Sequence[BaseMessage],
     force_final_tool: bool = False,
     targeted_tools: list[str] | None = None,
-    model: Literal['auto', 'fast', 'balanced', 'max'] | ModelConfig | None = None,
+    model: Literal['auto', 'fast', 'balanced', 'max', 'ultra'] | ModelConfig | None = None,
     force_model: str | None = None,
     reasoning: Literal['minimal', 'low', 'medium', 'high'] | None = None,
     stream_response: bool = True,
@@ -576,7 +576,7 @@ def stream(
 | `messages`                      | `Sequence[BaseMessage]`                  | Required | Messages to send to the agent                                                          |
 | `force_final_tool`              | `bool`                                   | `False`  | Force this stream invocation to return the `final_tool=True` tool. The agent constructor can also set this as a default |
 | `targeted_tools`                | `list[str] \| None`                      | `None`   | Run only these tools, plus dependencies                                                 |
-| `model`                         | `Literal['auto', 'fast', 'balanced', 'max'] \| ModelConfig \| None` | `None` | LLM selection: a tier or scoped `ModelConfig` |
+| `model`                         | `Literal['auto', 'fast', 'balanced', 'max', 'ultra'] \| ModelConfig \| None` | `None` | Provider-neutral tier or scoped `ModelConfig`; `None` uses `auto` |
 | `force_model`                   | `str \| None`                            | `None`   | Deprecated compatibility path for globally pinning a model. Use `model=ModelConfig.for_all(model_id=...)` or a scoped `ModelConfig` instead |
 | `reasoning`                     | `Literal['minimal', 'low', 'medium', 'high'] \| None` | `None` | Reasoning level                                                        |
 | `stream_response`               | `bool`                                   | `True`   | Request streamed model output from the server transport                                 |
@@ -846,7 +846,7 @@ def invoke(
     messages: Sequence[BaseMessage],
     *,
     force_final_tool: bool = False,
-    model: Literal['fast', 'balanced', 'max'] | None = None,
+    model: Literal['fast', 'balanced', 'max', 'ultra'] | None = None,
     reasoning: Literal['minimal', 'low', 'medium', 'high'] | None = None,
     stream_response: bool = True,
     thread_id: str | None = None,
@@ -865,7 +865,7 @@ All parameters after `messages` are keyword-only.
 | ----------- | --------------------------------------------- | -------- | ------------------------------------------------------------ |
 | `messages`  | `Sequence[BaseMessage]`                       | Required | Messages to send                                             |
 | `force_final_tool` | `bool`                                 | `False`  | Force the structured-output schema as the final output tool   |
-| `model`     | `Literal['fast', 'balanced', 'max']`          | `None`   | LLM selection hint                                           |
+| `model`     | `Literal['fast', 'balanced', 'max', 'ultra']` | `None`   | Provider-neutral model tier hint                             |
 | `reasoning` | `Literal['minimal', 'low', 'medium', 'high']` | `None`   | Reasoning level                                              |
 | `stream_response` | `bool`                                 | `True`   | Request streamed model output from the server transport       |
 | `thread_id` | `str \| None`                                 | `None`   | Thread ID for conversations                                  |

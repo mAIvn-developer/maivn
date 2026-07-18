@@ -110,7 +110,8 @@ class StateCompiler:
             force_final_tool: Whether to force final tool.
             targeted_tools: Optional list of tool_id strings to target.
             structured_output: Optional Pydantic model for structured output.
-            model: Optional model tier ("auto", "fast", "balanced", "max").
+            model: Optional provider-neutral model tier ("auto", "fast",
+                "balanced", "max", or "ultra") or scoped ModelConfig.
             force_model: Optional exact model identifier to force (e.g. "claude-opus-5").
             reasoning: Optional reasoning level.
             stream_response: Whether to stream intermediate responses.

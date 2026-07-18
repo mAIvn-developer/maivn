@@ -11,41 +11,106 @@ The agent does the deciding. You describe what each tool does; the agent figures
 ## Prerequisites
 
 - Python 3.10+
-- A maivn API key
+- A [mAIvn Developer Portal](https://developer.maivn.io) account
+- A mAIvn API key (the steps below show where to create one)
 
-## Installation
+## Step 1: Create an Isolated Python Environment
+
+Use one of these paths. Both create a project-local `.venv` so mAIvn and its
+dependencies do not change your system Python.
+
+### Option A: Python `venv` and pip
+
+Create a working directory and virtual environment:
 
 ```bash
-pip install maivn
+mkdir maivn-quickstart
+cd maivn-quickstart
+python -m venv .venv
 ```
 
-Or with uv:
+Activate it in Windows PowerShell:
 
-```bash
-uv add maivn
+```powershell
+.venv\Scripts\Activate.ps1
 ```
 
-To install the public Studio companion and enable `maivn studio` from a normal shell:
+Or activate it on macOS/Linux:
 
 ```bash
-pip install maivn maivn-studio
+source .venv/bin/activate
+```
+
+Then upgrade pip and install the SDK:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install maivn
+```
+
+Keep the environment active while following the guide. Run `deactivate` when
+you are finished.
+
+### Option B: uv-managed virtual environment
+
+From an empty working directory, create `.venv` with Python 3.12 and install the
+SDK:
+
+```bash
+mkdir maivn-quickstart
+cd maivn-quickstart
+uv venv --python 3.12
+uv pip install maivn
+```
+
+For this pip-compatible uv workflow, activate the environment before running
+commands: use `.venv\Scripts\Activate.ps1` in Windows PowerShell or
+`source .venv/bin/activate` on macOS/Linux.
+
+For a longer-lived project, use `uv init`, `uv add maivn`, and
+`uv run python app.py`. That workflow records the dependency in
+`pyproject.toml`, keeps the project environment synchronized, and does not
+require activation.
+
+### Optional: install mAIvn Studio
+
+Install the public Studio companion into the same environment:
+
+```bash
+python -m pip install maivn-studio
 maivn studio
 ```
 
-> **Using uv?** A `uv add`/`uv pip install` puts the `maivn` command inside the
-> project's `.venv`, which uv does not auto-activate. Launch Studio with
-> `uv run maivn studio`, or activate the environment first
-> (`.venv\Scripts\activate` on Windows, `source .venv/bin/activate` elsewhere)
-> and then run `maivn studio` directly.
+With uv, use:
 
 ```bash
-uv add maivn maivn-studio
-uv run maivn studio
+uv pip install maivn-studio
+maivn studio
 ```
 
-## Step 1: Set Up Your API Key
+If you chose the project workflow instead, use `uv add maivn-studio` and
+`uv run maivn studio`.
+
+## Step 2: Create and Set Up Your API Key
+
+1. Sign in to the [mAIvn Developer Portal](https://developer.maivn.io).
+2. Open [API Keys](https://developer.maivn.io/projects/current/api-keys). If
+   this is your first visit, the portal creates a default organization and
+   project so you can continue without additional workspace setup.
+3. Select **Create Key**, enter a descriptive name, and choose the narrowest
+   permission scope your application needs.
+4. Copy the key immediately and store it securely. The portal shows the full
+   value only once.
 
 Set your API key as an environment variable:
+
+Windows PowerShell:
+
+```powershell
+$env:MAIVN_API_KEY="your-api-key"
+```
+
+macOS/Linux:
 
 ```bash
 export MAIVN_API_KEY=your-api-key
@@ -54,7 +119,9 @@ export MAIVN_API_KEY=your-api-key
 The `Agent` constructor does not read environment variables automatically; read
 the key explicitly or pass a preconfigured `Client`.
 
-## Step 2: Create Your First Agent
+## Step 3: Create Your First Agent
+
+Create `app.py`:
 
 ```python
 import os
@@ -71,7 +138,7 @@ agent = Agent(
 )
 ```
 
-## Step 3: Add a Tool
+## Step 4: Add a Tool
 
 Tools are functions that the agent can call. Use the `@agent.toolify()` decorator:
 
@@ -102,7 +169,7 @@ def get_weather(city: str) -> dict:
 
 agent = Agent(
     name='weather_agent',
-    api_key='your-api-key',
+    api_key=os.environ['MAIVN_API_KEY'],
     tools=[get_weather],
 )
 
@@ -112,7 +179,7 @@ agent.add_tool(get_weather)
 
 **Note:** Your tool code executes locally in your environment - it is never transferred to or executed on mAIvn's servers. Only the tool schema (name, description, parameters) is sent to the hosted orchestrator.
 
-## Step 4: Invoke the Agent
+## Step 5: Invoke the Agent
 
 ```python
 # Send a message to the agent
@@ -125,11 +192,25 @@ print(response.response)
 
 `response.response` holds the final assistant text — the natural-language answer the agent produced after deciding whether to call your tool.
 
+Run the script from the same shell where `MAIVN_API_KEY` is set:
+
+```bash
+python app.py
+```
+
+Or, from a uv project initialized with `uv init`:
+
+```bash
+uv run python app.py
+```
+
 ## Complete Example
 
 Here's the full working example:
 
 ```python
+import os
+
 from maivn import Agent
 from maivn.messages import HumanMessage
 
@@ -138,7 +219,7 @@ agent = Agent(
     name='weather_agent',
     description='An agent that can check the weather',
     system_prompt='You are a helpful assistant that provides weather information.',
-    api_key='your-api-key',
+    api_key=os.environ['MAIVN_API_KEY'],
 )
 
 # Add a tool
@@ -155,7 +236,7 @@ response = agent.invoke([
 print(response.response)
 ```
 
-## Step 5: Add Structured Output
+## Step 6: Add Structured Output
 
 When your code needs to act on the answer — not just print it — you want a guaranteed shape, not prose to parse. Mark a Pydantic model as a final tool and the agent will fill it in:
 
@@ -184,7 +265,7 @@ print(response.result.temperature)
 
 For a deeper look — including the faster `agent.structured_output(MyModel).invoke(...)` builder for one-shot extraction — see the [Structured Output Guide](structured-output.md).
 
-## Step 6: Stream Live Progress
+## Step 7: Stream Live Progress
 
 For a responsive UI, you'll want to show what the agent is doing while it works, instead of waiting for the whole turn to finish. The events builder wraps `invoke()` and reports progress as it happens:
 

@@ -187,6 +187,7 @@ response = agent.invoke(
 | `'fast'`     | Favor speed and lower latency                                   |
 | `'balanced'` | A middle ground between speed and capability                    |
 | `'max'`      | Favor maximum capability for hard requests                      |
+| `'ultra'`    | Favor the highest available capability for the hardest requests |
 
 Leave `model` unset (or `'auto'`) and the runtime chooses for you. The selection
 logic is intentionally internal for the broad tier path.
@@ -217,7 +218,7 @@ response = agent.invoke(
 | `repl` | REPL code generation and repair |
 
 Each part can use `ModelChoice(tier='fast')`, `ModelChoice(tier='balanced')`,
-`ModelChoice(tier='max')`, `ModelChoice(tier='auto')`, or
+`ModelChoice(tier='max')`, `ModelChoice(tier='ultra')`, `ModelChoice(tier='auto')`, or
 `ModelChoice(model_id='...')`. Unspecified parts keep the runtime default.
 Internal nodes such as assignment planning and generated-action planning are
 not configurable through `ModelConfig`.

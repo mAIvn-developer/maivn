@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-08-14
+
+### Added
+
+- Added `ultra` to the provider-neutral model-tier surface, including
+  structured-output and nested-agent invocations.
+- Added public documentation for weighted-token billing and the fixed Fast,
+  Balanced, Max, and Ultra multipliers.
+
+## [0.4.2] - 2026-06-25
+
+### Added
+
+- Added public `ModelChoice`, `ModelConfig`, `ModelConfigPart`, and `ModelTier`
+  exports and threaded scoped model selection through Agent, Swarm, and nested
+  agent invocations.
+- Added a content-addressed cache for compiled tool specs with schema-aware
+  invalidation.
+
+### Changed
+
+- Deprecated the global `force_model` compatibility path in favor of scoped
+  `ModelConfig` choices.
+- Restricted live nested-response forwarding to nested agents explicitly used
+  as the final output while preserving the completed `SessionResponse`.
+- Moved event-bridge serialization to `orjson`, including browser-safe handling
+  of non-finite numeric values.
+- Raised the minimum `maivn-shared` version to `0.4.2`.
+
 ## [0.4.1] - 2026-06-15
 
 ### Fixed

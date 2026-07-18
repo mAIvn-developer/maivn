@@ -40,7 +40,7 @@ from .response import DynamicToolFactoryResponseMixin
 
 # MARK: - Types
 
-ModelSelection: TypeAlias = Literal["fast", "balanced", "max"]
+ModelSelection: TypeAlias = Literal["fast", "balanced", "max", "ultra"]
 
 logger = logging.getLogger(__name__)
 _NESTED_FINAL_RESPONSE_ASSISTANT_IDS = frozenset({"chat_agent", "orchestrator_agent"})
@@ -225,7 +225,7 @@ class DynamicToolFactory(
                 use_as_final_output: If True, this agent's output is treated as
                     the swarm's final response (does not force final_tool).
                 force_final_tool: If True, force execution of the agent's final_tool.
-                model: LLM model selection hint ('fast', 'balanced', 'max').
+                model: LLM model selection hint ('fast', 'balanced', 'max', 'ultra').
                     Use 'fast' for intermediate agents to maximize performance.
                 included_nested_synthesis: Nested synthesis mode for the invoked agent.
                     True=always include synthesized response, False=skip synthesis,
