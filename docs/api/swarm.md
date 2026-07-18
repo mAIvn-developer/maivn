@@ -155,7 +155,7 @@ Invoke the swarm with messages.
 def invoke(
     messages: Sequence[BaseMessage] | BaseMessage,
     *,
-    model: Literal['auto', 'fast', 'balanced', 'max'] | ModelConfig | None = None,
+    model: Literal['auto', 'fast', 'balanced', 'max', 'ultra'] | ModelConfig | None = None,
     force_model: str | None = None,
     reasoning: Any = None,
     force_final_tool: bool = False,
@@ -175,7 +175,7 @@ def invoke(
 | Parameter                       | Type                                         | Default  | Description                                                                            |
 | ------------------------------- | -------------------------------------------- | -------- | -------------------------------------------------------------------------------------- |
 | `messages`                      | `Sequence[BaseMessage] \| BaseMessage`       | Required | Messages to send                                                                       |
-| `model`                         | `Literal['auto', 'fast', 'balanced', 'max'] \| ModelConfig \| None` | `None` | LLM selection: a tier for broad routing, or a scoped `ModelConfig` for configurable framework parts |
+| `model`                         | `Literal['auto', 'fast', 'balanced', 'max', 'ultra'] \| ModelConfig \| None` | `None` | Provider-neutral tier or scoped `ModelConfig`; `None` uses `auto` |
 | `force_model`                   | `str \| None`                                | `None`   | Deprecated compatibility path for globally pinning a model. Use `model=ModelConfig.for_all(model_id=...)` or a scoped `ModelConfig` instead |
 | `reasoning`                     | `Any`                                        | `None`   | Reasoning level                                                                        |
 | `force_final_tool`              | `bool`                                       | `False`  | Force final tool output                                                                |
@@ -195,7 +195,7 @@ def invoke(
 #### Model selection
 
 `Swarm.invoke()` accepts the same model selection surface as `Agent.invoke()`:
-a tier string (`'auto'`, `'fast'`, `'balanced'`, or `'max'`) or a `ModelConfig`.
+a tier string (`'auto'`, `'fast'`, `'balanced'`, `'max'`, or `'ultra'`) or a `ModelConfig`.
 
 `ModelConfig` only applies to configurable framework parts: `response`,
 `thinking`, `compose_artifact`, and `repl`. Internal swarm planning, assignment,
@@ -341,7 +341,7 @@ Stream raw SSE events while the swarm executes.
 def stream(
     messages: Sequence[BaseMessage] | BaseMessage,
     *,
-    model: Literal['auto', 'fast', 'balanced', 'max'] | ModelConfig | None = None,
+    model: Literal['auto', 'fast', 'balanced', 'max', 'ultra'] | ModelConfig | None = None,
     force_model: str | None = None,
     reasoning: Any = None,
     force_final_tool: bool = False,
@@ -362,7 +362,7 @@ def stream(
 | Parameter                       | Type                                                   | Default  | Description                                                              |
 | ------------------------------- | ------------------------------------------------------ | -------- | ------------------------------------------------------------------------ |
 | `messages`                      | `Sequence[BaseMessage] \| BaseMessage`                 | Required | Messages to send to the swarm                                            |
-| `model`                         | `Literal['auto', 'fast', 'balanced', 'max'] \| ModelConfig \| None` | `None` | LLM selection: a tier or scoped `ModelConfig` |
+| `model`                         | `Literal['auto', 'fast', 'balanced', 'max', 'ultra'] \| ModelConfig \| None` | `None` | Provider-neutral tier or scoped `ModelConfig`; `None` uses `auto` |
 | `force_model`                   | `str \| None`                                          | `None`   | Deprecated compatibility path for globally pinning a model. Use `model=ModelConfig.for_all(model_id=...)` or a scoped `ModelConfig` instead |
 | `reasoning`                     | `Any`                                                  | `None`   | Reasoning level                                                          |
 | `force_final_tool`              | `bool`                                                 | `False`  | Force the final tool or final-output agent result                        |

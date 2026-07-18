@@ -66,7 +66,8 @@ class AgentOrchestratorInterface(Protocol):
             force_final_tool: If True, returns result from final_tool; otherwise last task.
             targeted_tools: Optional list of tool names to execute.
             structured_output: Optional Pydantic model for structured output validation.
-            model: LLM model selection: 'fast', 'balanced', 'max'.
+            model: Provider-neutral model tier ('auto', 'fast', 'balanced',
+                'max', or 'ultra') or a scoped ModelConfig.
             reasoning: Reasoning level: 'minimal', 'low', 'medium', 'high'.
             stream_response: Whether to stream synthesized response updates.
             status_messages: Whether to emit status messages at swarm lifecycle milestones.
@@ -111,7 +112,8 @@ class AgentOrchestratorInterface(Protocol):
             force_final_tool: If True, returns result from final_tool; otherwise last task.
             targeted_tools: Optional list of tool names to execute.
             structured_output: Optional Pydantic model for structured output validation.
-            model: LLM model selection: 'fast', 'balanced', 'max'.
+            model: Provider-neutral model tier ('auto', 'fast', 'balanced',
+                'max', or 'ultra') or a scoped ModelConfig.
             reasoning: Reasoning level: 'minimal', 'low', 'medium', 'high'.
             stream_response: Whether to stream synthesized response updates.
             thread_id: Optional thread identifier for conversation continuity.

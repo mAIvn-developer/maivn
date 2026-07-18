@@ -231,6 +231,8 @@ if counters.tokens_limit != -1:  # -1 = unlimited
 
 ## Next Steps
 
+- [Weighted Token Billing](./weighted-token-billing.md) - how provider-neutral
+  model tiers translate raw usage into billed usage.
 - [Sessions, Invocation, and Streaming](./sessions-and-streaming.md) — read
   responses and live events from a run, including where usage data appears.
 - [SDK Reference (Billing)](../api/billing.md) — full `get_usage()` signature,

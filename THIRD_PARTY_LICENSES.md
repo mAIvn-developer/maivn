@@ -2,7 +2,7 @@
 
 **Package**: maivn
 **Distribution**: Public PyPI SDK
-**Report Date**: 2026-06-24
+**Report Date**: 2026-08-14
 **Report Version**: 2.1
 
 ---
@@ -44,7 +44,7 @@ First-party `maivn-*` packages are excluded from the third-party inventory.
 | idna | 3.18 | BSD-3-Clause | Permissive |   |
 | jsonpatch | 1.33 | BSD License | Permissive |   |
 | jsonpointer | 3.1.0 | BSD License | Permissive |   |
-| langchain-core | 1.4.7 | MIT License | Permissive |   |
+| langchain-core | 1.5.5 | MIT License | Permissive |   |
 | langchain-protocol | 0.0.18 | MIT License | Permissive |   |
 | langsmith | 0.9.1 | MIT | Permissive |   |
 | markdown-it-py | 4.0.0 | MIT License | Permissive |   |
@@ -84,7 +84,7 @@ These packages are not part of the production runtime image.
 |---------|---------|-------------------|----------|-------|
 | annotated-doc | 0.0.4 | MIT | Permissive |   |
 | basedpyright | 1.39.5 | MIT License | Permissive |   |
-| click | 8.3.1 | BSD-3-Clause | Permissive |   |
+| click | 8.4.2 | BSD-3-Clause | Permissive |   |
 | fastapi | 0.136.3 | MIT | Permissive |   |
 | httpcore2 | 2.4.0 | BSD-3-Clause | Permissive |   |
 | httpx2 | 2.4.0 | BSD-3-Clause | Permissive |   |

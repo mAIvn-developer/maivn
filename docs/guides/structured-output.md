@@ -71,7 +71,7 @@ The `.structured_output()` builder returns an invocation builder with these opti
 ```python
 response = agent.structured_output(MyModel).invoke(
     messages=[HumanMessage(content='...')],
-    model='balanced',    # 'fast', 'balanced', or 'max' (omit for the default)
+    model='balanced',    # provider-neutral tier; omit to use 'auto'
     reasoning='minimal', # 'minimal', 'low', 'medium', 'high'
     thread_id='...',     # For multi-turn conversations
 )

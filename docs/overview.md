@@ -94,6 +94,6 @@ Pick the path that matches what you're trying to do:
   - [Structured Output](guides/structured-output.md) — Guaranteed, typed responses.
   - [Multi-Agent](guides/multi-agent.md) — Coordinate specialized agents with a `Swarm`.
   - [Private Data](guides/private-data.md) — Keep secrets and PII out of the model.
-- **Guides** — Task-focused how-tos for [system tools](guides/system-tools.md), [memory and recall](guides/memory-and-recall.md), [scheduled invocation](guides/scheduled-invocation.md), [billing and usage](guides/billing-and-usage.md), and [frontend events](guides/frontend-events.md).
+- **Guides** — Task-focused how-tos for [system tools](guides/system-tools.md), [memory and recall](guides/memory-and-recall.md), [scheduled invocation](guides/scheduled-invocation.md), [billing and usage](guides/billing-and-usage.md), [weighted token billing](guides/weighted-token-billing.md), and [frontend events](guides/frontend-events.md).
 - **[SDK Reference](api/README.md)** — Per-class API documentation for [`Agent`](api/agent.md), [`Swarm`](api/swarm.md), [decorators](api/decorators.md), [configuration](api/configuration.md), and more.
 - **[Examples](examples/README.md)** — A working tour of the SDK organized by what you'd want to build.

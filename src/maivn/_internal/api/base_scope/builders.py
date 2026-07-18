@@ -223,7 +223,7 @@ class StructuredOutputInvocationBuilder:
         messages: Sequence[BaseMessage],
         *,
         force_final_tool: bool = False,
-        model: Literal["fast", "balanced", "max"] | None = None,
+        model: Literal["fast", "balanced", "max", "ultra"] | None = None,
         reasoning: Literal["minimal", "low", "medium", "high"] | None = None,
         stream_response: bool = True,
         thread_id: str | None = None,

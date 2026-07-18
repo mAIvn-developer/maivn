@@ -54,24 +54,48 @@ flowchart TD
 
 ## Installation
 
+Create an API key in the
+[mAIvn Developer Portal](https://developer.maivn.io/projects/current/api-keys),
+then install the SDK in a project-local virtual environment.
+
+With Python `venv` and pip:
+
 ```bash
-pip install maivn
+python -m venv .venv
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install maivn
+```
+
+Or create and use the environment with uv:
+
+```bash
+uv venv --python 3.12
+uv pip install maivn
+# Activate .venv with the platform command above, then:
+python app.py
 ```
 
 `maivn` depends on the public `maivn-shared` package and will install it automatically
 from PyPI.
 
-To install the public Studio companion and enable `maivn studio` from a normal shell:
+To install the public Studio companion in the same environment:
 
 ```bash
-pip install maivn maivn-studio
+python -m pip install maivn-studio
 maivn studio
 ```
 
-With a uv-managed project the command lives in the project `.venv`, which uv does
-not auto-activate — use `uv run maivn studio` (or activate the venv first).
+For a uv project managed with `uv init` and `uv add`, use
+`uv add maivn-studio` and `uv run maivn studio` without activating the
+environment.
 
 `maivn-studio` pins a compatible `maivn` version, so installing them together always resolves a matching pair.
+
+See the
+[Getting Started guide](https://developer.maivn.io/docs/getting-started) for
+copy-pasteable Windows, macOS, and Linux setup plus the first complete agent.
 
 ## Quick Start
 
@@ -112,7 +136,7 @@ agent = Agent(
     name='weather_agent',
     description='Provides weather information',
     system_prompt='You are a helpful weather assistant.',
-    api_key='your-api-key',
+    api_key=os.environ['MAIVN_API_KEY'],
     tools=[get_weather],
 )
 
@@ -242,20 +266,23 @@ agent.private_data = {'api_secret': 'sk-xxx'}
 ### Multi-Agent with Swarm
 
 ```python
+import os
+
 from maivn import Agent, Swarm, depends_on_agent
+from maivn.messages import HumanMessage
 
 researcher = Agent(
     name='researcher',
     description='Research specialist',
     system_prompt='You research topics thoroughly.',
-    api_key='your-api-key',
+    api_key=os.environ['MAIVN_API_KEY'],
 )
 
 writer = Agent(
     name='writer',
     description='Content writer',
     system_prompt='You write clear, engaging content.',
-    api_key='your-api-key',
+    api_key=os.environ['MAIVN_API_KEY'],
     use_as_final_output=True,  # This agent produces final output
     included_nested_synthesis='auto',  # default: orchestrator/runtime decides
 )
@@ -401,6 +428,7 @@ pages in order, then jump to whichever guide matches your task.
 - [Interrupts & Human-in-the-Loop](docs/guides/interrupts.md) - Pause a turn for human input with `@depends_on_interrupt`, then resume
 - [Enrichment Events and Streaming to a Frontend](docs/guides/frontend-events.md) - Live progress phases, the enrichment contract, and streaming events to any frontend
 - [Token and Usage Tracking](docs/guides/billing-and-usage.md) - `TokenUsage` per run, plus account usage and plan models
+- [Weighted Token Billing](docs/guides/weighted-token-billing.md) - How model tiers translate raw usage into billed usage
 - [System Tools](docs/guides/system-tools.md) - Built-in `web_search`, `repl`, `think`
 - [Connecting MCP Servers](docs/guides/mcp.md) - Plug in external MCP tool servers over stdio/HTTP, with auth and the trust boundary
 - [Memory and Recall](docs/guides/memory-and-recall.md) - Carry context across turns; skills, resources, and insights

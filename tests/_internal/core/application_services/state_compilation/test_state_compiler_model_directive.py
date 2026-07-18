@@ -42,6 +42,21 @@ def test_state_compiler_accepts_model_auto() -> None:
     assert result.model == "auto"
 
 
+def test_state_compiler_accepts_model_ultra() -> None:
+    """model='ultra' must be accepted and land on SessionRequest.model."""
+    compiler = _make_compiler()
+    scope = _MinimalScope()
+
+    result: SessionRequest = compiler.compile_state(
+        messages=[],
+        tools=[],
+        scope=scope,
+        model="ultra",
+    )
+
+    assert result.model == "ultra"
+
+
 def test_state_compiler_accepts_model_config() -> None:
     """ModelConfig must be accepted and land on SessionRequest.model."""
     compiler = _make_compiler()
