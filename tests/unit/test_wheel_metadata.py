@@ -30,4 +30,4 @@ def test_wheel_requires_the_private_data_vault_native_binding(tmp_path: Path) ->
         )
         metadata = BytesParser(policy=policy.default).parsebytes(archive.read(metadata_path))
 
-    assert 'private-data-vault==0.0.0' in metadata.get_all('Requires-Dist', [])
+    assert 'private-data-vault<0.2,>=0.1.0' in metadata.get_all('Requires-Dist', [])
