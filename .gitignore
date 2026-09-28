@@ -1,126 +1,92 @@
+# --- inherited from the maivn-platform superproject at extraction ---
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
+*.pyo
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# PyInstaller
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-cover/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-profile_default/
-ipython_config.py
-
-# Virtual environments
-.env
-.env.local
-.env.*.local
-!.env.example
-.venv
+.venv/
 venv/
 env/
-ENV/
-env.bak/
-venv.bak/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.pyright/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+*.egg-info/
 
-# IDE files
-.vscode/
-.idea/
+# Node / TypeScript
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+*.tsbuildinfo
+coverage/
+.next/
+.nuxt/
+.svelte-kit/
+out/
+
+# Go
+bin/
+pkg/
+*.test
+*.out
+coverage.out
+.gocache/
+.tmp-gen-check-*/
+
+# Rust
+target/
+Cargo.lock
+
+# Build artifacts and caches
+.cache/
+.parcel-cache/
+.turbo/
+.vite/
+tmp/
+temp/
+logs/
+*.log
+
+# OS and editors
+.DS_Store
+Thumbs.db
 *.swp
 *.swo
-*~
-.spyderproject
-.spyproject
-.ropeproject
+.idea/
+.vscode/*
+!.vscode/extensions.json
 
-# AI/Development Tools
-.claude/
-.cursor/
-.windsurf/
-.github/copilot/
-.aider/
-.continue/
+# Generated local outputs
+output/
+outputs/
 
-# OS files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-desktop.ini
+# Local task runner files
+.codex-task-*.md
 
-# Temporary files
-*.tmp
-*.temp
-*.bak
-*.backup
-*.old
+# Canonical prose belongs in the Obsidian vault. Do not ignore docs/; accidental repository prose must remain visible.
+.superpowers/
 
-# Type checking
-.mypy_cache/
-.dmypy.json
-dmypy.json
-.pyre/
-.pytype/
-cython_debug/
+# Local service runtime state
+.maivn-service-pids.json
+.maivn-run-state.json
+.maivn-logs/
+.maivn-runtime/
+.playwright-mcp/
 
-# Package managers
-.pdm.toml
-.pdm-python
-.pdm-build/
-__pypackages__/
-
-# Logs
-*.log
-logs/
-.deps/
-
-# Database
-*.sqlite
-*.sqlite3
-*.db
-
-# Documentation
-docs/_build/
-/site
+# Agent scratch output, never product source
+.scratch-codex/
+.impeccable/

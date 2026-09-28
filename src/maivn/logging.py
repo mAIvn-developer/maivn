@@ -1,16 +1,7 @@
-"""Public logging entry points for the maivn SDK."""
+"""Public logging entry points for the mAIvn SDK."""
 
-# pyright: strict
 from __future__ import annotations
 
-from ._internal.utils.logging.sdk_logger import (
-    configure_logging,
-    get_logger,
-)
+from maivn._internal.compat.logging import configure_logging, get_logger
 
-# MARK: - Public API
-
-__all__ = [
-    "configure_logging",
-    "get_logger",
-]
+__all__ = ['configure_logging', 'get_logger']

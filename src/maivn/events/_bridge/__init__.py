@@ -10,7 +10,6 @@ Submodules:
 - ui_event: UIEvent value object
 """
 
-# pyright: strict
 from __future__ import annotations
 
 from .bridge import (
@@ -27,15 +26,15 @@ from .ui_event import UIEvent
 # MARK: Public Exports
 
 __all__ = [
-    "BackpressurePolicy",
-    "BridgeAudience",
-    "BridgeRegistry",
-    "EventBridge",
-    "EventBridgeSecurityPolicy",
-    "EventSchemaError",
-    "UIEvent",
-    "ValidationMode",
-    "build_safe_event_payload",
-    "safe_json_dumps",
-    "validate_event",
+    'BackpressurePolicy',
+    'BridgeAudience',
+    'BridgeRegistry',
+    'EventBridge',
+    'EventBridgeSecurityPolicy',
+    'EventSchemaError',
+    'UIEvent',
+    'ValidationMode',
+    'build_safe_event_payload',
+    'safe_json_dumps',
+    'validate_event',
 ]

@@ -1,6 +1,5 @@
 """UI event value object for EventBridge."""
 
-# pyright: strict
 from __future__ import annotations
 
 import uuid
@@ -18,8 +17,8 @@ class UIEvent:
 
     type: str
     data: dict[str, object]
-    id: str = ""
-    timestamp: str = ""
+    id: str = ''
+    timestamp: str = ''
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -30,15 +29,15 @@ class UIEvent:
     def to_sse(self) -> dict[str, object]:
         """Build an ``EventSourceResponse``-compatible payload."""
         payload: dict[str, object] = {
-            "id": self.id,
-            "type": self.type,
-            "data": self.data,
-            "timestamp": self.timestamp,
+            'id': self.id,
+            'type': self.type,
+            'data': self.data,
+            'timestamp': self.timestamp,
         }
         return {
-            "event": self.type,
-            "id": self.id,
-            "data": build_safe_event_payload(
+            'event': self.type,
+            'id': self.id,
+            'data': build_safe_event_payload(
                 payload,
                 event_id=self.id,
                 event_type=self.type,
@@ -49,11 +48,11 @@ class UIEvent:
     def to_dict(self) -> dict[str, object]:
         """Serialize for history/snapshot APIs."""
         return {
-            "id": self.id,
-            "type": self.type,
-            "data": self.data,
-            "timestamp": self.timestamp,
+            'id': self.id,
+            'type': self.type,
+            'data': self.data,
+            'timestamp': self.timestamp,
         }
 
 
-__all__ = ["UIEvent"]
+__all__ = ['UIEvent']

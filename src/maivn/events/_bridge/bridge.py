@@ -1,11 +1,10 @@
 """Reusable EventBridge for streaming AppEvent v1 payloads to frontends via SSE."""
 
-# pyright: strict
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, Awaitable
-from typing import ClassVar, Final, Literal, cast
+import inspect
+from typing import TYPE_CHECKING, ClassVar, Final, Literal, cast
 
 from .dedup import build_interrupt_fingerprint, build_status_fingerprint
 from .emitters import (
@@ -32,16 +31,61 @@ from .serialization import logger
 from .streaming import generate_sse_events, reopen_bridge
 from .ui_event import UIEvent
 
-BackpressurePolicy = Literal["block", "drop_oldest", "drop_newest"]
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator, Awaitable, Callable
 
-_VALID_BACKPRESSURE: Final[frozenset[BackpressurePolicy]] = cast(
-    frozenset[BackpressurePolicy],
-    frozenset(("block", "drop_oldest", "drop_newest")),
-)  # pyright: ignore[reportUnnecessaryCast]
-_VALID_VALIDATION_MODES: Final[frozenset[ValidationMode]] = cast(
-    frozenset[ValidationMode],
-    frozenset(("off", "warn", "strict")),
-)  # pyright: ignore[reportUnnecessaryCast]
+    # A packet observer receives the final, canonical ``UIEvent`` - already
+    # normalized, validated, dedup-filtered, and security-sanitized - exactly
+    # once, after those steps and before it is enqueued for the live SSE
+    # consumer. It may return ``None`` (fire-and-forget) or an awaitable; if
+    # awaitable, ``_emit_packet`` awaits it before enqueueing, so an observer
+    # that wants a durable-write acknowledgement before the browser sees the
+    # event can simply await its own write there. Never called for events a
+    # dedup/backpressure policy drops before reaching ``_emit_packet``.
+    PacketObserver = Callable[[UIEvent], object]
+
+BackpressurePolicy = Literal['block', 'drop_oldest', 'drop_newest']
+
+_VALID_BACKPRESSURE: Final[frozenset[BackpressurePolicy]] = frozenset(
+    ('block', 'drop_oldest', 'drop_newest'),
+)
+_VALID_VALIDATION_MODES: Final[frozenset[ValidationMode]] = frozenset(
+    ('off', 'warn', 'strict'),
+)
+
+# BENCH-2026-08-16 (claude): the one event class the history can afford to lose. Chunk text
+# is already recoverable from `turn_complete.responses`; a tool call that ages out is gone.
+_EVICTABLE_EVENT_TYPES: Final[frozenset[str]] = frozenset(
+    ('assistant_chunk', 'system_tool_chunk', 'heartbeat')
+)
+
+
+def _evict_from_history(history: list[UIEvent], count: int) -> None:
+    """Drop `count` events, spending streaming chunks before anything structural.
+
+    BENCH-2026-08-16 (claude): this was `del history[:count]` - oldest-first, regardless of
+    what the event was. The events at the front of a run are `session_start`, `enrichment`
+    and the tool calls; the events filling the buffer are assistant text chunks. So any run
+    that streamed past `max_history` showed up in Studio as a run that called no tools at
+    all. multi_result_demo reported six tools in its own `turn_complete` and displayed
+    none, because 498 chunks had pushed all six out.
+
+    Structural events are only dropped once no chunk is left to drop, so the cap still
+    holds and the buffer stays bounded.
+    """
+    if count <= 0:
+        return
+    remaining = count
+    kept: list[UIEvent] = []
+    for event in history:
+        if remaining > 0 and event.type in _EVICTABLE_EVENT_TYPES:
+            remaining -= 1
+            continue
+        kept.append(event)
+    if remaining > 0:
+        # Nothing streaming left to spend: fall back to oldest-first for the balance.
+        kept = kept[remaining:]
+    history[:] = kept
 
 
 # MARK: EventBridge
@@ -51,8 +95,8 @@ class EventBridge:
     """Bridge between SDK execution events and a frontend SSE stream."""
 
     TERMINAL_EVENTS: ClassVar[frozenset[str]] = cast(
-        frozenset[str],
-        frozenset(("final", "error", "session_end")),
+        'frozenset[str]',
+        frozenset(('final', 'error', 'session_end')),
     )
 
     def __init__(
@@ -61,28 +105,29 @@ class EventBridge:
         *,
         max_history: int = 500,
         heartbeat_interval: float = 15.0,
-        audience: BridgeAudience = "internal",
+        audience: BridgeAudience = 'internal',
         queue_maxsize: int = 0,
-        backpressure: BackpressurePolicy = "block",
-        schema_validation: ValidationMode = "warn",
+        backpressure: BackpressurePolicy = 'block',
+        schema_validation: ValidationMode = 'warn',
         dedupe_interrupts: bool = True,
         dedupe_status_messages: bool = False,
         reset_on_session_start: bool = True,
+        on_packet: PacketObserver | None = None,
     ) -> None:
         if max_history < 1:
-            raise ValueError("max_history must be >= 1")
+            raise ValueError('max_history must be >= 1')
         if heartbeat_interval <= 0:
-            raise ValueError("heartbeat_interval must be > 0")
+            raise ValueError('heartbeat_interval must be > 0')
         if queue_maxsize < 0:
-            raise ValueError("queue_maxsize must be >= 0 (0 = unbounded)")
+            raise ValueError('queue_maxsize must be >= 0 (0 = unbounded)')
         if backpressure not in _VALID_BACKPRESSURE:
             raise ValueError(
-                f"backpressure must be one of {sorted(_VALID_BACKPRESSURE)}, got {backpressure!r}"
+                f'backpressure must be one of {sorted(_VALID_BACKPRESSURE)}, got {backpressure!r}'
             )
         if schema_validation not in _VALID_VALIDATION_MODES:
             allowed_modes: list[ValidationMode] = sorted(_VALID_VALIDATION_MODES)
             raise ValueError(
-                f"schema_validation must be one of {allowed_modes}, got {schema_validation!r}"
+                f'schema_validation must be one of {allowed_modes}, got {schema_validation!r}'
             )
 
         self.session_id: str = session_id
@@ -122,6 +167,10 @@ class EventBridge:
         self._reset_on_session_start: bool = reset_on_session_start
         self._emitted_interrupt_fingerprints: set[tuple[str, str]] = set()
         self._last_status_fingerprint: tuple[str, str] | None = None
+        # Optional post-canonicalization observer (see ``PacketObserver`` type
+        # comment above). Additive/backward-compatible: unset by default, zero
+        # behavior change to any existing caller.
+        self._on_packet: PacketObserver | None = on_packet
 
     async def _emit_normalized(self, event_type: str, data: EventPayload) -> None:
         validate_event(event_type, data, mode=self._schema_validation)
@@ -130,7 +179,7 @@ class EventBridge:
 
     async def _emit_packet(self, event_type: str, data: EventPayload) -> None:
         if self._closed:
-            logger.warning("Attempted to emit to closed bridge: %s", self.session_id)
+            logger.warning('Attempted to emit to closed bridge: %s', self.session_id)
             return
 
         event = UIEvent(type=event_type, data=data)
@@ -138,10 +187,20 @@ class EventBridge:
         if len(self._event_history) > self._max_history:
             evicted = len(self._event_history) - self._max_history
             self._history_evictions += evicted
-            del self._event_history[:evicted]
+            _evict_from_history(self._event_history, evicted)
+
+        if self._on_packet is not None:
+            # Post-normalization/dedup/validation/security, pre-enqueue: the
+            # observer sees exactly the canonical event the live SSE consumer
+            # is about to see, and (if it returns an awaitable) can delay that
+            # delivery - e.g. a durable-write observer awaiting its own commit
+            # acknowledgement before the event is allowed to reach the browser.
+            observer_result = self._on_packet(event)
+            if inspect.isawaitable(observer_result):
+                await observer_result
 
         await self._enqueue_event(event)
-        logger.debug("Emitted %s event for session %s", event_type, self.session_id)
+        logger.debug('Emitted %s event for session %s', event_type, self.session_id)
 
     async def _enqueue_event(self, event: UIEvent) -> None:
         """Place an event on the live queue, applying the backpressure policy."""
@@ -155,7 +214,7 @@ class EventBridge:
 
     async def emit(self, event_type: str, data: EventPayload) -> None:
         """Emit an event to the UI stream."""
-        if self._reset_on_session_start and event_type == "session_start":
+        if self._reset_on_session_start and event_type == 'session_start':
             self._reset_dedup_state()
         normalized_data = self._payload_normalizer.normalize_payload(event_type, data)
         # Run the status dedup drop-check against the NORMALIZED payload so a
@@ -165,11 +224,11 @@ class EventBridge:
         # ``message``/``assistant_id`` to the top level the fingerprint reads.
         if (
             self._dedupe_status_messages
-            and event_type == "status_message"
+            and event_type == 'status_message'
             and self._should_drop_status_message(normalized_data)
         ):
             return
-        if event_type == "interrupt_required" and self._should_drop_interrupt_payload(
+        if event_type == 'interrupt_required' and self._should_drop_interrupt_payload(
             normalized_data
         ):
             return
@@ -204,12 +263,12 @@ class EventBridge:
         return False
 
     def _should_drop_interrupt_payload(self, data: EventPayload) -> bool:
-        prompt = data.get("prompt")
-        data_key = data.get("data_key")
+        prompt = data.get('prompt')
+        data_key = data.get('data_key')
         if not isinstance(prompt, str) or not isinstance(data_key, str):
             return False
 
-        arg_name = data.get("arg_name")
+        arg_name = data.get('arg_name')
         return self._should_drop_interrupt(
             prompt=prompt,
             data_key=data_key,
@@ -240,6 +299,8 @@ class EventBridge:
         agent_name: str | None = None,
         swarm_name: str | None = None,
         tool_type: str | None = None,
+        duration_ms: int | None = None,
+        private_data_keys: list[str] | None = None,
     ) -> None:
         """Emit a tool execution event."""
         canonical_tool_id = self._tool_identity_resolver.resolve_tool_id(
@@ -262,6 +323,8 @@ class EventBridge:
             agent_name=agent_name,
             swarm_name=swarm_name,
             tool_type=tool_type,
+            duration_ms=duration_ms,
+            private_data_keys=private_data_keys,
         )
 
     async def emit_system_tool_start(
@@ -276,11 +339,11 @@ class EventBridge:
         canonical_tool_id = self._tool_identity_resolver.resolve_tool_id(
             tool_name=tool_type,
             tool_id=tool_id,
-            status="executing",
+            status='executing',
             args=params,
             agent_name=agent_name,
             swarm_name=swarm_name,
-            tool_type="system",
+            tool_type='system',
         )
         await emit_system_tool_start(
             self._emit_normalized,
@@ -310,6 +373,7 @@ class EventBridge:
         self,
         tool_id: str,
         result: object,
+        duration_ms: int | None = None,
     ) -> None:
         """Emit a system tool completion event."""
         canonical_tool_id = self._identity_state.tool_id_aliases.get(tool_id, tool_id)
@@ -317,6 +381,7 @@ class EventBridge:
             self._emit_normalized,
             tool_id=canonical_tool_id,
             result=result,
+            duration_ms=duration_ms,
         )
 
     # MARK: Assistant Events
@@ -327,6 +392,7 @@ class EventBridge:
         text: str,
         *,
         replace_content: bool = False,
+        private_value_restorations: list[dict[str, object]] | None = None,
     ) -> None:
         """Emit a streamed assistant response chunk."""
         await emit_assistant_chunk(
@@ -334,6 +400,7 @@ class EventBridge:
             assistant_id=assistant_id,
             text=text,
             replace_content=replace_content,
+            private_value_restorations=private_value_restorations,
         )
 
     async def emit_status_message(
@@ -343,7 +410,7 @@ class EventBridge:
     ) -> None:
         """Emit a standalone status message."""
         if self._dedupe_status_messages and self._should_drop_status_message(
-            {"assistant_id": assistant_id, "message": message}
+            {'assistant_id': assistant_id, 'message': message}
         ):
             return
         await emit_status_message(self._emit_normalized, assistant_id=assistant_id, message=message)
@@ -359,7 +426,7 @@ class EventBridge:
         assignment_id: str | None = None,
         interrupt_number: int = 1,
         total_interrupts: int = 1,
-        input_type: str = "text",
+        input_type: str = 'text',
         choices: list[str] | None = None,
     ) -> None:
         """Emit an interrupt request for user input.
@@ -398,6 +465,8 @@ class EventBridge:
         task: str | None = None,
         error: str | None = None,
         result: object | None = None,
+        *,
+        use_as_final_output: bool = False,
     ) -> None:
         """Emit an agent assignment event (for swarms)."""
         canonical_assignment_id = self._assignment_scope_resolver.resolve_agent_assignment_id(
@@ -414,6 +483,7 @@ class EventBridge:
             task=task,
             error=error,
             result=result,
+            use_as_final_output=use_as_final_output,
         )
 
     async def emit_enrichment(
@@ -534,7 +604,7 @@ class EventBridge:
         while not self._queue.empty():
             try:
                 _ = self._queue.get_nowait()
-            except asyncio.QueueEmpty:
+            except asyncio.QueueEmpty:  # noqa: PERF203 - drain-until-empty
                 break
 
     async def generate_sse(
@@ -615,9 +685,9 @@ class EventBridge:
 
 
 __all__ = [
-    "BackpressurePolicy",
-    "BridgeAudience",
-    "EventBridge",
-    "EventBridgeSecurityPolicy",
-    "UIEvent",
+    'BackpressurePolicy',
+    'BridgeAudience',
+    'EventBridge',
+    'EventBridgeSecurityPolicy',
+    'UIEvent',
 ]

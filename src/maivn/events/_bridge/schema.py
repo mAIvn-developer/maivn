@@ -12,23 +12,22 @@ without a guardrail. This module is that guardrail:
 
 This is intentionally a *guardrail*, not a full schema definition. The
 canonical payload shapes are defined by the builders in
-``maivn._internal.utils.reporting.app_event_payloads`` — duplicating them
+``maivn._internal.reporting.app_event_payloads`` — duplicating them
 as full pydantic models would couple the SDK boundary too tightly to
 internal payload evolution. The validator focuses on catching the kinds
 of mistakes that would otherwise reach a frontend developer at 2am.
 """
 
-# pyright: strict
 from __future__ import annotations
 
 import logging
 from collections.abc import Iterator, Mapping
 from typing import Literal, cast
 
-ValidationMode = Literal["off", "warn", "strict"]
-_VALID_MODES: frozenset[str] = frozenset({"off", "warn", "strict"})
+ValidationMode = Literal['off', 'warn', 'strict']
+_VALID_MODES: frozenset[str] = frozenset({'off', 'warn', 'strict'})
 
-_logger = logging.getLogger("maivn.events._bridge.schema")
+_logger = logging.getLogger('maivn.events._bridge.schema')
 
 # MARK: Errors
 
@@ -45,28 +44,28 @@ class EventSchemaError(ValueError):
 # list is tight on purpose: keep it to fields that downstream consumers
 # (frontend, observers) absolutely depend on.
 _REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
-    "tool_event": ("tool_id", "tool_name", "status"),
-    "system_tool_start": ("tool_id", "tool_type"),
-    "system_tool_chunk": ("tool_id", "text"),
-    "system_tool_complete": ("tool_id", "result"),
-    "assistant_chunk": ("assistant_id", "text"),
-    "status_message": ("assistant_id", "message"),
-    "status_message_chunk": ("assistant_id", "status_id", "text"),
-    "interrupt_required": ("interrupt_id", "data_key", "prompt"),
-    "agent_assignment": ("agent_name", "status"),
-    "enrichment": ("phase", "message"),
-    "hook_fired": ("name", "stage", "status", "target_type"),
-    "final": ("response",),
-    "error": ("error",),
-    "session_start": ("session_id",),
-    "session_end": ("session_id",),
+    'tool_event': ('tool_id', 'tool_name', 'status'),
+    'system_tool_start': ('tool_id', 'tool_type'),
+    'system_tool_chunk': ('tool_id', 'text'),
+    'system_tool_complete': ('tool_id', 'result'),
+    'assistant_chunk': ('assistant_id', 'text'),
+    'status_message': ('assistant_id', 'message'),
+    'status_message_chunk': ('assistant_id', 'status_id', 'text'),
+    'interrupt_required': ('interrupt_id', 'data_key', 'prompt'),
+    'agent_assignment': ('agent_name', 'status'),
+    'enrichment': ('phase', 'message'),
+    'hook_fired': ('name', 'stage', 'status', 'target_type'),
+    'final': ('response',),
+    'error': ('error',),
+    'session_start': ('session_id',),
+    'session_end': ('session_id',),
 }
 
 # Field names that look like a deserialization-attack vector if they appear
 # at any depth. Refusing them does not break legitimate payloads — these
 # names are reserved by JS / Python runtimes and have no place in event
 # payloads.
-_RESERVED_FIELD_NAMES: frozenset[str] = frozenset({"__class__", "__proto__", "constructor"})
+_RESERVED_FIELD_NAMES: frozenset[str] = frozenset({'__class__', '__proto__', 'constructor'})
 
 
 # MARK: Public API
@@ -76,7 +75,7 @@ def validate_event(
     event_type: object,
     data: object,
     *,
-    mode: ValidationMode = "warn",
+    mode: ValidationMode = 'warn',
 ) -> None:
     """Validate an event tuple against the bridge's schema guardrails.
 
@@ -89,55 +88,55 @@ def validate_event(
     * ``"strict"``: raises :class:`EventSchemaError` on any violation.
       Recommended for tests and developer environments.
     """
-    if mode == "off":
+    if mode == 'off':
         return
     if mode not in _VALID_MODES:
-        raise ValueError(f"mode must be one of {sorted(_VALID_MODES)}, got {mode!r}")
+        raise ValueError(f'mode must be one of {sorted(_VALID_MODES)}, got {mode!r}')
 
     problems = list(_iter_problems(event_type, data))
     if not problems:
         return
 
-    message = f"Event {event_type!r} failed schema validation: {'; '.join(problems)}"
-    if mode == "strict":
+    message = f'Event {event_type!r} failed schema validation: {"; ".join(problems)}'
+    if mode == 'strict':
         raise EventSchemaError(message)
     _logger.warning(message)
 
 
 def _iter_problems(event_type: object, data: object) -> Iterator[str]:
     if not isinstance(event_type, str):
-        yield f"event_type must be str, got {type(event_type).__name__}"
+        yield f'event_type must be str, got {type(event_type).__name__}'
         return
     if not event_type.strip():
-        yield "event_type must be non-empty"
+        yield 'event_type must be non-empty'
 
     if not isinstance(data, Mapping):
-        yield f"data must be a mapping, got {type(data).__name__}"
+        yield f'data must be a mapping, got {type(data).__name__}'
         return
-    payload = cast(Mapping[str, object], data)
+    payload = cast('Mapping[str, object]', data)
 
     reserved_hits = list(_iter_reserved_hits(payload))
     if reserved_hits:
-        yield "reserved field names present at " + ", ".join(reserved_hits)
+        yield 'reserved field names present at ' + ', '.join(reserved_hits)
 
     required = _REQUIRED_FIELDS.get(event_type)
     if required is None:
         return
-    missing = [field for field in required if payload.get(field) in (None, "")]
+    missing = [field for field in required if payload.get(field) in (None, '')]
     if missing:
-        yield f"missing required fields {missing}"
+        yield f'missing required fields {missing}'
 
 
 def _iter_reserved_hits(
     value: object,
     *,
-    path: str = "$",
+    path: str = '$',
     active_ids: set[int] | None = None,
 ) -> Iterator[str]:
     if isinstance(value, Mapping):
-        traversable: Mapping[object, object] | list[object] = cast(Mapping[object, object], value)
+        traversable: Mapping[object, object] | list[object] = cast('Mapping[object, object]', value)
     elif isinstance(value, list):
-        traversable = cast(list[object], value)
+        traversable = cast('list[object]', value)
     else:
         return
 
@@ -163,17 +162,17 @@ def _iter_reserved_hits_inner(
     if isinstance(value, Mapping):
         for key, item in value.items():
             key_text = str(key)
-            here = f"{path}.{key_text}"
+            here = f'{path}.{key_text}'
             if isinstance(key, str) and key in _RESERVED_FIELD_NAMES:
                 yield here
             yield from _iter_reserved_hits(item, path=here, active_ids=active_ids)
     else:
         for index, item in enumerate(value):
-            yield from _iter_reserved_hits(item, path=f"{path}[{index}]", active_ids=active_ids)
+            yield from _iter_reserved_hits(item, path=f'{path}[{index}]', active_ids=active_ids)
 
 
 __all__ = [
-    "EventSchemaError",
-    "ValidationMode",
-    "validate_event",
+    'EventSchemaError',
+    'ValidationMode',
+    'validate_event',
 ]

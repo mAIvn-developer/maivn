@@ -1,25 +1,29 @@
-# pyright: strict
 """Tool event normalization helpers."""
 
 from __future__ import annotations
 
-from .._models import JsonObject
-from .context import NormalizationOptions
+from typing import TYPE_CHECKING
+
 from .helpers import clean_text, coerce_mapping
+
+if TYPE_CHECKING:
+    from maivn.events._models import JsonObject
+
+    from .context import NormalizationOptions
 
 # MARK: Tool Resolution
 
 
 def extract_tool_identifier(tool_call: JsonObject) -> str:
-    for key in ("tool_id", "id"):
+    for key in ('tool_id', 'id'):
         candidate = clean_text(tool_call.get(key))
         if candidate is not None:
             return candidate
-    for key in ("name", "tool_name"):
+    for key in ('name', 'tool_name'):
         candidate = clean_text(tool_call.get(key))
         if candidate is not None:
             return candidate
-    return ""
+    return ''
 
 
 def extract_tool_name(
@@ -27,7 +31,7 @@ def extract_tool_name(
     tool_id: str,
     options: NormalizationOptions,
 ) -> str:
-    explicit_name = clean_text(tool_call.get("name") or tool_call.get("tool_name"))
+    explicit_name = clean_text(tool_call.get('name') or tool_call.get('tool_name'))
 
     # Prefer canonical metadata/map names over the raw explicit name when it
     # matches the tool_id.  Dynamic agent invocation tools have UUID-based IDs
@@ -35,7 +39,7 @@ def extract_tool_name(
     # holds the human-readable agent name that should appear in the UI.
     metadata = options.tool_metadata_map.get(tool_id) if options.tool_metadata_map else None
     if isinstance(metadata, dict):
-        metadata_name = clean_text(metadata.get("tool_name") or metadata.get("name"))
+        metadata_name = clean_text(metadata.get('tool_name') or metadata.get('name'))
         if metadata_name is not None:
             return metadata_name
 
@@ -45,9 +49,9 @@ def extract_tool_name(
 
     if explicit_name is not None:
         return explicit_name
-    if ":" in tool_id:
-        return tool_id.rsplit(":", 1)[-1]
-    return tool_id or "tool"
+    if ':' in tool_id:
+        return tool_id.rsplit(':', 1)[-1]
+    return tool_id or 'tool'
 
 
 def extract_tool_type(
@@ -59,14 +63,14 @@ def extract_tool_type(
     # agent invocation tools resolve to "agent" instead of the default "func".
     metadata = options.tool_metadata_map.get(tool_id) if options.tool_metadata_map else None
     if isinstance(metadata, dict):
-        metadata_type = clean_text(metadata.get("tool_type"))
+        metadata_type = clean_text(metadata.get('tool_type'))
         if metadata_type is not None:
             return metadata_type.lower()
 
-    explicit_type = clean_text(tool_call.get("tool_type") or tool_call.get("type"))
+    explicit_type = clean_text(tool_call.get('tool_type') or tool_call.get('type'))
     if explicit_type is not None:
         return explicit_type.lower()
-    return "func"
+    return 'func'
 
 
 def extract_tool_scope(
@@ -80,11 +84,11 @@ def extract_tool_scope(
     metadata_agent_name = None
     metadata_swarm_name = None
     if isinstance(metadata, dict):
-        metadata_agent_name = clean_text(metadata.get("agent_name"))
-        metadata_swarm_name = clean_text(metadata.get("swarm_name"))
+        metadata_agent_name = clean_text(metadata.get('agent_name'))
+        metadata_swarm_name = clean_text(metadata.get('swarm_name'))
 
     resolved_agent_name = metadata_agent_name
-    if resolved_agent_name is None and tool_type == "agent":
+    if resolved_agent_name is None and tool_type == 'agent':
         resolved_agent_name = tool_name
     if resolved_agent_name is None:
         resolved_agent_name = options.default_agent_name
@@ -99,15 +103,15 @@ def extract_tool_args(
     tool_type: str,
     options: NormalizationOptions,
 ) -> JsonObject:
-    resolved_args = coerce_mapping(tool_call.get("args"))
-    if tool_type != "agent":
+    resolved_args = coerce_mapping(tool_call.get('args'))
+    if tool_type != 'agent':
         return resolved_args
 
     metadata = options.tool_metadata_map.get(tool_id) if options.tool_metadata_map else None
     if not isinstance(metadata, dict):
         return resolved_args
 
-    target_agent_id = clean_text(metadata.get("target_agent_id"))
-    if target_agent_id is not None and "agent_id" not in resolved_args:
-        resolved_args["agent_id"] = target_agent_id
+    target_agent_id = clean_text(metadata.get('target_agent_id'))
+    if target_agent_id is not None and 'agent_id' not in resolved_args:
+        resolved_args['agent_id'] = target_agent_id
     return resolved_args

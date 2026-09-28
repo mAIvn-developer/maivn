@@ -1,0 +1,23 @@
+# Line endings. Every source extension below is stored in git and checked out
+# with LF on every platform. Endings drifting to CRLF is what has repeatedly
+# turned a one-line edit into a whole-file diff nobody could review.
+#
+# Binary assets - png, mp3, ico, jpg, pdf - match nothing here on purpose. They
+# carry CR LF byte pairs that are data, not line endings.
+*.css    text eol=lf
+*.json   text eol=lf
+*.md     text eol=lf
+*.py     text eol=lf
+*.svelte text eol=lf
+*.toml   text eol=lf
+*.ts     text eol=lf
+*.yaml   text eol=lf
+*.yml    text eol=lf
+
+# Launcher and shell scripts. Windows PowerShell 5.1 parses and runs LF-only
+# scripts, and cmd.exe runs LF-only batch files including label, goto and
+# delayed-expansion blocks - both were executed on Windows 11 to check before
+# this was written, rather than assumed.
+*.cmd    text eol=lf
+*.ps1    text eol=lf
+*.sh     text eol=lf

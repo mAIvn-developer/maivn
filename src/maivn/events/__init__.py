@@ -1,4 +1,3 @@
-# pyright: strict
 """Public event contract for streaming SDK execution state into frontends.
 
 Tiered API:
@@ -17,34 +16,26 @@ Tiered API:
 - **Tier 3 - Builders**: ``build_*_payload()`` functions for custom reporters
   and advanced integrations.
 
-See ``docs/guides/frontend-events.md`` for end-to-end recipes including
-frontend client examples in JavaScript, TypeScript, Swift, Kotlin, Go,
-Python, Rust, .NET, and more.
+See ``guides/frontend-events.md`` in the maivn-docs repository for
+end-to-end recipes including frontend client examples in JavaScript,
+TypeScript, Swift, Kotlin, Go, Python, Rust, .NET, and more.
 """
 
 from __future__ import annotations
 
-# Re-export event name constants from shared core
-from maivn_shared.core.events import (
-    ENRICHMENT_EVENT_NAME,
-    ERROR_EVENT_NAME,
-    FINAL_EVENT_NAME,
-    HOOK_FIRED_EVENT_NAME,
-    INTERRUPT_REQUIRED_EVENT_NAME,
-    MODEL_TOOL_COMPLETE_EVENT_NAME,
-    PROGRESS_UPDATE_EVENT_NAME,
-    STATUS_MESSAGE_CHUNK_EVENT_NAME,
-    STATUS_MESSAGE_EVENT_NAME,
-    SYSTEM_TOOL_CHUNK_EVENT_NAME,
-    SYSTEM_TOOL_COMPLETE_EVENT_NAME,
-    SYSTEM_TOOL_ERROR_EVENT_NAME,
-    SYSTEM_TOOL_START_EVENT_NAME,
-    TOOL_EVENT_NAME,
-    UPDATE_EVENT_NAME,
+from maivn_contracts.events import (
+    Event,
+    load_event_schema,
+    load_projection,
+    load_taxonomy,
+    project_event_type,
+    validate_event,
 )
 
+from maivn._internal.models import StreamEvent
+
 # Re-export builders from internal payloads module
-from .._internal.utils.reporting.app_event_payloads import (
+from maivn._internal.reporting.app_event_payloads import (
     APP_EVENT_CONTRACT_VERSION,
     build_agent_assignment_payload,
     build_assistant_chunk_payload,
@@ -60,6 +51,25 @@ from .._internal.utils.reporting.app_event_payloads import (
     build_system_tool_complete_payload,
     build_system_tool_start_payload,
     build_tool_event_payload,
+)
+
+# Re-export event name constants from shared core
+from maivn.events._vocabulary import (
+    ENRICHMENT_EVENT_NAME,
+    ERROR_EVENT_NAME,
+    FINAL_EVENT_NAME,
+    HOOK_FIRED_EVENT_NAME,
+    INTERRUPT_REQUIRED_EVENT_NAME,
+    MODEL_TOOL_COMPLETE_EVENT_NAME,
+    PROGRESS_UPDATE_EVENT_NAME,
+    STATUS_MESSAGE_CHUNK_EVENT_NAME,
+    STATUS_MESSAGE_EVENT_NAME,
+    SYSTEM_TOOL_CHUNK_EVENT_NAME,
+    SYSTEM_TOOL_COMPLETE_EVENT_NAME,
+    SYSTEM_TOOL_ERROR_EVENT_NAME,
+    SYSTEM_TOOL_START_EVENT_NAME,
+    TOOL_EVENT_NAME,
+    UPDATE_EVENT_NAME,
 )
 
 # Tier 2: Frontend bridge
@@ -101,66 +111,74 @@ from ._normalize import normalize_stream, normalize_stream_event
 # MARK: Package API
 
 __all__ = [
+    # v2 contract surface: canonical Event schema, taxonomy, and projections
+    'Event',
+    'StreamEvent',
+    'load_event_schema',
+    'load_projection',
+    'load_taxonomy',
+    'project_event_type',
+    'validate_event',
     # Tier 1: Stream consumption
-    "normalize_stream",
-    "normalize_stream_event",
-    "forward_normalized_event",
-    "forward_normalized_stream",
-    "AppEvent",
-    "NormalizedEventForwardingState",
-    "NormalizedStreamState",
-    "RawSSEEvent",
+    'normalize_stream',
+    'normalize_stream_event',
+    'forward_normalized_event',
+    'forward_normalized_stream',
+    'AppEvent',
+    'NormalizedEventForwardingState',
+    'NormalizedStreamState',
+    'RawSSEEvent',
     # Tier 2: Frontend bridge
-    "BackpressurePolicy",
-    "BridgeAudience",
-    "BridgeRegistry",
-    "EventBridge",
-    "EventBridgeSecurityPolicy",
-    "UIEvent",
+    'BackpressurePolicy',
+    'BridgeAudience',
+    'BridgeRegistry',
+    'EventBridge',
+    'EventBridgeSecurityPolicy',
+    'UIEvent',
     # Tier 3: Builders (advanced)
-    "APP_EVENT_CONTRACT_VERSION",
-    "build_agent_assignment_payload",
-    "build_assistant_chunk_payload",
-    "build_enrichment_payload",
-    "build_error_payload",
-    "build_final_payload",
-    "build_hook_fired_payload",
-    "build_interrupt_required_payload",
-    "build_session_start_payload",
-    "build_status_message_chunk_payload",
-    "build_status_message_payload",
-    "build_system_tool_chunk_payload",
-    "build_system_tool_complete_payload",
-    "build_system_tool_start_payload",
-    "build_tool_event_payload",
+    'APP_EVENT_CONTRACT_VERSION',
+    'build_agent_assignment_payload',
+    'build_assistant_chunk_payload',
+    'build_enrichment_payload',
+    'build_error_payload',
+    'build_final_payload',
+    'build_hook_fired_payload',
+    'build_interrupt_required_payload',
+    'build_session_start_payload',
+    'build_status_message_chunk_payload',
+    'build_status_message_payload',
+    'build_system_tool_chunk_payload',
+    'build_system_tool_complete_payload',
+    'build_system_tool_start_payload',
+    'build_tool_event_payload',
     # Descriptor models (reference types)
-    "AssignmentDescriptor",
-    "AssistantDescriptor",
-    "ChunkDescriptor",
-    "EnrichmentDescriptor",
-    "ErrorInfoDescriptor",
-    "HookDescriptor",
-    "InterruptDescriptor",
-    "LifecycleDescriptor",
-    "OutputDescriptor",
-    "ParticipantDescriptor",
-    "ScopeDescriptor",
-    "SessionDescriptor",
-    "ToolDescriptor",
+    'AssignmentDescriptor',
+    'AssistantDescriptor',
+    'ChunkDescriptor',
+    'EnrichmentDescriptor',
+    'ErrorInfoDescriptor',
+    'HookDescriptor',
+    'InterruptDescriptor',
+    'LifecycleDescriptor',
+    'OutputDescriptor',
+    'ParticipantDescriptor',
+    'ScopeDescriptor',
+    'SessionDescriptor',
+    'ToolDescriptor',
     # Event name constants
-    "ENRICHMENT_EVENT_NAME",
-    "ERROR_EVENT_NAME",
-    "FINAL_EVENT_NAME",
-    "HOOK_FIRED_EVENT_NAME",
-    "INTERRUPT_REQUIRED_EVENT_NAME",
-    "MODEL_TOOL_COMPLETE_EVENT_NAME",
-    "PROGRESS_UPDATE_EVENT_NAME",
-    "STATUS_MESSAGE_CHUNK_EVENT_NAME",
-    "STATUS_MESSAGE_EVENT_NAME",
-    "SYSTEM_TOOL_CHUNK_EVENT_NAME",
-    "SYSTEM_TOOL_COMPLETE_EVENT_NAME",
-    "SYSTEM_TOOL_ERROR_EVENT_NAME",
-    "SYSTEM_TOOL_START_EVENT_NAME",
-    "TOOL_EVENT_NAME",
-    "UPDATE_EVENT_NAME",
+    'ENRICHMENT_EVENT_NAME',
+    'ERROR_EVENT_NAME',
+    'FINAL_EVENT_NAME',
+    'HOOK_FIRED_EVENT_NAME',
+    'INTERRUPT_REQUIRED_EVENT_NAME',
+    'MODEL_TOOL_COMPLETE_EVENT_NAME',
+    'PROGRESS_UPDATE_EVENT_NAME',
+    'STATUS_MESSAGE_CHUNK_EVENT_NAME',
+    'STATUS_MESSAGE_EVENT_NAME',
+    'SYSTEM_TOOL_CHUNK_EVENT_NAME',
+    'SYSTEM_TOOL_COMPLETE_EVENT_NAME',
+    'SYSTEM_TOOL_ERROR_EVENT_NAME',
+    'SYSTEM_TOOL_START_EVENT_NAME',
+    'TOOL_EVENT_NAME',
+    'UPDATE_EVENT_NAME',
 ]

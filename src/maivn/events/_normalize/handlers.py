@@ -1,4 +1,3 @@
-# pyright: strict
 """Dispatch table for event normalization handlers."""
 
 from __future__ import annotations
@@ -6,10 +5,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TypeAlias
 
-from maivn_shared.core.events import (
+from maivn.events._models import JsonObject, NormalizedStreamState
+from maivn.events._vocabulary import (
     ENRICHMENT_EVENT_NAME,
     ERROR_EVENT_NAME,
     FINAL_EVENT_NAME,
+    HOOK_FIRED_EVENT_NAME,
     INTERRUPT_REQUIRED_EVENT_NAME,
     MODEL_TOOL_COMPLETE_EVENT_NAME,
     PROGRESS_UPDATE_EVENT_NAME,
@@ -23,7 +24,6 @@ from maivn_shared.core.events import (
     UPDATE_EVENT_NAME,
 )
 
-from .._models import JsonObject, NormalizedStreamState
 from .assistant_events import (
     handle_progress_update_event,
     handle_status_message_chunk_event,
@@ -31,6 +31,7 @@ from .assistant_events import (
     handle_update_event,
 )
 from .context import NormalizationOptions
+from .hook_events import handle_hook_fired_event
 from .lifecycle_events import (
     handle_enrichment_event,
     handle_error_event,
@@ -48,7 +49,7 @@ from .tool_events import handle_model_tool_complete_event, handle_tool_event
 
 # MARK: Configuration
 
-_SESSION_START_EVENT_NAME = "session_start"
+_SESSION_START_EVENT_NAME = 'session_start'
 
 
 # MARK: Dispatch
@@ -74,5 +75,6 @@ EVENT_HANDLERS: dict[str, EventHandler] = {
     INTERRUPT_REQUIRED_EVENT_NAME: handle_interrupt_required_event,
     FINAL_EVENT_NAME: handle_final_event,
     ERROR_EVENT_NAME: handle_error_event,
+    HOOK_FIRED_EVENT_NAME: handle_hook_fired_event,
     _SESSION_START_EVENT_NAME: handle_session_start_event,
 }

@@ -9,21 +9,20 @@ dataclasses to :func:`_bridge_default` so their exact prior representation is
 preserved. The ``default`` callback covers the remaining types stdlib handled.
 """
 
-# pyright: strict
 from __future__ import annotations
 
 import dataclasses
 import logging
 from datetime import date, datetime
 from decimal import Decimal
+from logging import Logger as LoggerProtocol
 from typing import ClassVar, Protocol, TypeGuard, cast, runtime_checkable
 
 import orjson
-from maivn_shared.infrastructure.logging import LoggerProtocol
 
 logger: LoggerProtocol = cast(
-    LoggerProtocol,
-    cast(object, logging.getLogger("maivn.events._bridge")),
+    'LoggerProtocol',
+    cast('object', logging.getLogger('maivn.events._bridge')),
 )
 
 # orjson passes datetimes and dataclasses to ``default`` so we keep the exact
@@ -50,7 +49,7 @@ class _DataclassInstance(Protocol):
 
 
 def _is_dataclass_instance(value: object) -> TypeGuard[_DataclassInstance]:
-    return not isinstance(value, type) and hasattr(type(value), "__dataclass_fields__")
+    return not isinstance(value, type) and hasattr(type(value), '__dataclass_fields__')
 
 
 def _bridge_default(o: object) -> object:
@@ -65,12 +64,12 @@ def _bridge_default(o: object) -> object:
     if isinstance(o, Decimal):
         return str(o)
     if isinstance(o, set | frozenset):
-        values = cast("set[object] | frozenset[object]", o)
+        values = cast('set[object] | frozenset[object]', o)
         return sorted(values, key=repr)
     if isinstance(o, bytes | bytearray):
-        return bytes(o).decode("utf-8", errors="replace")
+        return bytes(o).decode('utf-8', errors='replace')
     if _is_dataclass_instance(o):
-        return cast(object, dataclasses.asdict(o))
+        return cast('object', dataclasses.asdict(o))
     # Pydantic v2 / v1 - try without importing the dependency.
     if isinstance(o, _SupportsModelDump):
         try:
@@ -96,13 +95,13 @@ def safe_json_dumps(payload: dict[str, object]) -> str:
     """
     try:
         return orjson.dumps(payload, default=_bridge_default, option=_ORJSON_OPTIONS).decode(
-            "utf-8"
+            'utf-8'
         )
-    except Exception:  # noqa: BLE001 - serialization must degrade to a stable error envelope.
-        logger.exception("Failed to serialize SSE payload")
+    except Exception:
+        logger.exception('Failed to serialize SSE payload')
         return orjson.dumps(
-            {"event": "error", "message": "Failed to serialize event payload"}
-        ).decode("utf-8")
+            {'event': 'error', 'message': 'Failed to serialize event payload'}
+        ).decode('utf-8')
 
 
 def build_safe_event_payload(
@@ -125,36 +124,36 @@ def build_safe_event_payload(
     """
     try:
         return orjson.dumps(payload, default=_bridge_default, option=_ORJSON_OPTIONS).decode(
-            "utf-8"
+            'utf-8'
         )
-    except Exception as exc:  # noqa: BLE001 - never let one bad event break the SSE stream.
-        logger.exception(f"Failed to serialize SSE payload for event {event_id} ({event_type})")
+    except Exception as exc:
+        logger.exception(f'Failed to serialize SSE payload for event {event_id} ({event_type})')
         fallback = {
-            "id": event_id,
-            "type": event_type,
-            "timestamp": timestamp,
-            "data": {
-                "serialization_error": True,
-                "error_class": type(exc).__name__,
-                "message": "Event payload could not be serialized for transport.",
+            'id': event_id,
+            'type': event_type,
+            'timestamp': timestamp,
+            'data': {
+                'serialization_error': True,
+                'error_class': type(exc).__name__,
+                'message': 'Event payload could not be serialized for transport.',
             },
         }
         try:
-            return orjson.dumps(fallback).decode("utf-8")
+            return orjson.dumps(fallback).decode('utf-8')
         except Exception:  # noqa: BLE001 - the minimal fallback should be impossible to reject.
             # Should be impossible, but never break the SSE stream.
             return orjson.dumps(
                 {
-                    "id": event_id,
-                    "type": event_type,
-                    "timestamp": timestamp,
-                    "data": {"serialization_error": True},
+                    'id': event_id,
+                    'type': event_type,
+                    'timestamp': timestamp,
+                    'data': {'serialization_error': True},
                 }
-            ).decode("utf-8")
+            ).decode('utf-8')
 
 
 __all__ = [
-    "build_safe_event_payload",
-    "logger",
-    "safe_json_dumps",
+    'build_safe_event_payload',
+    'logger',
+    'safe_json_dumps',
 ]

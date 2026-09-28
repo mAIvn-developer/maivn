@@ -1,13 +1,11 @@
 """Dispatcher that routes normalized AppEvents to reporter methods."""
 
-# pyright: strict
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from ..._models import AppEvent
-from ..payload import EventPayload, normalized_text
-from ..state import NormalizedEventForwardingState
+from maivn.events._forwarding.payload import EventPayload, normalized_text
+
 from .assignment import forward_agent_assignment, forward_enrichment
 from .hooks import forward_hook_fired
 from .session import forward_assistant_chunk, forward_session_start, forward_status_message
@@ -19,6 +17,10 @@ from .tools import (
     forward_system_tool_start,
     forward_tool_event,
 )
+
+if TYPE_CHECKING:
+    from maivn.events._forwarding.state import NormalizedEventForwardingState
+    from maivn.events._models import AppEvent
 
 # MARK: Dispatcher Protocol
 
@@ -45,19 +47,19 @@ class Forwarder(Protocol):
 # the set of names the rest of the SDK emits, so a typo or missed entry trips
 # CI rather than silently dropping events.
 _DISPATCHERS: dict[str, Forwarder] = {
-    "session_start": forward_session_start,
-    "assistant_chunk": forward_assistant_chunk,
-    "status_message": forward_status_message,
-    "agent_assignment": forward_agent_assignment,
-    "enrichment": forward_enrichment,
-    "tool_event": forward_tool_event,
-    "system_tool_start": forward_system_tool_start,
-    "system_tool_chunk": forward_system_tool_chunk,
-    "system_tool_complete": forward_system_tool_complete,
-    "system_tool_error": forward_system_tool_error,
-    "hook_fired": forward_hook_fired,
-    "final": forward_final,
-    "error": forward_error,
+    'session_start': forward_session_start,
+    'assistant_chunk': forward_assistant_chunk,
+    'status_message': forward_status_message,
+    'agent_assignment': forward_agent_assignment,
+    'enrichment': forward_enrichment,
+    'tool_event': forward_tool_event,
+    'system_tool_start': forward_system_tool_start,
+    'system_tool_chunk': forward_system_tool_chunk,
+    'system_tool_complete': forward_system_tool_complete,
+    'system_tool_error': forward_system_tool_error,
+    'hook_fired': forward_hook_fired,
+    'final': forward_final,
+    'error': forward_error,
 }
 
 
@@ -72,7 +74,7 @@ def forward_to_reporter(
     state: NormalizedEventForwardingState,
 ) -> None:
     """Route a normalized AppEvent to the matching reporter forwarder."""
-    event_name = normalized_text(event.event_name) or ""
+    event_name = normalized_text(event.event_name) or ''
     forwarder = _DISPATCHERS.get(event_name)
     if forwarder is None:
         return
@@ -88,6 +90,6 @@ def known_event_names() -> frozenset[str]:
 
 
 __all__ = [
-    "forward_to_reporter",
-    "known_event_names",
+    'forward_to_reporter',
+    'known_event_names',
 ]

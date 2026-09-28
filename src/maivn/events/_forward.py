@@ -1,14 +1,16 @@
-# pyright: strict
 """Public helpers for replaying normalized AppEvents into reporters and bridges."""
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
-from ._bridge import EventBridge
 from ._forwarding import NormalizedEventForwardingState, forward_to_bridge, forward_to_reporter
-from ._models import AppEvent
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from ._bridge import EventBridge
+    from ._models import AppEvent
 
 # MARK: Public API
 
@@ -22,7 +24,7 @@ async def forward_normalized_event(
 ) -> NormalizedEventForwardingState:
     """Forward a normalized AppEvent into a reporter and/or UI bridge."""
     active_state = state or NormalizedEventForwardingState()
-    payload = cast(dict[str, object], event.model_dump(mode="python"))
+    payload = cast('dict[str, object]', event.model_dump(mode='python'))
 
     if reporter is not None:
         forward_to_reporter(event, payload=payload, reporter=reporter, state=active_state)
@@ -52,7 +54,7 @@ async def forward_normalized_stream(
 
 
 __all__ = [
-    "NormalizedEventForwardingState",
-    "forward_normalized_event",
-    "forward_normalized_stream",
+    'NormalizedEventForwardingState',
+    'forward_normalized_event',
+    'forward_normalized_stream',
 ]
