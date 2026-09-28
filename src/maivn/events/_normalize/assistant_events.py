@@ -1,17 +1,23 @@
-# pyright: strict
 """Assistant-facing event normalization handlers."""
 
 from __future__ import annotations
 
-from ..._internal.utils.reporting.app_event_payloads import (
+from typing import TYPE_CHECKING, cast
+
+from maivn._internal.private_placeholders import project_private_restorations
+from maivn._internal.reporting.app_event_payloads import (
     build_agent_assignment_payload,
     build_assistant_chunk_payload,
     build_status_message_chunk_payload,
     build_status_message_payload,
 )
-from .._models import JsonObject, NormalizedStreamState
-from .context import NormalizationOptions
+
 from .helpers import clean_stream_text, clean_text, compute_delta, map_assignment_status
+
+if TYPE_CHECKING:
+    from maivn.events._models import JsonObject, NormalizedStreamState
+
+    from .context import NormalizationOptions
 
 # MARK: Assistant Streaming
 
@@ -21,18 +27,38 @@ def _resolve_swarm_agent_name(
     options: NormalizationOptions,
 ) -> str:
     """Resolve the display name for a swarm-agent assignment update."""
-    action_name = clean_text(payload.get("action_name"))
+    action_name = clean_text(payload.get('action_name'))
     if action_name is not None:
         return action_name
 
-    action_id = clean_text(payload.get("action_id"))
+    action_id = clean_text(payload.get('action_id'))
     if action_id and options.assignment_name_map and action_id in options.assignment_name_map:
         return options.assignment_name_map[action_id]
 
     if action_id is not None:
         return action_id
 
-    return "unknown-agent"
+    return 'unknown-agent'
+
+
+def _swarm_agent_assignment_payload(
+    payload: JsonObject,
+    options: NormalizationOptions,
+) -> JsonObject | None:
+    """Project a parent-session swarm member lifecycle update for Studio."""
+    if clean_text(payload.get('action_type')) != 'swarm_agent':
+        return None
+    assignment_status = map_assignment_status(clean_text(payload.get('status')))
+    return build_agent_assignment_payload(
+        agent_name=_resolve_swarm_agent_name(payload, options),
+        status=assignment_status,
+        assignment_id=clean_text(payload.get('action_id')),
+        swarm_name=clean_text(payload.get('swarm_name')) or options.default_swarm_name,
+        task=clean_text(payload.get('task')),
+        result=payload.get('result') if assignment_status == 'completed' else None,
+        use_as_final_output=payload.get('use_as_final_output') is True,
+        **options.participant_kwargs(),
+    )
 
 
 def handle_update_event(
@@ -41,10 +67,10 @@ def handle_update_event(
     options: NormalizationOptions,
 ) -> list[JsonObject]:
     normalized_payloads: list[JsonObject] = []
-    streaming_content = clean_stream_text(payload.get("streaming_content"))
+    streaming_content = clean_stream_text(payload.get('streaming_content'))
     if streaming_content is not None:
-        assistant_id = clean_text(payload.get("assistant_id")) or "assistant"
-        previous = state.streaming_text_by_id.get(assistant_id, "")
+        assistant_id = clean_text(payload.get('assistant_id')) or 'assistant'
+        previous = state.streaming_text_by_id.get(assistant_id, '')
         delta = compute_delta(previous, streaming_content)
         # Detect a divergent stream: we had prior text and the new cumulative
         # text doesn't continue from it. This covers reevaluate cycles AND
@@ -78,24 +104,22 @@ def handle_update_event(
                     participant_name=options.default_participant_name,
                     participant_role=options.default_participant_role,
                     replace_content=replace_content,
+                    private_value_restorations=cast(
+                        'list[JsonObject]',
+                        project_private_restorations(
+                            payload.get('private_value_restorations'),
+                            '/streaming_content',
+                            '/text',
+                            offset=0 if replace_content else len(streaming_content) - len(delta),
+                            length=len(delta),
+                        ),
+                    ),
                 )
             )
 
-    action_type = clean_text(payload.get("action_type"))
-    if action_type == "swarm_agent":
-        assignment_status = map_assignment_status(clean_text(payload.get("status")))
-        action_name = _resolve_swarm_agent_name(payload, options)
-        normalized_payloads.append(
-            build_agent_assignment_payload(
-                agent_name=action_name,
-                status=assignment_status,
-                assignment_id=clean_text(payload.get("action_id")),
-                swarm_name=clean_text(payload.get("swarm_name")) or options.default_swarm_name,
-                task=clean_text(payload.get("task")),
-                result=payload.get("result") if assignment_status == "completed" else None,
-                **options.participant_kwargs(),
-            )
-        )
+    assignment_payload = _swarm_agent_assignment_payload(payload, options)
+    if assignment_payload is not None:
+        normalized_payloads.append(assignment_payload)
 
     return normalized_payloads
 
@@ -105,18 +129,31 @@ def handle_progress_update_event(
     _state: NormalizedStreamState,
     options: NormalizationOptions,
 ) -> list[JsonObject]:
-    text = clean_stream_text(payload.get("text"))
-    if text is None:
-        return []
-    return [
-        build_assistant_chunk_payload(
-            assistant_id=clean_text(payload.get("assistant_id")) or "assistant",
-            text=text,
-            participant_key=options.default_participant_key,
-            participant_name=options.default_participant_name,
-            participant_role=options.default_participant_role,
+    normalized_payloads: list[JsonObject] = []
+    assignment_payload = _swarm_agent_assignment_payload(payload, options)
+    if assignment_payload is not None:
+        normalized_payloads.append(assignment_payload)
+    text = clean_stream_text(payload.get('text'))
+    if text is not None:
+        normalized_payloads.append(
+            build_assistant_chunk_payload(
+                assistant_id=clean_text(payload.get('assistant_id')) or 'assistant',
+                text=text,
+                participant_key=options.default_participant_key,
+                participant_name=options.default_participant_name,
+                participant_role=options.default_participant_role,
+                private_value_restorations=cast(
+                    'list[JsonObject]',
+                    project_private_restorations(
+                        payload.get('private_value_restorations'),
+                        '/text',
+                        '/text',
+                        length=len(text),
+                    ),
+                ),
+            )
         )
-    ]
+    return normalized_payloads
 
 
 def handle_status_message_event(
@@ -124,12 +161,12 @@ def handle_status_message_event(
     _state: NormalizedStreamState,
     _options: NormalizationOptions,
 ) -> list[JsonObject]:
-    message = clean_text(payload.get("message"))
+    message = clean_text(payload.get('message'))
     if message is None:
         return []
     return [
         build_status_message_payload(
-            assistant_id=clean_text(payload.get("assistant_id")) or "assistant",
+            assistant_id=clean_text(payload.get('assistant_id')) or 'assistant',
             message=message,
         )
     ]
@@ -140,18 +177,18 @@ def handle_status_message_chunk_event(
     _state: NormalizedStreamState,
     _options: NormalizationOptions,
 ) -> list[JsonObject]:
-    text = clean_stream_text(payload.get("text"))
-    final = payload.get("final") is True or payload.get("is_final") is True
+    text = clean_stream_text(payload.get('text'))
+    final = payload.get('final') is True or payload.get('is_final') is True
     if text is None and not final:
         return []
 
-    assistant_id = clean_text(payload.get("assistant_id")) or "assistant"
-    status_id = clean_text(payload.get("status_id")) or f"status:{assistant_id}"
+    assistant_id = clean_text(payload.get('assistant_id')) or 'assistant'
+    status_id = clean_text(payload.get('status_id')) or f'status:{assistant_id}'
     return [
         build_status_message_chunk_payload(
             assistant_id=assistant_id,
             status_id=status_id,
-            text=text or "",
+            text=text or '',
             final=final,
         )
     ]

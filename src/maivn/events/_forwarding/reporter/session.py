@@ -1,14 +1,20 @@
 """Forwarders for session lifecycle and assistant streaming events."""
 
-# pyright: strict
 from __future__ import annotations
 
 import inspect
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
-from ..._models import AppEvent
-from ..payload import EventPayload, mapping_value, normalized_text, string_value
-from ..state import NormalizedEventForwardingState
+from maivn.events._forwarding.payload import (
+    EventPayload,
+    mapping_value,
+    normalized_text,
+    string_value,
+)
+
+if TYPE_CHECKING:
+    from maivn.events._forwarding.state import NormalizedEventForwardingState
+    from maivn.events._models import AppEvent
 
 # MARK: Reporter Protocol
 
@@ -44,12 +50,12 @@ def forward_session_start(
     state: NormalizedEventForwardingState,
 ) -> None:
     _ = state
-    session_reporter = cast(SessionEventReporter, reporter)
+    session_reporter = cast('SessionEventReporter', reporter)
     session = event.session
-    session_id = normalized_text(payload.get("session_id")) or normalized_text(
+    session_id = normalized_text(payload.get('session_id')) or normalized_text(
         session.id if session is not None else None
     )
-    assistant_id = normalized_text(payload.get("assistant_id")) or normalized_text(
+    assistant_id = normalized_text(payload.get('assistant_id')) or normalized_text(
         session.assistant_id if session is not None else None
     )
     if session_id and assistant_id:
@@ -66,18 +72,18 @@ def forward_assistant_chunk(
     reporter: object,
     state: NormalizedEventForwardingState,
 ) -> None:
-    session_reporter = cast(SessionEventReporter, reporter)
+    session_reporter = cast('SessionEventReporter', reporter)
     assistant = event.assistant
-    delta = string_value(payload.get("text")) or string_value(
+    delta = string_value(payload.get('text')) or string_value(
         assistant.delta if assistant is not None else None
     )
     if not delta:
         return
 
-    assistant_id = normalized_text(payload.get("assistant_id")) or normalized_text(
+    assistant_id = normalized_text(payload.get('assistant_id')) or normalized_text(
         assistant.id if assistant is not None else None
     )
-    stream_id = assistant_id or "assistant"
+    stream_id = assistant_id or 'assistant'
 
     # ``replace_content`` is the normalize-layer signal that this chunk
     # represents a fresh stream (reevaluate cycle, synthesis restart) and
@@ -86,31 +92,29 @@ def forward_assistant_chunk(
     # stream MUST be reset before we recompute ``full_text``; otherwise the
     # accumulated prior-cycle text gets prepended to the new cycle's first
     # chunk and the bubble keeps growing across cycles.
-    replace_content = bool(payload.get("replace_content")) or bool(
+    replace_content = bool(payload.get('replace_content')) or bool(
         assistant.replace_content if assistant is not None else False
     )
     if replace_content:
-        state.assistant_text_by_id[stream_id] = ""
+        state.assistant_text_by_id[stream_id] = ''
 
-    previous = state.assistant_text_by_id.get(stream_id, "")
+    previous = state.assistant_text_by_id.get(stream_id, '')
     full_text = previous + delta
     state.assistant_text_by_id[stream_id] = full_text
 
-    # Some reporter implementations predate the ``replace_content`` kwarg.
-    if _report_response_chunk_accepts_keyword(session_reporter, "replace_content"):
-        session_reporter.report_response_chunk(
-            delta,
-            assistant_id=stream_id,
-            full_text=full_text,
-            replace_content=replace_content,
-        )
-        return
-
-    session_reporter.report_response_chunk(
-        delta,
-        assistant_id=stream_id,
-        full_text=full_text,
+    # Optional additions remain compatible with older reporter implementations.
+    kwargs: dict[str, Any] = {'assistant_id': stream_id, 'full_text': full_text}
+    kwargs.update(
+        {
+            keyword: value
+            for keyword, value in (
+                ('replace_content', replace_content),
+                ('private_value_restorations', payload.get('private_value_restorations')),
+            )
+            if _report_response_chunk_accepts_keyword(session_reporter, keyword)
+        }
     )
+    session_reporter.report_response_chunk(delta, **kwargs)
 
 
 # MARK: Status Forwarding
@@ -124,17 +128,17 @@ def forward_status_message(
     state: NormalizedEventForwardingState,
 ) -> None:
     _ = state
-    session_reporter = cast(SessionEventReporter, reporter)
-    message = string_value(payload.get("message")) or string_value(
-        mapping_value(payload.get("status"), "message")
+    session_reporter = cast('SessionEventReporter', reporter)
+    message = string_value(payload.get('message')) or string_value(
+        mapping_value(payload.get('status'), 'message')
     )
     if not message:
         return
 
-    assistant_id = normalized_text(payload.get("assistant_id")) or normalized_text(
+    assistant_id = normalized_text(payload.get('assistant_id')) or normalized_text(
         event.assistant.id if event.assistant is not None else None
     )
-    session_reporter.report_status_message(message, assistant_id=assistant_id or "assistant")
+    session_reporter.report_status_message(message, assistant_id=assistant_id or 'assistant')
 
 
 def _report_response_chunk_accepts_keyword(
@@ -152,7 +156,7 @@ def _report_response_chunk_accepts_keyword(
 
 
 __all__ = [
-    "forward_assistant_chunk",
-    "forward_session_start",
-    "forward_status_message",
+    'forward_assistant_chunk',
+    'forward_session_start',
+    'forward_status_message',
 ]

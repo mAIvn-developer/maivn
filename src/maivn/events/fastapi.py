@@ -1,4 +1,3 @@
-# pyright: strict
 """FastAPI / Starlette adapter for streaming :class:`EventBridge` events.
 
 This module is the **one-liner** developers reach for when they want their
@@ -24,9 +23,9 @@ Quickstart::
         return {"ok": True}
 
 The frontend then connects with any HTML5 ``EventSource`` (or any HTTP
-client that speaks SSE). See ``docs/guides/frontend-events.md`` for
-client examples in JavaScript, TypeScript, Swift, Kotlin, Go, Python,
-and cURL.
+client that speaks SSE). See ``guides/frontend-events.md`` in the
+maivn-docs repository for client examples in JavaScript, TypeScript,
+Swift, Kotlin, Go, Python, and cURL.
 
 This adapter is intentionally framework-specific so the base SDK does
 **not** force ``fastapi`` / ``starlette`` / ``sse-starlette`` on every
@@ -55,7 +54,7 @@ if TYPE_CHECKING:
 
 AuthHook: TypeAlias = Callable[..., Awaitable[None]]
 BridgeFactory: TypeAlias = Callable[[str], EventBridge]
-StreamEventsHandler: TypeAlias = Callable[[str, str | None], Awaitable["Response"]]
+StreamEventsHandler: TypeAlias = Callable[[str, str | None], Awaitable['Response']]
 RouteDecorator: TypeAlias = Callable[[StreamEventsHandler], StreamEventsHandler]
 
 
@@ -82,24 +81,24 @@ def _as_object(value: object) -> object:
 
 def _require_fastapi() -> FastAPIModule:
     try:
-        import fastapi as _fastapi  # noqa: PLC0415
+        import fastapi as _fastapi
     except ModuleNotFoundError as exc:
         raise ModuleNotFoundError(
-            "maivn.events.fastapi requires fastapi + sse-starlette. "
-            + "Install with `pip install maivn[fastapi]`."
+            'maivn.events.fastapi requires fastapi + sse-starlette. '
+            'Install with `pip install maivn[fastapi]`.'
         ) from exc
-    return cast(FastAPIModule, _as_object(_fastapi))
+    return cast('FastAPIModule', _as_object(_fastapi))
 
 
 def _require_sse_starlette() -> EventSourceResponseFactory:
     try:
-        from sse_starlette.sse import EventSourceResponse  # noqa: PLC0415
+        from sse_starlette.sse import EventSourceResponse
     except ModuleNotFoundError as exc:
         raise ModuleNotFoundError(
-            "maivn.events.fastapi requires sse-starlette. "
-            + "Install with `pip install maivn[fastapi]`."
+            'maivn.events.fastapi requires sse-starlette. '
+            'Install with `pip install maivn[fastapi]`.'
         ) from exc
-    return cast(EventSourceResponseFactory, cast(object, EventSourceResponse))
+    return cast('EventSourceResponseFactory', cast('object', EventSourceResponse))
 
 
 # MARK: Module-level registry
@@ -120,7 +119,7 @@ def get_event_bridge(
     create: bool = True,
     factory: BridgeFactory | None = None,
     registry: BridgeRegistry | None = None,
-    audience: BridgeAudience = "frontend_safe",
+    audience: BridgeAudience = 'frontend_safe',
 ) -> EventBridge:
     """Return the bridge for ``session_id``, creating one if needed.
 
@@ -143,13 +142,14 @@ def get_event_bridge(
         Audience used when creating a bridge without a custom factory. The
         FastAPI adapter defaults to ``"frontend_safe"`` because events are
         usually consumed by end-user browser clients.
+
     """
     target_registry = _resolve_registry(registry)
     existing = target_registry.get(session_id)
     if existing is not None:
         return existing
     if not create:
-        raise KeyError(f"No event bridge registered for session {session_id!r}")
+        raise KeyError(f'No event bridge registered for session {session_id!r}')
     bridge_factory: BridgeFactory
     if factory is not None:
         bridge_factory = factory
@@ -180,12 +180,12 @@ def remove_event_bridge(
 
 def create_event_router(
     *,
-    prefix: str = "/maivn",
-    path: str = "/events/{session_id}",
+    prefix: str = '/maivn',
+    path: str = '/events/{session_id}',
     auth: AuthHook | None = None,
     factory: BridgeFactory | None = None,
     registry: BridgeRegistry | None = None,
-    audience: BridgeAudience = "frontend_safe",
+    audience: BridgeAudience = 'frontend_safe',
     heartbeat_interval: float | None = None,
     tags: list[str] | None = None,
 ) -> APIRouter:
@@ -220,16 +220,18 @@ def create_event_router(
         the client lives behind a proxy with an aggressive idle timeout.
     tags:
         OpenAPI tags. Default ``["maivn-events"]``.
+
     """
     fastapi = _require_fastapi()
+    # CapWords because the value bound is sse-starlette's response class, not a value.
     EventSourceResponse = _require_sse_starlette()  # noqa: N806
 
-    if "{session_id}" not in path:
-        raise ValueError("path must contain a {session_id} placeholder")
+    if '{session_id}' not in path:
+        raise ValueError('path must contain a {session_id} placeholder')
 
     target_registry = _resolve_registry(registry)
-    router = cast("APIRouter", fastapi.APIRouter(prefix=prefix, tags=tags or ["maivn-events"]))
-    event_router = cast(EventRouter, cast(object, router))
+    router = cast('APIRouter', fastapi.APIRouter(prefix=prefix, tags=tags or ['maivn-events']))
+    event_router = cast('EventRouter', cast('object', router))
 
     if auth is not None:
         dependencies = [fastapi.Depends(auth)]
@@ -269,12 +271,12 @@ def create_event_router(
 def mount_events(
     app: FastAPI,
     *,
-    prefix: str = "/maivn",
-    path: str = "/events/{session_id}",
+    prefix: str = '/maivn',
+    path: str = '/events/{session_id}',
     auth: AuthHook | None = None,
     factory: BridgeFactory | None = None,
     registry: BridgeRegistry | None = None,
-    audience: BridgeAudience = "frontend_safe",
+    audience: BridgeAudience = 'frontend_safe',
     heartbeat_interval: float | None = None,
     tags: list[str] | None = None,
 ) -> APIRouter:
@@ -299,10 +301,10 @@ def mount_events(
 
 
 __all__ = [
-    "AuthHook",
-    "BridgeFactory",
-    "create_event_router",
-    "get_event_bridge",
-    "mount_events",
-    "remove_event_bridge",
+    'AuthHook',
+    'BridgeFactory',
+    'create_event_router',
+    'get_event_bridge',
+    'mount_events',
+    'remove_event_bridge',
 ]

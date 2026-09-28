@@ -1,15 +1,17 @@
 """Streaming and lifecycle helpers for EventBridge."""
 
-# pyright: strict
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, Awaitable
 from datetime import datetime, timezone
-from typing import ClassVar, Protocol, cast
+from typing import TYPE_CHECKING, ClassVar, Protocol
 
 from .serialization import logger
-from .ui_event import UIEvent
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator, Awaitable
+
+    from .ui_event import UIEvent
 
 
 class StreamBridge(Protocol):
@@ -73,7 +75,7 @@ def _drain_replayed_events(
 
     if drained:
         logger.debug(
-            "Drained %d already-replayed events from queue for session %s",
+            'Drained %d already-replayed events from queue for session %s',
             drained,
             bridge.session_id,
         )
@@ -106,9 +108,9 @@ async def _replay_history(
             evictions = bridge.stream_history_evictions
             if evictions:
                 logger.warning(
-                    "Replay cursor %s unknown for session %s; %d events have aged out "
-                    + "of the %d-event history buffer. Replaying full buffer; client may "
-                    + "see duplicates.",
+                    'Replay cursor %s unknown for session %s; %d events have aged out '
+                    'of the %d-event history buffer. Replaying full buffer; client may '
+                    'see duplicates.',
                     last_event_id,
                     bridge.session_id,
                     evictions,
@@ -116,14 +118,14 @@ async def _replay_history(
                 )
             else:
                 logger.info(
-                    "Replay cursor %s not in history for session %s "
-                    + "(possible new turn); replaying full buffer",
+                    'Replay cursor %s not in history for session %s '
+                    '(possible new turn); replaying full buffer',
                     last_event_id,
                     bridge.session_id,
                 )
 
     logger.debug(
-        "Replaying %d buffered events for session %s (last_event_id=%s)",
+        'Replaying %d buffered events for session %s (last_event_id=%s)',
         len(history),
         bridge.session_id,
         last_event_id,
@@ -140,7 +142,7 @@ async def _replay_history(
 
     if replay_start:
         logger.debug(
-            "Skipped %d already-seen events for session %s",
+            'Skipped %d already-seen events for session %s',
             replay_start,
             bridge.session_id,
         )
@@ -168,7 +170,7 @@ def _build_keepalive_frame() -> dict[str, object]:
     """
     utc_now: datetime = datetime.now(tz=timezone.utc)
     timestamp: str = utc_now.isoformat()
-    return {"comment": f"keepalive {timestamp}"}
+    return {'comment': f'keepalive {timestamp}'}
 
 
 async def generate_sse_events(
@@ -194,7 +196,7 @@ async def generate_sse_events(
         else bridge.stream_default_heartbeat_interval
     )
     if interval <= 0:
-        raise ValueError("heartbeat_interval must be > 0")
+        raise ValueError('heartbeat_interval must be > 0')
 
     bridge.stream_subscriber_attached()
     try:
@@ -211,13 +213,10 @@ async def generate_sse_events(
         while not bridge.stream_is_closed:
             try:
                 queue_wait: Awaitable[UIEvent] = bridge.stream_queue_get()
-                live_event: UIEvent = cast(
-                    UIEvent,
-                    await asyncio.wait_for(
-                        queue_wait,
-                        timeout=interval,
-                    ),
-                )  # pyright: ignore[reportUnnecessaryCast]
+                live_event: UIEvent = await asyncio.wait_for(
+                    queue_wait,
+                    timeout=interval,
+                )
                 if live_event.id in replayed_ids:
                     continue
                 yield live_event.to_sse()
@@ -228,7 +227,7 @@ async def generate_sse_events(
                 yield _build_keepalive_frame()
 
     except (asyncio.CancelledError, GeneratorExit):
-        logger.debug("SSE stream cancelled for session %s", bridge.session_id)
+        logger.debug('SSE stream cancelled for session %s', bridge.session_id)
         # Re-raise GeneratorExit per PEP 525 so the runtime knows the
         # generator finalized cleanly. CancelledError likewise should not
         # be swallowed silently in newer Python.

@@ -1,14 +1,15 @@
 """Forwarders for agent assignment and enrichment events."""
 
-# pyright: strict
 from __future__ import annotations
 
 import inspect
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
-from ..._models import AppEvent
-from ..payload import EventPayload, coerce_mapping, normalized_text
-from ..state import NormalizedEventForwardingState
+from maivn.events._forwarding.payload import EventPayload, coerce_mapping, normalized_text
+
+if TYPE_CHECKING:
+    from maivn.events._forwarding.state import NormalizedEventForwardingState
+    from maivn.events._models import AppEvent
 
 # MARK: Callback Protocols
 
@@ -23,6 +24,7 @@ class AgentAssignmentCallback(Protocol):
         swarm_name: str | None = None,
         error: str | None = None,
         result: object | None = None,
+        use_as_final_output: bool = False,
     ) -> None: ...
 
 
@@ -45,42 +47,72 @@ def forward_agent_assignment(
     state: NormalizedEventForwardingState,
 ) -> None:
     _ = state
-    callback = getattr(reporter, "report_agent_assignment", None)
+    callback = getattr(reporter, 'report_agent_assignment', None)
     if not callable(callback):
         return
-    report_agent_assignment = cast(AgentAssignmentCallback, callback)
+    report_agent_assignment = cast('AgentAssignmentCallback', callback)
 
-    assignment_id = normalized_text(payload.get("assignment_id")) or normalized_text(
+    assignment_id = normalized_text(payload.get('assignment_id')) or normalized_text(
         event.assignment.id if event.assignment is not None else None
     )
-    agent_name = normalized_text(payload.get("agent_name")) or normalized_text(
+    agent_name = normalized_text(payload.get('agent_name')) or normalized_text(
         event.assignment.agent_name if event.assignment is not None else None
     )
-    status = normalized_text(payload.get("status")) or normalized_text(
+    status = normalized_text(payload.get('status')) or normalized_text(
         event.assignment.status if event.assignment is not None else None
     )
-    swarm_name = normalized_text(payload.get("swarm_name")) or normalized_text(
+    swarm_name = normalized_text(payload.get('swarm_name')) or normalized_text(
         event.assignment.swarm_name if event.assignment is not None else None
     )
-    error = normalized_text(payload.get("error")) or normalized_text(
+    error = normalized_text(payload.get('error')) or normalized_text(
         event.assignment.error if event.assignment is not None else None
     )
     result = payload.get(
-        "result",
-        cast(object, event.assignment.result) if event.assignment is not None else None,
+        'result',
+        cast('object', event.assignment.result) if event.assignment is not None else None,
     )
 
     if not agent_name or not status:
         return
 
-    report_agent_assignment(
-        agent_name=agent_name,
-        status=status,
-        assignment_id=assignment_id or f"agent:{agent_name}",
-        swarm_name=swarm_name,
-        error=error,
-        result=result,
-    )
+    kwargs: dict[str, object] = {
+        'agent_name': agent_name,
+        'status': status,
+        'assignment_id': assignment_id or f'agent:{agent_name}',
+        'swarm_name': swarm_name,
+        'error': error,
+        'result': result,
+    }
+    if _supports_assignment_final_output(reporter, state=state):
+        kwargs['use_as_final_output'] = payload.get('use_as_final_output') is True
+    cast('EnrichmentCallback', report_agent_assignment)(**kwargs)
+
+
+def _supports_assignment_final_output(
+    reporter: object,
+    *,
+    state: NormalizedEventForwardingState,
+) -> bool:
+    """Return whether an assignment callback accepts the canonical final-output flag."""
+    reporter_type = type(reporter)
+    cached = state.assignment_final_output_support_by_reporter_type.get(reporter_type)
+    if cached is not None:
+        return cached
+
+    callback = getattr(reporter, 'report_agent_assignment', None)
+    if not callable(callback):
+        state.assignment_final_output_support_by_reporter_type[reporter_type] = False
+        return False
+    try:
+        params = inspect.signature(callback).parameters
+    except (TypeError, ValueError):
+        supported = False
+    else:
+        supported = 'use_as_final_output' in params or any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in params.values()
+        )
+    state.assignment_final_output_support_by_reporter_type[reporter_type] = supported
+    return supported
 
 
 # MARK: Enrichment Forwarding
@@ -95,54 +127,54 @@ def forward_enrichment(
 ) -> None:
     enrichment = event.enrichment
     scope = event.scope
-    phase = normalized_text(payload.get("phase")) or normalized_text(
+    phase = normalized_text(payload.get('phase')) or normalized_text(
         enrichment.phase if enrichment is not None else None
     )
-    message = normalized_text(payload.get("message")) or normalized_text(
+    message = normalized_text(payload.get('message')) or normalized_text(
         enrichment.message if enrichment is not None else None
     )
     if not phase:
         return
 
-    enrichment_callback = getattr(reporter, "report_enrichment", None)
+    enrichment_callback = getattr(reporter, 'report_enrichment', None)
     if not callable(enrichment_callback):
-        phase_change_callback = getattr(reporter, "report_phase_change", None)
+        phase_change_callback = getattr(reporter, 'report_phase_change', None)
         if callable(phase_change_callback):
-            cast(PhaseChangeCallback, phase_change_callback)(phase)
+            cast('PhaseChangeCallback', phase_change_callback)(phase)
         return
-    report_enrichment = cast(EnrichmentCallback, enrichment_callback)
+    report_enrichment = cast('EnrichmentCallback', enrichment_callback)
 
-    scope_id = normalized_text(payload.get("scope_id")) or normalized_text(
+    scope_id = normalized_text(payload.get('scope_id')) or normalized_text(
         scope.id if scope is not None else None
     )
-    scope_name = normalized_text(payload.get("scope_name")) or normalized_text(
+    scope_name = normalized_text(payload.get('scope_name')) or normalized_text(
         scope.name if scope is not None else None
     )
-    scope_type = normalized_text(payload.get("scope_type")) or normalized_text(
+    scope_type = normalized_text(payload.get('scope_type')) or normalized_text(
         scope.type if scope is not None else None
     )
-    memory = coerce_mapping(payload.get("memory")) or coerce_mapping(
-        cast(object, enrichment.memory) if enrichment is not None else None
+    memory = coerce_mapping(payload.get('memory')) or coerce_mapping(
+        cast('object', enrichment.memory) if enrichment is not None else None
     )
-    redaction = coerce_mapping(payload.get("redaction")) or coerce_mapping(
-        cast(object, enrichment.redaction) if enrichment is not None else None
+    redaction = coerce_mapping(payload.get('redaction')) or coerce_mapping(
+        cast('object', enrichment.redaction) if enrichment is not None else None
     )
     supports_scope, supports_memory, supports_redaction = _enrichment_support(
         reporter,
         state=state,
     )
     kwargs: dict[str, object] = {
-        "phase": phase,
-        "message": message or phase,
+        'phase': phase,
+        'message': message or phase,
     }
     if supports_scope:
-        kwargs["scope_id"] = scope_id
-        kwargs["scope_name"] = scope_name
-        kwargs["scope_type"] = scope_type
+        kwargs['scope_id'] = scope_id
+        kwargs['scope_name'] = scope_name
+        kwargs['scope_type'] = scope_type
     if supports_memory and memory is not None:
-        kwargs["memory"] = memory
+        kwargs['memory'] = memory
     if supports_redaction and redaction is not None:
-        kwargs["redaction"] = redaction
+        kwargs['redaction'] = redaction
     report_enrichment(**kwargs)
 
 
@@ -161,7 +193,7 @@ def _enrichment_support(
     if cached is not None:
         return cached
 
-    report_enrichment = getattr(reporter, "report_enrichment", None)
+    report_enrichment = getattr(reporter, 'report_enrichment', None)
     if not callable(report_enrichment):
         cached = (False, False, False)
         state.enrichment_support_by_reporter_type[reporter_type] = cached
@@ -176,9 +208,9 @@ def _enrichment_support(
             parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in params.values()
         )
         cached = (
-            accepts_var_kwargs or "scope_id" in params,
-            accepts_var_kwargs or "memory" in params,
-            accepts_var_kwargs or "redaction" in params,
+            accepts_var_kwargs or 'scope_id' in params,
+            accepts_var_kwargs or 'memory' in params,
+            accepts_var_kwargs or 'redaction' in params,
         )
 
     state.enrichment_support_by_reporter_type[reporter_type] = cached
@@ -186,6 +218,6 @@ def _enrichment_support(
 
 
 __all__ = [
-    "forward_agent_assignment",
-    "forward_enrichment",
+    'forward_agent_assignment',
+    'forward_enrichment',
 ]

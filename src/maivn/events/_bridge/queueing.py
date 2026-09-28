@@ -1,12 +1,14 @@
 """Queue backpressure helpers for EventBridge."""
 
-# pyright: strict
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 
 from .serialization import logger
-from .ui_event import UIEvent
+
+if TYPE_CHECKING:
+    from .ui_event import UIEvent
 
 # MARK: Queueing
 
@@ -24,16 +26,16 @@ async def enqueue_event(
         queue.put_nowait(event)
         return
 
-    if backpressure == "block":
+    if backpressure == 'block':
         await queue.put(event)
         return
 
-    if backpressure == "drop_newest":
+    if backpressure == 'drop_newest':
         try:
             queue.put_nowait(event)
         except asyncio.QueueFull:
             logger.warning(
-                "Dropping newest event for session %s (queue full, type=%s)",
+                'Dropping newest event for session %s (queue full, type=%s)',
                 session_id,
                 event.type,
             )
@@ -44,17 +46,17 @@ async def enqueue_event(
         try:
             queue.put_nowait(event)
             return
-        except asyncio.QueueFull:
+        except asyncio.QueueFull:  # noqa: PERF203 - drop-oldest retry loop
             try:
                 dropped = queue.get_nowait()
             except asyncio.QueueEmpty:
                 # Defensive guard; full and empty should not happen together.
                 return
             logger.warning(
-                "Dropping oldest event for session %s (queue full, type=%s)",
+                'Dropping oldest event for session %s (queue full, type=%s)',
                 session_id,
                 dropped.type,
             )
 
 
-__all__ = ["enqueue_event"]
+__all__ = ['enqueue_event']

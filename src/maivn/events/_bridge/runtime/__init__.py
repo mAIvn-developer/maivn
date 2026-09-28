@@ -6,7 +6,6 @@ Submodules:
 - normalization: known-event payload normalization for raw bridge packets
 """
 
-# pyright: strict
 from __future__ import annotations
 
 # MARK: Public Exports

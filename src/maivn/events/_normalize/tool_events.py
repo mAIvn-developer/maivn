@@ -1,14 +1,12 @@
-# pyright: strict
 """Tool event normalization handlers."""
 
 from __future__ import annotations
 
 import uuid
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
-from ..._internal.utils.reporting.app_event_payloads import build_tool_event_payload
-from .._models import JsonObject, NormalizedStreamState
-from .context import NormalizationOptions
+from maivn._internal.reporting.app_event_payloads import build_tool_event_payload
+
 from .helpers import clean_text, coerce_mapping, model_result_as_mapping
 from .tooling import (
     extract_tool_args,
@@ -18,6 +16,11 @@ from .tooling import (
     extract_tool_type,
 )
 
+if TYPE_CHECKING:
+    from maivn.events._models import JsonObject, NormalizedStreamState
+
+    from .context import NormalizationOptions
+
 # MARK: Tool Execution
 
 
@@ -26,33 +29,37 @@ def _resolve_tool_event_id(
     tool_call: JsonObject,
     tool_index: int,
 ) -> str:
-    for key in ("tool_id", "id"):
+    for key in ('tool_id', 'id'):
         candidate = clean_text(tool_call.get(key))
         if candidate is not None:
             return candidate
 
     tool_id = extract_tool_identifier(tool_call)
 
-    raw_event_id = clean_text(payload.get("id"))
-    fallback_name = clean_text(tool_call.get("name") or tool_call.get("tool_name")) or "tool"
+    raw_event_id = clean_text(payload.get('id'))
+    fallback_name = clean_text(tool_call.get('name') or tool_call.get('tool_name')) or 'tool'
     if raw_event_id is not None:
-        return f"{raw_event_id}:{tool_index}:{fallback_name}"
+        return f'{raw_event_id}:{tool_index}:{fallback_name}'
     return tool_id
 
 
 def _extract_tool_calls(value: JsonObject) -> list[JsonObject]:
-    raw_tool_calls = value.get("tool_calls")
+    raw_tool_calls = value.get('tool_calls')
     tool_calls = (
-        [cast(JsonObject, tool_call) for tool_call in raw_tool_calls if isinstance(tool_call, dict)]
+        [
+            cast('JsonObject', tool_call)
+            for tool_call in raw_tool_calls
+            if isinstance(tool_call, dict)
+        ]
         if isinstance(raw_tool_calls, list)
         else []
     )
     if tool_calls:
         return tool_calls
 
-    single = value.get("tool_call")
+    single = value.get('tool_call')
     if isinstance(single, dict):
-        return [cast(JsonObject, single)]
+        return [cast('JsonObject', single)]
     return []
 
 
@@ -61,7 +68,7 @@ def handle_tool_event(
     state: NormalizedStreamState,
     options: NormalizationOptions,
 ) -> list[JsonObject]:
-    value = coerce_mapping(payload.get("value"))
+    value = coerce_mapping(payload.get('value'))
     tool_calls = _extract_tool_calls(value)
 
     normalized_payloads: list[JsonObject] = []
@@ -83,7 +90,7 @@ def handle_tool_event(
             build_tool_event_payload(
                 tool_name=resolved_tool_name,
                 tool_id=tool_id,
-                status="executing",
+                status='executing',
                 args=extract_tool_args(
                     tool_call,
                     tool_id,
@@ -104,19 +111,19 @@ def handle_model_tool_complete_event(
     state: NormalizedStreamState,
     options: NormalizationOptions,
 ) -> list[JsonObject]:
-    tool_name = clean_text(payload.get("tool_name")) or "model_tool"
-    tool_id = clean_text(payload.get("event_id")) or str(uuid.uuid4())
-    state.pending_model_tools.append({"tool_name": tool_name, "tool_id": tool_id})
-    state.last_model_tool_result = model_result_as_mapping(payload.get("result"))
+    tool_name = clean_text(payload.get('tool_name')) or 'model_tool'
+    tool_id = clean_text(payload.get('event_id')) or str(uuid.uuid4())
+    state.pending_model_tools.append({'tool_name': tool_name, 'tool_id': tool_id})
+    state.last_model_tool_result = model_result_as_mapping(payload.get('result'))
     return [
         build_tool_event_payload(
             tool_name=tool_name,
             tool_id=tool_id,
-            status="executing",
+            status='executing',
             result=None,
             agent_name=options.default_agent_name,
             swarm_name=options.default_swarm_name,
-            tool_type="model",
+            tool_type='model',
             **options.participant_kwargs(),
         )
     ]

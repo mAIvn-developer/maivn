@@ -1,4 +1,3 @@
-# pyright: strict
 """Pydantic descriptor models and state types for the AppEvent v1 contract."""
 
 from __future__ import annotations
@@ -8,8 +7,8 @@ from typing import ClassVar, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-from .._internal.core.entities.sse_event import SSEEvent as RawSSEEvent
-from .._internal.utils.reporting.app_event_payloads import APP_EVENT_CONTRACT_VERSION
+from maivn._internal.reporting.app_event_payloads import APP_EVENT_CONTRACT_VERSION
+from maivn._internal.sse_event import SSEEvent as RawSSEEvent
 
 # MARK: Types
 
@@ -20,7 +19,7 @@ JsonObject: TypeAlias = dict[str, JsonValue]
 
 
 class ScopeDescriptor(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra='allow')
 
     id: str | None = None
     name: str | None = None
@@ -28,7 +27,7 @@ class ScopeDescriptor(BaseModel):
 
 
 class ParticipantDescriptor(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra='allow')
 
     key: str | None = None
     name: str | None = None
@@ -36,7 +35,7 @@ class ParticipantDescriptor(BaseModel):
 
 
 class LifecycleDescriptor(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra='allow')
 
     phase: str | None = None
     parent_id: str | None = None
@@ -46,7 +45,7 @@ class LifecycleDescriptor(BaseModel):
 
 
 class ToolDescriptor(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra='allow')
 
     id: str | None = None
     name: str | None = None
@@ -58,7 +57,7 @@ class ToolDescriptor(BaseModel):
 
 
 class AssistantDescriptor(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra='allow')
 
     id: str | None = None
     delta: str | None = None
@@ -73,7 +72,7 @@ class AssistantDescriptor(BaseModel):
 
 
 class AssignmentDescriptor(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra='allow')
 
     id: str | None = None
     agent_name: str | None = None
@@ -85,7 +84,7 @@ class AssignmentDescriptor(BaseModel):
 
 
 class EnrichmentDescriptor(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra='allow')
 
     phase: str | None = None
     message: str | None = None
@@ -95,7 +94,7 @@ class EnrichmentDescriptor(BaseModel):
 
 
 class InterruptDescriptor(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra='allow')
 
     id: str | None = None
     checkpoint_id: str | None = None
@@ -111,7 +110,7 @@ class InterruptDescriptor(BaseModel):
 
 
 class OutputDescriptor(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra='allow')
 
     response: str | None = None
     result: JsonValue = None
@@ -119,21 +118,22 @@ class OutputDescriptor(BaseModel):
 
 
 class ErrorInfoDescriptor(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra='allow')
 
     message: str | None = None
+    code: str | None = None
     details: JsonObject = Field(default_factory=dict)
 
 
 class SessionDescriptor(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra='allow')
 
     id: str | None = None
     assistant_id: str | None = None
 
 
 class ChunkDescriptor(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra='allow')
 
     text: str | None = None
     progress: float | None = None
@@ -147,7 +147,7 @@ class HookDescriptor(BaseModel):
     on-screen card the firing should attach to.
     """
 
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra='allow')
 
     name: str | None = None
     """Display name of the hook callable (its ``__name__``)."""
@@ -188,7 +188,7 @@ class AppEvent(BaseModel):
     when the SDK evolves.
     """
 
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra='allow')
 
     contract_version: str = APP_EVENT_CONTRACT_VERSION
     event_name: str
@@ -218,6 +218,7 @@ class NormalizedStreamState:
     reported_tool_ids: set[str] = field(default_factory=set)
     pending_model_tools: list[dict[str, str]] = field(default_factory=list)
     last_model_tool_result: JsonObject | None = None
+    last_tool_result: JsonObject | None = None
     # One-shot flag set whenever a ``reevaluate_accrued`` event fires. The
     # NEXT streamed assistant chunk — regardless of which ``assistant_id``
     # the server attaches to it — is emitted with ``replace_content=True``
@@ -229,21 +230,21 @@ class NormalizedStreamState:
 
 
 __all__ = [
-    "APP_EVENT_CONTRACT_VERSION",
-    "AppEvent",
-    "AssignmentDescriptor",
-    "AssistantDescriptor",
-    "ChunkDescriptor",
-    "EnrichmentDescriptor",
-    "ErrorInfoDescriptor",
-    "HookDescriptor",
-    "InterruptDescriptor",
-    "LifecycleDescriptor",
-    "NormalizedStreamState",
-    "OutputDescriptor",
-    "ParticipantDescriptor",
-    "RawSSEEvent",
-    "ScopeDescriptor",
-    "SessionDescriptor",
-    "ToolDescriptor",
+    'APP_EVENT_CONTRACT_VERSION',
+    'AppEvent',
+    'AssignmentDescriptor',
+    'AssistantDescriptor',
+    'ChunkDescriptor',
+    'EnrichmentDescriptor',
+    'ErrorInfoDescriptor',
+    'HookDescriptor',
+    'InterruptDescriptor',
+    'LifecycleDescriptor',
+    'NormalizedStreamState',
+    'OutputDescriptor',
+    'ParticipantDescriptor',
+    'RawSSEEvent',
+    'ScopeDescriptor',
+    'SessionDescriptor',
+    'ToolDescriptor',
 ]

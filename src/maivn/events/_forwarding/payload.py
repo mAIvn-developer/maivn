@@ -1,12 +1,12 @@
 """Payload extraction and coercion helpers for normalized event forwarding."""
 
-# pyright: strict
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TypeAlias, cast
+from typing import TYPE_CHECKING, TypeAlias, cast
 
-from .._models import AppEvent
+if TYPE_CHECKING:
+    from maivn.events._models import AppEvent
 
 # MARK: Types
 
@@ -29,6 +29,8 @@ class ToolPayload:
     error: str | None
     agent_name: str | None
     swarm_name: str | None
+    duration_ms: int | None
+    private_data_keys: list[str] | None
 
 
 # MARK: Payload Extraction
@@ -41,34 +43,49 @@ def extract_tool_payload(
 ) -> ToolPayload:
     tool = event.tool
     tool_id = (
-        normalized_text(payload.get("tool_id"))
-        or normalized_text(payload.get("event_id"))
+        normalized_text(payload.get('tool_id'))
+        or normalized_text(payload.get('event_id'))
         or normalized_text(tool.id if tool is not None else None)
     )
     tool_name = (
-        normalized_text(payload.get("tool_name"))
-        or normalized_text(payload.get("tool_type"))
+        normalized_text(payload.get('tool_name'))
+        or normalized_text(payload.get('tool_type'))
         or normalized_text(tool.name if tool is not None else None)
     )
-    tool_type = normalized_text(payload.get("tool_type")) or normalized_text(
+    tool_type = normalized_text(payload.get('tool_type')) or normalized_text(
         tool.type if tool is not None else None
     )
-    status = normalized_text(payload.get("status")) or normalized_text(
+    status = normalized_text(payload.get('status')) or normalized_text(
         tool.status if tool is not None else None
     )
-    args = coerce_mapping(payload.get("args")) or coerce_mapping(payload.get("params"))
+    args = coerce_mapping(payload.get('args')) or coerce_mapping(payload.get('params'))
     if args is None and tool is not None:
-        args = coerce_mapping(cast(object, tool.args))
-    result = payload.get("result", cast(object, tool.result) if tool is not None else None)
-    error = normalized_text(payload.get("error")) or normalized_text(
+        args = coerce_mapping(cast('object', tool.args))
+    result = payload.get('result', cast('object', tool.result) if tool is not None else None)
+    error = normalized_text(payload.get('error')) or normalized_text(
         tool.error if tool is not None else None
     )
-    agent_name = normalized_text(payload.get("agent_name"))
-    swarm_name = normalized_text(payload.get("swarm_name"))
+    agent_name = normalized_text(payload.get('agent_name'))
+    swarm_name = normalized_text(payload.get('swarm_name'))
+    duration_value = payload.get('duration_ms')
+    if duration_value is None and tool is not None:
+        duration_value = tool.model_extra.get('duration_ms') if tool.model_extra else None
+    duration_ms = (
+        duration_value
+        if isinstance(duration_value, int)
+        and not isinstance(duration_value, bool)
+        and duration_value >= 0
+        else None
+    )
+    private_data_keys = string_list(payload.get('private_data_keys'))
+    if private_data_keys is None and event.model_extra:
+        private_data_keys = string_list(event.model_extra.get('private_data_keys'))
+    if private_data_keys is None and tool is not None and tool.model_extra:
+        private_data_keys = string_list(tool.model_extra.get('private_data_keys'))
     scope = event.scope
-    if agent_name is None and scope is not None and scope.type == "agent":
+    if agent_name is None and scope is not None and scope.type == 'agent':
         agent_name = normalized_text(scope.name)
-    if swarm_name is None and scope is not None and scope.type == "swarm":
+    if swarm_name is None and scope is not None and scope.type == 'swarm':
         swarm_name = normalized_text(scope.name)
     return ToolPayload(
         tool_id=tool_id,
@@ -80,6 +97,8 @@ def extract_tool_payload(
         error=error,
         agent_name=agent_name,
         swarm_name=swarm_name,
+        duration_ms=duration_ms,
+        private_data_keys=private_data_keys,
     )
 
 
@@ -100,20 +119,20 @@ def string_value(value: object) -> str | None:
 def coerce_mapping(value: object) -> ToolArguments | None:
     if not isinstance(value, dict):
         return None
-    mapping = cast(dict[object, object], value)
-    return {cast(str, key): item for key, item in mapping.items()}
+    mapping = cast('dict[object, object]', value)
+    return {cast('str', key): item for key, item in mapping.items()}
 
 
 def mapping_value(value: object, key: str) -> object | None:
     if isinstance(value, dict):
-        return cast(ToolArguments, value).get(key)
+        return cast('ToolArguments', value).get(key)
     return None
 
 
 def string_list(value: object) -> list[str] | None:
     if not isinstance(value, list):
         return None
-    items = cast(list[object], value)
+    items = cast('list[object]', value)
     return [str(item) for item in items]
 
 
@@ -129,32 +148,32 @@ def float_value(value: object) -> float | None:
 
 
 def normalize_tool_type(tool_type: str | None) -> str:
-    return (normalized_text(tool_type) or "func").lower()
+    return (normalized_text(tool_type) or 'func').lower()
 
 
 def normalize_tool_status(status: str | None) -> str:
-    normalized = (normalized_text(status) or "executing").lower()
-    if normalized in {"started", "running", "in_progress", "pending"}:
-        return "executing"
-    if normalized in {"completed", "success"}:
-        return "completed"
-    if normalized in {"failed", "error"}:
-        return "failed"
+    normalized = (normalized_text(status) or 'executing').lower()
+    if normalized in {'started', 'running', 'in_progress', 'pending'}:
+        return 'executing'
+    if normalized in {'completed', 'success'}:
+        return 'completed'
+    if normalized in {'failed', 'error'}:
+        return 'failed'
     return normalized
 
 
 __all__ = [
-    "EventPayload",
-    "ToolPayload",
-    "ToolArguments",
-    "coerce_mapping",
-    "extract_tool_payload",
-    "float_value",
-    "integer_value",
-    "mapping_value",
-    "normalize_tool_status",
-    "normalize_tool_type",
-    "normalized_text",
-    "string_list",
-    "string_value",
+    'EventPayload',
+    'ToolArguments',
+    'ToolPayload',
+    'coerce_mapping',
+    'extract_tool_payload',
+    'float_value',
+    'integer_value',
+    'mapping_value',
+    'normalize_tool_status',
+    'normalize_tool_type',
+    'normalized_text',
+    'string_list',
+    'string_value',
 ]

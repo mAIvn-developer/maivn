@@ -1,115 +1,144 @@
 [build-system]
-requires = ["hatchling>=1.25.0"]
-build-backend = "hatchling.build"
+requires = ['hatchling>=1.27']
+build-backend = 'hatchling.build'
 
 [project]
-name = "maivn"
-dynamic = ["version"]
-description = "mAIvn Python SDK for building agentic systems with typed tools and dependencies"
-readme = "README.md"
-requires-python = ">=3.10"
-license = "Apache-2.0"
-license-files = ["LICENSE", "NOTICE"]
-authors = [{ name = "Chad Heathcote", email = "developer@maivn.io" }]
-keywords = ["sdk", "maivn", "ai", "agents", "llm", "agentic"]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: Software Development :: Libraries :: Python Modules",
-    "Typing :: Typed",
-]
+name = 'maivn'
+version = '2.0.0'
+description = 'Python SDK for mAIvn Platform v2.'
+readme = 'README.md'
+requires-python = '>=3.10'
+license = 'Apache-2.0'
+license-files = ['LICENSE', 'NOTICE']
 dependencies = [
-    # SDK runtime
-    "croniter>=2.0.1",
-    "docstring-parser>=0.17.0",
-    "maivn-shared>=0.4.3,<0.5.0",
-    "prompt-toolkit>=3.0.52",
-    "python-dotenv>=1.2.2",
-    "rich>=14.3.4",
-    "tzlocal>=5.3.1",
-    "typing-extensions>=4.15.0",
-]
-
-[project.optional-dependencies]
-# ``[studio]`` extra was removed in 0.3.0 — it created a circular
-# release-time dependency where locking ``maivn`` required ``maivn-studio``
-# on PyPI and vice versa, blocking every coordinated SDK + Studio release.
-# Install the companion directly instead: ``pip install maivn maivn-studio``.
-# The SDK<->Studio version coupling is still enforced inside maivn-studio
-# (which pins ``maivn>=0.4.2,<0.5.0``).
-#
-# Drop-in FastAPI/Starlette adapter for streaming bridge events to a
-# frontend. Both deps are MIT-licensed (fully OSI-approved).
-fastapi = ["fastapi>=0.136.1", "sse-starlette>=2.1.3"]
-
-# Note: ``maivn-tools`` is installed directly (``pip install maivn-tools``)
-# and depends on this SDK; it is NOT exposed as a ``maivn[tools]`` extra,
-# for the same circular release-time reason we dropped ``maivn[studio]``.
-
-[project.urls]
-Homepage = "https://maivn.io"
-Documentation = "https://developer.maivn.io/docs"
-Repository = "https://github.com/mAIvn-developer/maivn"
-Issues = "https://github.com/mAIvn-developer/maivn/issues"
-Changelog = "https://github.com/mAIvn-developer/maivn/blob/master/CHANGELOG.md"
-
-[dependency-groups]
-dev = [
-    "fastapi>=0.136.1",
-    "httpx>=0.28.1",
-    "httpx2>=2.4.0",
-    "pyright>=1.1.409",
-    "pytest>=9.0.3",
-    "pytest-asyncio>=1.3.0",
-    "ruff>=0.15.12,<1",
-    "sse-starlette>=2.1.3",
+  'croniter>=2.0.1',
+  'httpx>=0.28',
+  'maivn-contracts>=0.1.0,<0.2',
+  'orjson>=3',
+  'private-data-vault>=0.1.0,<0.2',
+  'pydantic>=2.13.5',
+  'pydantic-settings>=2',
+  'typing-extensions>=4.12',
+  # Scheduling resolves named timezones via zoneinfo, which has no bundled
+  # database on Windows.
+  'tzdata; sys_platform == "win32"',
 ]
 
 [project.scripts]
-maivn = "maivn.cli:main"
+maivn = 'maivn.cli:main'
 
-[tool.hatch.version]
-path = "src/maivn/__version__.py"
+[project.optional-dependencies]
+# maivn.events.fastapi serves an EventBridge over SSE. Only an app backend needs it, so
+# FastAPI is not forced on every SDK consumer.
+fastapi = ['fastapi>=0.115', 'sse-starlette>=2']
+# Instrumentation libraries depend on the OpenTelemetry API only. Applications
+# choose and configure their SDK, processor, and exporter.
+otel = ['opentelemetry-api>=1.30,<2']
+# Enhanced (Tier 1) terminal output. Plain-text reporting works without it, so
+# Rich is not forced on every SDK consumer.
+rich = ['rich>=14.3.4']
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/maivn"]
-
-[tool.ruff]
-target-version = "py310"
-line-length = 100
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
-ignore = []
-
-[tool.ruff.lint.isort]
-required-imports = ["from __future__ import annotations"]
-
-[tool.pyright]
-pythonVersion = "3.10"
-typeCheckingMode = "strict"
-
-[tool.pytest.ini_options]
-addopts = "-q -ra --strict-config --strict-markers --import-mode=importlib"
-testpaths = ["tests"]
-asyncio_default_fixture_loop_scope = "function"
-xfail_strict = true
-
-[tool.coverage.run]
-omit = [
-    "src/maivn/_internal/utils/reporting/*",
-    "src/maivn/_internal/utils/reporting/**",
-    "src/maivn/_internal/api/mcp.py",
-    "src/maivn/_internal/api/mcp_auto.py",
-    "src/maivn/_internal/api/mcp_tools.py",
-    "src/maivn/_internal/api/base_scope_mcp.py",
+[dependency-groups]
+dev = [
+  'fastapi>=0.115',
+  'sse-starlette>=2',
+  'rich>=14.3.4',
+  'basedpyright',
+  'opentelemetry-sdk>=1.30,<2',
+  'pytest',
+  'ruff',
 ]
 
-[tool.coverage.report]
-fail_under = 80
-show_missing = true
+[tool.uv.sources]
+maivn-contracts = { path = '../maivn-contracts', editable = true }
+private-data-vault = { path = '../maivn-private-data-vault/crates/private-data-vault-py', editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ['src/maivn']
+
+# Keep the source distribution limited to SDK code. Public guides are versioned
+# and published separately from this package.
+[tool.hatch.build.targets.sdist]
+only-include = ['src/maivn', 'LICENSE', 'NOTICE', 'README.md']
+
+[tool.pytest.ini_options]
+addopts = [
+  '--import-mode=importlib',
+]
+pythonpath = [
+  'src',
+]
+testpaths = [
+  'tests',
+]
+
+[tool.ruff]
+line-length = 100
+target-version = 'py310'
+
+[tool.ruff.format]
+quote-style = 'single'
+
+# LF on every platform. The default, "auto", keeps whatever ending a file
+# already carries, which is how CRLF kept arriving from Windows editors.
+line-ending = 'lf'
+
+[tool.ruff.lint]
+select = ['ALL']
+ignore = [
+  # `Any` is load-bearing where the SDK hands back an opaque customer payload or binds
+  # the optional vault wheel by name. The annotation is honest there, not lazy.
+  'ANN401',
+  # Ruff documents COM812 and ISC001 as conflicting with its own formatter, so both stay
+  # off; otherwise `ruff format` and `ruff check` disagree about the same line.
+  'COM812',
+  # No source file in this repository carries a copyright header and none is planned.
+  # The rule is preview-gated, so it reports nothing until preview is enabled; the waiver
+  # stays so that turning preview on does not flag all 169 files.
+  'CPY001',
+  # D203/D211 and D213/D212 are mutually exclusive pairs. D211 and D212 are the halves
+  # that match `ruff format`'s docstring layout, so their partners are the ones waived.
+  'D203',
+  'D213',
+  # `tests/` is an implicit namespace package on purpose: pytest runs in importlib mode,
+  # so there is no `__init__.py` for INP001 to find.
+  'INP001',
+  # See COM812 - the second half of ruff's formatter-conflict pair.
+  'ISC001',
+]
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = 'single'
+
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-base-classes = ['pydantic.BaseModel']
+
+[tool.ruff.lint.per-file-ignores]
+# Asserting is what a test does; S101 exists to keep asserts out of shipped code.
+'tests/**/*.py' = ['S101']
+# Writing to the terminal is the entire job of a terminal reporter.
+'src/maivn/_internal/reporting/terminal_reporter/**/*.py' = ['T201']
+# A CLI prints to the terminal and launches Studio as a subprocess. Both are the job.
+'src/maivn/cli.py' = ['T201', 'S603']
+# Keep compatibility-module exceptions scoped to the event package.
+'src/maivn/events/**/*.py' = [
+  'C901', 'D205', 'D301', 'D417', 'EM101', 'EM102', 'ERA001', 'G004',
+  'N802', 'PERF401', 'PLC0415', 'PLR0911', 'PLR0912', 'PLR0913', 'PLR0915', 'RUF022',
+  'S110', 'SIM108', 'SIM118', 'TRY003', 'TRY300',
+]
+# Keyword-only builders that mirror the AppEvent contract field for field: the arity and
+# branching are the contract's shape (C901, PLR0912, PLR0913), and each docstring
+# describes the payload rather than restating every field (D417). ERA001 fires on the
+# `# MARK:` section markers, not on dead code.
+'src/maivn/_internal/reporting/app_event_payloads/**/*.py' = [
+  'C901', 'D417', 'ERA001', 'PLR0912', 'PLR0913',
+]
+
+[tool.basedpyright]
+pythonVersion = '3.10'
+typeCheckingMode = 'strict'
+reportUnnecessaryTypeIgnoreComment = 'error'
+include = [
+  'src',
+  'tests',
+]

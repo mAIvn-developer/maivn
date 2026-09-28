@@ -1,5 +1,3 @@
-"""Internal SDK implementation package.
-Not part of the public SDK API surface.
-"""
+"""Private implementation package for the mAIvn SDK."""
 
-# pyright: strict
+from __future__ import annotations

@@ -1,4 +1,3 @@
-# pyright: strict
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -8,7 +7,7 @@ from .helpers import build_fallback_id, fingerprint_mapping, normalize_key_part,
 
 ToolBaseSignature = tuple[str, str, str | None, str | None]
 ToolFullSignature = tuple[str, str, str | None, str | None, str | None]
-_KeyT = TypeVar("_KeyT")
+_KeyT = TypeVar('_KeyT')
 
 
 # MARK: Identity State
@@ -47,8 +46,8 @@ class ToolIdentityResolver:
         swarm_name: str | None,
     ) -> ToolBaseSignature:
         return (
-            normalize_key_part(tool_type) or "func",
-            normalize_key_part(tool_name) or "unknown",
+            normalize_key_part(tool_type) or 'func',
+            normalize_key_part(tool_name) or 'unknown',
             normalize_key_part(agent_name),
             normalize_key_part(swarm_name),
         )
@@ -172,11 +171,11 @@ class ToolIdentityResolver:
             args=args,
         )
         args_fingerprint = full_signature[-1]
-        normalized_status = (normalize_key_part(status) or "executing").lower()
+        normalized_status = (normalize_key_part(status) or 'executing').lower()
 
         if existing_alias is not None:
             canonical_tool_id = existing_alias
-        elif normalized_status == "executing":
+        elif normalized_status == 'executing':
             canonical_tool_id = (
                 self._find_unique_active_tool_by_full_signature(full_signature)
                 or (
@@ -193,13 +192,13 @@ class ToolIdentityResolver:
             )
 
         self.state.tool_id_aliases[normalized_tool_id] = canonical_tool_id
-        if normalized_status == "executing":
+        if normalized_status == 'executing':
             self._register_active_tool(
                 canonical_tool_id,
                 base_signature=base_signature,
                 full_signature=full_signature,
             )
-        elif normalized_status in {"completed", "failed"}:
+        elif normalized_status in {'completed', 'failed'}:
             self._retire_active_tool(canonical_tool_id)
 
         return canonical_tool_id
@@ -222,7 +221,7 @@ class AssignmentAndScopeResolver:
         normalized_assignment_id = normalize_text(assignment_id)
         agent_key = (
             normalize_key_part(swarm_name),
-            normalize_key_part(agent_name) or "unknown-agent",
+            normalize_key_part(agent_name) or 'unknown-agent',
         )
         if (
             normalized_assignment_id
@@ -232,7 +231,7 @@ class AssignmentAndScopeResolver:
         canonical_assignment_id = self.state.agent_assignment_id_by_key.get(agent_key)
         if canonical_assignment_id is None:
             canonical_assignment_id = normalized_assignment_id or build_fallback_id(
-                "agent",
+                'agent',
                 swarm_name,
                 agent_name,
             )
@@ -260,15 +259,15 @@ class AssignmentAndScopeResolver:
         if normalized_scope_id and normalized_scope_id in self.state.scope_id_aliases:
             return self.state.scope_id_aliases[normalized_scope_id]
         scope_key = (
-            normalized_scope_type or "scope",
+            normalized_scope_type or 'scope',
             normalize_key_part(normalized_scope_name)
             or normalize_key_part(normalized_scope_id)
-            or "unknown",
+            or 'unknown',
         )
         canonical_scope_id = self.state.scope_id_by_key.get(scope_key)
         if canonical_scope_id is None:
             canonical_scope_id = normalized_scope_id or build_fallback_id(
-                normalized_scope_type or "scope",
+                normalized_scope_type or 'scope',
                 normalized_scope_name,
             )
             self.state.scope_id_by_key[scope_key] = canonical_scope_id

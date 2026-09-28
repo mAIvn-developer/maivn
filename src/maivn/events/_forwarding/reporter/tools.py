@@ -1,12 +1,10 @@
 """Forwarders for tool execution and system tool events."""
 
-# pyright: strict
 from __future__ import annotations
 
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
-from ..._models import AppEvent
-from ..payload import (
+from maivn.events._forwarding.payload import (
     EventPayload,
     ToolArguments,
     ToolPayload,
@@ -16,7 +14,14 @@ from ..payload import (
     normalized_text,
     string_value,
 )
-from ..state import NormalizedEventForwardingState, clear_tool_state, remember_tool_context
+from maivn.events._forwarding.state import (
+    NormalizedEventForwardingState,
+    clear_tool_state,
+    remember_tool_context,
+)
+
+if TYPE_CHECKING:
+    from maivn.events._models import AppEvent
 
 # MARK: Reporter Protocol
 
@@ -30,6 +35,7 @@ class ToolEventReporter(Protocol):
         agent_name: str | None = None,
         tool_args: ToolArguments | None = None,
         swarm_name: str | None = None,
+        private_data_keys: list[str] | None = None,
     ) -> None: ...
 
     def report_tool_complete(
@@ -76,16 +82,16 @@ def forward_tool_event(
     reporter: object,
     state: NormalizedEventForwardingState,
 ) -> None:
-    tool_reporter = cast(ToolEventReporter, reporter)
+    tool_reporter = cast('ToolEventReporter', reporter)
     tool = extract_tool_payload(event, payload=payload)
     if not tool.tool_id or not tool.tool_name or not tool.status:
         return
 
     normalized_status = normalize_tool_status(tool.status)
     normalized_type = normalize_tool_type(tool.tool_type)
-    if normalized_type == "system":
+    if normalized_type == 'system':
         _remember_tool_payload_context(state, tool=tool, tool_type=normalized_type)
-        if normalized_status == "executing":
+        if normalized_status == 'executing':
             tool_reporter.report_tool_start(
                 tool.tool_name,
                 tool.tool_id,
@@ -93,22 +99,28 @@ def forward_tool_event(
                 tool.agent_name,
                 tool.args,
                 tool.swarm_name,
+                tool.private_data_keys,
             )
             return
-        if normalized_status == "completed":
-            tool_reporter.report_tool_complete(tool.tool_id, result=tool.result)
+        if normalized_status == 'completed':
+            tool_reporter.report_tool_complete(
+                tool.tool_id, elapsed_ms=tool.duration_ms, result=tool.result
+            )
             clear_tool_state(state, tool.tool_id)
             return
-        if normalized_status == "failed":
+        if normalized_status == 'failed':
             tool_reporter.report_tool_error(
-                tool.tool_name, tool.error or "Unknown error", event_id=tool.tool_id
+                tool.tool_name,
+                tool.error or 'Unknown error',
+                event_id=tool.tool_id,
+                elapsed_ms=tool.duration_ms,
             )
             clear_tool_state(state, tool.tool_id)
             return
         return
 
-    if normalized_type == "model":
-        if normalized_status == "completed":
+    if normalized_type == 'model':
+        if normalized_status == 'completed':
             tool_reporter.report_model_tool_complete(
                 tool.tool_name,
                 event_id=tool.tool_id,
@@ -118,9 +130,9 @@ def forward_tool_event(
             )
             clear_tool_state(state, tool.tool_id)
             return
-        if normalized_status == "failed":
+        if normalized_status == 'failed':
             tool_reporter.report_tool_error(
-                tool.tool_name, tool.error or "Unknown error", event_id=tool.tool_id
+                tool.tool_name, tool.error or 'Unknown error', event_id=tool.tool_id
             )
             clear_tool_state(state, tool.tool_id)
             return
@@ -128,7 +140,7 @@ def forward_tool_event(
         return
 
     _remember_tool_payload_context(state, tool=tool, tool_type=normalized_type)
-    if normalized_status == "executing":
+    if normalized_status == 'executing':
         tool_reporter.report_tool_start(
             tool.tool_name,
             tool.tool_id,
@@ -136,15 +148,21 @@ def forward_tool_event(
             tool.agent_name,
             tool.args,
             tool.swarm_name,
+            tool.private_data_keys,
         )
         return
-    if normalized_status == "completed":
-        tool_reporter.report_tool_complete(tool.tool_id, result=tool.result)
+    if normalized_status == 'completed':
+        tool_reporter.report_tool_complete(
+            tool.tool_id, elapsed_ms=tool.duration_ms, result=tool.result
+        )
         clear_tool_state(state, tool.tool_id)
         return
-    if normalized_status == "failed":
+    if normalized_status == 'failed':
         tool_reporter.report_tool_error(
-            tool.tool_name, tool.error or "Unknown error", event_id=tool.tool_id
+            tool.tool_name,
+            tool.error or 'Unknown error',
+            event_id=tool.tool_id,
+            elapsed_ms=tool.duration_ms,
         )
         clear_tool_state(state, tool.tool_id)
 
@@ -159,7 +177,7 @@ def forward_system_tool_start(
     reporter: object,
     state: NormalizedEventForwardingState,
 ) -> None:
-    tool_reporter = cast(ToolEventReporter, reporter)
+    tool_reporter = cast('ToolEventReporter', reporter)
     tool = extract_tool_payload(event, payload=payload)
     if not tool.tool_id or not tool.tool_name:
         return
@@ -168,17 +186,18 @@ def forward_system_tool_start(
         state,
         tool_id=tool.tool_id,
         tool_name=tool.tool_name,
-        tool_type="system",
+        tool_type='system',
         agent_name=tool.agent_name,
         swarm_name=tool.swarm_name,
     )
     tool_reporter.report_tool_start(
         tool.tool_name,
         tool.tool_id,
-        "system",
+        'system',
         tool.agent_name,
         tool.args,
         tool.swarm_name,
+        tool.private_data_keys,
     )
 
 
@@ -189,22 +208,27 @@ def forward_system_tool_chunk(
     reporter: object,
     state: NormalizedEventForwardingState,
 ) -> None:
-    tool_reporter = cast(ToolEventReporter, reporter)
+    tool_reporter = cast('ToolEventReporter', reporter)
     tool = event.tool
     chunk = event.chunk
-    tool_id = normalized_text(payload.get("tool_id")) or normalized_text(
+    tool_id = normalized_text(payload.get('tool_id')) or normalized_text(
         tool.id if tool is not None else None
     )
     if not tool_id:
         return
 
     context = state.tool_context_by_id.get(tool_id)
-    tool_name = context.name if context is not None else "system_tool"
-    chunk_text = string_value(payload.get("text")) or string_value(
+    tool_name = context.name if context is not None else 'system_tool'
+    chunk_text = string_value(payload.get('text')) or string_value(
         chunk.text if chunk is not None else None
     )
     chunk_count = state.system_tool_chunk_count_by_id.get(tool_id, 0) + 1
     state.system_tool_chunk_count_by_id[tool_id] = chunk_count
+    # Reporter callbacks consume cumulative snapshots; normalized events carry deltas.
+    # Keep bridge delivery untouched so repeated tokens remain distinct there too.
+    if chunk_text is not None:
+        chunk_text = state.system_tool_text_by_id.get(tool_id, '') + chunk_text
+        state.system_tool_text_by_id[tool_id] = chunk_text
 
     tool_reporter.report_system_tool_progress(
         event_id=tool_id,
@@ -222,9 +246,9 @@ def forward_system_tool_complete(
     reporter: object,
     state: NormalizedEventForwardingState,
 ) -> None:
-    tool_reporter = cast(ToolEventReporter, reporter)
+    tool_reporter = cast('ToolEventReporter', reporter)
     tool = event.tool
-    tool_id = normalized_text(payload.get("tool_id")) or normalized_text(
+    tool_id = normalized_text(payload.get('tool_id')) or normalized_text(
         tool.id if tool is not None else None
     )
     if not tool_id:
@@ -232,7 +256,8 @@ def forward_system_tool_complete(
 
     tool_reporter.report_tool_complete(
         tool_id,
-        result=payload.get("result", cast(object, tool.result) if tool is not None else None),
+        elapsed_ms=_duration_ms(payload, tool),
+        result=payload.get('result', cast('object', tool.result) if tool is not None else None),
     )
     clear_tool_state(state, tool_id)
 
@@ -244,9 +269,9 @@ def forward_system_tool_error(
     reporter: object,
     state: NormalizedEventForwardingState,
 ) -> None:
-    tool_reporter = cast(ToolEventReporter, reporter)
+    tool_reporter = cast('ToolEventReporter', reporter)
     tool = event.tool
-    tool_id = normalized_text(payload.get("tool_id")) or normalized_text(
+    tool_id = normalized_text(payload.get('tool_id')) or normalized_text(
         tool.id if tool is not None else None
     )
     if not tool_id:
@@ -256,12 +281,17 @@ def forward_system_tool_error(
     tool_name = (
         context.name
         if context is not None
-        else (normalized_text(payload.get("tool_name")) or "system_tool")
+        else (normalized_text(payload.get('tool_name')) or 'system_tool')
     )
-    error = normalized_text(payload.get("error")) or normalized_text(
+    error = normalized_text(payload.get('error')) or normalized_text(
         tool.error if tool is not None else None
     )
-    tool_reporter.report_tool_error(tool_name, error or "Unknown error", event_id=tool_id)
+    tool_reporter.report_tool_error(
+        tool_name,
+        error or 'Unknown error',
+        event_id=tool_id,
+        elapsed_ms=_duration_ms(payload, tool),
+    )
     clear_tool_state(state, tool_id)
 
 
@@ -286,10 +316,17 @@ def _remember_tool_payload_context(
     )
 
 
+def _duration_ms(payload: EventPayload, tool: object | None) -> int | None:
+    value = payload.get('duration_ms')
+    if value is None and tool is not None:
+        value = getattr(tool, 'duration_ms', None)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
 __all__ = [
-    "forward_system_tool_chunk",
-    "forward_system_tool_complete",
-    "forward_system_tool_error",
-    "forward_system_tool_start",
-    "forward_tool_event",
+    'forward_system_tool_chunk',
+    'forward_system_tool_complete',
+    'forward_system_tool_error',
+    'forward_system_tool_start',
+    'forward_tool_event',
 ]

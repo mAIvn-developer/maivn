@@ -1,5 +1,11 @@
 name: CI
 
+# Standalone check for this public package repository. The development
+# environment ([tool.uv.sources]) points at sibling packages that only exist in
+# the platform monorepo, so this workflow never syncs it. It proves what a user
+# gets: the distributions build without path sources, pass twine, and the wheel
+# installs from PyPI-published dependencies into a clean environment.
+
 on:
   pull_request:
   push:
@@ -16,34 +22,35 @@ permissions:
   contents: read
 
 jobs:
-  validate:
+  build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          python-version: "3.12"
+          persist-credentials: false
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          enable-cache: true
+          python-version: ${{ matrix.python-version }}
 
-      - name: Sync environment
-        run: uv sync --frozen
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
 
-      - name: Validate OSS license report
-        run: uv run --no-sync python scripts/oss_license_audit.py
+      - name: Release guard self-test (offline)
+        run: uv run --with packaging --no-project --python 3.12 python scripts/release_guard_test.py
 
-      - name: Ruff
-        run: uv run --no-sync ruff check .
+      - name: Build distributions
+        run: uv build --no-sources
 
-      # NOTE: strict type checking is a MONOREPO gate, not a standalone step.
-      # Run it from the maivn-apps superproject: `uv run python scripts/typecheck.py`
-      # (also enforced by scripts/verify.ps1 and `verify.ps1 full-ci`). A standalone
-      # `basedpyright -p .` cannot resolve workspace siblings from source, and the
-      # monorepo-relative venvPath ('../..') overshoots the repo root -> exit 3.
-      # Do NOT re-add a standalone basedpyright step here.
+      - name: Validate distributions
+        run: uvx twine check dist/*
 
-      - name: Pytest
-        run: uv run --no-sync pytest
+      - name: Install the wheel into a clean environment
+        run: |
+          uv venv .ci --python ${{ matrix.python-version }}
+          uv pip install --python .ci/bin/python dist/*.whl
+
+      - name: Import smoke test
+        run: .ci/bin/python -c "import maivn, maivn_contracts, private_data_vault; print(maivn.__version__)" && .ci/bin/maivn --help

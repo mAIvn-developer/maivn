@@ -1,4 +1,3 @@
-# pyright: strict
 from __future__ import annotations
 
 import json
@@ -30,7 +29,7 @@ def normalize_key_part(value: object) -> str | None:
 
 def coerce_mapping(value: object) -> dict[str, object] | None:
     if isinstance(value, dict):
-        return cast(dict[str, object], value)
+        return cast('dict[str, object]', value)
     return None
 
 
@@ -52,7 +51,7 @@ def fingerprint_mapping(value: dict[str, object] | None) -> str | None:
     if not isinstance(value, dict) or not value:
         return None
     try:
-        return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+        return json.dumps(value, sort_keys=True, separators=(',', ':'), default=str)
     except (TypeError, ValueError):
         return repr(value)
 
@@ -61,11 +60,11 @@ def slugify(value: str | None) -> str | None:
     normalized = normalize_key_part(value)
     if normalized is None:
         return None
-    return "_".join(normalized.split())
+    return '_'.join(normalized.split())
 
 
 def build_fallback_id(prefix: str, *parts: str | None) -> str:
     normalized_parts = [part for part in (slugify(part) for part in parts) if part]
     if not normalized_parts:
         return prefix
-    return ":".join([prefix, *normalized_parts])
+    return ':'.join([prefix, *normalized_parts])

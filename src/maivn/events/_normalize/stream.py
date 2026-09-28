@@ -1,15 +1,20 @@
-# pyright: strict
 """Stream normalization entry points for AppEvent payloads."""
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+from typing import TYPE_CHECKING, cast
 
-from ..._internal.utils.reporting.app_event_payloads import APP_EVENT_CONTRACT_VERSION
-from .._models import AppEvent, JsonObject, NormalizedStreamState, RawSSEEvent
+from maivn._internal.reporting.app_event_payloads import APP_EVENT_CONTRACT_VERSION
+from maivn.events._models import AppEvent, JsonObject, NormalizedStreamState, RawSSEEvent
+
 from .context import NormalizationOptions
 from .handlers import EVENT_HANDLERS
 from .helpers import clean_text, coerce_mapping, validate_payload
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
+
+    from pydantic import JsonValue
 
 # MARK: Public API
 
@@ -53,13 +58,21 @@ def normalize_stream_event(
     Returns:
         Zero or more normalized AppEvents. Empty list means the input event
         had no normalization handler and is intentionally dropped.
+
     """
     active_state = state or NormalizedStreamState()
-    payload = coerce_mapping(getattr(event, "payload", {}))
-    name = clean_text(getattr(event, "name", "")) or ""
+    payload = coerce_mapping(getattr(event, 'payload', {}))
+    name = clean_text(getattr(event, 'name', '')) or ''
 
-    if payload.get("contract_version") == APP_EVENT_CONTRACT_VERSION and payload.get("event_name"):
-        return [validate_payload(payload)]
+    if payload.get('contract_version') == APP_EVENT_CONTRACT_VERSION and payload.get('event_name'):
+        return [
+            validate_payload(
+                _enrich_contract_tool_private_data(
+                    payload,
+                    tool_metadata_map=tool_metadata_map,
+                )
+            )
+        ]
 
     options = NormalizationOptions(
         default_agent_name,
@@ -77,6 +90,53 @@ def normalize_stream_event(
 
     normalized_payloads: list[JsonObject] = handler(payload, active_state, options)
     return [validate_payload(item) for item in normalized_payloads]
+
+
+def _enrich_contract_tool_private_data(
+    payload: JsonObject,
+    *,
+    tool_metadata_map: dict[str, JsonObject] | None,
+) -> JsonObject:
+    """Attach safe private field names to an already-normalized tool event."""
+    if payload.get('event_name') != 'tool_event' or not tool_metadata_map:
+        return payload
+    existing_keys = payload.get('private_data_keys')
+    if isinstance(existing_keys, list) and existing_keys:
+        return payload
+
+    tool = coerce_mapping(payload.get('tool'))
+    candidates = (
+        clean_text(payload.get('tool_id')),
+        clean_text(payload.get('tool_name')),
+        clean_text(tool.get('id')),
+        clean_text(tool.get('name')),
+    )
+    metadata = next(
+        (
+            tool_metadata_map[candidate]
+            for candidate in candidates
+            if candidate and candidate in tool_metadata_map
+        ),
+        None,
+    )
+    if not isinstance(metadata, dict):
+        return payload
+    raw_keys = metadata.get('private_data_keys')
+    if not isinstance(raw_keys, list):
+        return payload
+    keys = cast(
+        'list[JsonValue]',
+        [key for key in raw_keys if isinstance(key, str) and key],
+    )
+    if not keys:
+        return payload
+
+    enriched_tool: JsonObject = {**tool, 'private_data_keys': keys}
+    return {
+        **payload,
+        'private_data_keys': keys,
+        'tool': enriched_tool,
+    }
 
 
 def normalize_stream(
@@ -118,4 +178,4 @@ def normalize_stream(
         )
 
 
-__all__ = ["normalize_stream", "normalize_stream_event"]
+__all__ = ['normalize_stream', 'normalize_stream_event']
