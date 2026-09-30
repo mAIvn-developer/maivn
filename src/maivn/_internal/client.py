@@ -10,6 +10,7 @@ import os
 import time
 from collections.abc import Mapping
 from datetime import datetime, timezone
+from http import HTTPStatus
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
@@ -36,6 +37,7 @@ from maivn._internal.compat.decorators import (
 from maivn._internal.compat.invocation import response_from_stream_events
 from maivn._internal.config import ClientConfig
 from maivn._internal.error_diagnostics import attach_error_diagnostics, diagnostic_facts
+from maivn._internal.errors import MaivnHTTPError
 from maivn._internal.memory import MemoryClient
 from maivn._internal.models import (
     ApprovalDecision,
@@ -107,6 +109,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _ORCHESTRATOR_ASSISTANT_ID = 'orchestrator_agent'
+_STREAM_CANCEL_TIMEOUT_SECONDS = 2.0
 
 
 def _interrupt_response(answer: object) -> InterruptResponse:
@@ -860,6 +863,18 @@ class Client:
         path = SESSION_CANCEL_PATH.format(session_id=session_id)
         await self._http().post(path, {})
 
+    async def _cancel_closed_invoke(self, session_id: str) -> None:
+        """Attempt bounded cancellation without hiding the original stream failure."""
+        try:
+            await asyncio.wait_for(self.acancel(session_id), timeout=_STREAM_CANCEL_TIMEOUT_SECONDS)
+        except MaivnHTTPError as exc:
+            if exc.status_code == HTTPStatus.CONFLICT and exc.code == 'invoke_not_running':
+                logger.debug('Stream close cancellation raced with invocation completion')
+            else:
+                logger.warning('Stream close cancellation failed: http_status=%d', exc.status_code)
+        except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001 - cleanup preserves failure.
+            logger.warning('Stream close cancellation failed: failure_type=%s', type(exc).__name__)
+
     def thread(
         self,
         thread_id: str | None = None,
@@ -1024,8 +1039,14 @@ class Client:
         private_data: Mapping[object, object] | None = None,
         force_final_tool: bool = False,
         swarm_members: Sequence[object] = (),
+        cancel_on_close: bool = False,
     ) -> AsyncGenerator[StreamEvent, None]:
-        """Stream events asynchronously for a new invoke."""
+        """Stream a new invoke; optionally cancel its root when closed before a terminal event.
+
+        By default closing only disconnects SSE, retaining the invocation for replay.
+        ``cancel_on_close`` is local policy and is never sent in the invoke payload.
+        An interrupt awaiting input remains nonterminal and is cancelled on opt-in close.
+        """
         resolved_options = self._options(options)
         private_data = await self._thread_private_data(
             resolved_options.thread_id,
@@ -1039,57 +1060,70 @@ class Client:
             force_final_tool=force_final_tool,
             swarm_members=swarm_members,
         )
-        # Report acceptance before consuming SSE so cancelled/failed runs remain traceable.
-        _report_invoke_accepted(accepted.session_id)
-        # Delegate agents' and swarm members' tools execute here too: the server runs
-        # them as nested sessions, but their tool calls broker back over this stream.
-        all_tools = invocation_tools(tools, swarm_members)
-        # Local resolution only. This map is built AFTER the invoke was sent, so the
-        # caller's named known-PII values never change what the server was told about
-        # `private_data` - they only let this process recognise its own values coming
-        # back under the server's `user_<name>` key.
-        resolution_data = _local_resolution_data(messages, private_data)
-        tool_runtime = LocalToolRuntime(
-            all_tools,
-            private_data=resolution_data,
-            canonical_interrupts=True,
-            thread_id=resolved_options.thread_id,
-        )
-        tool_http = self._http(timeout_seconds=resolved_options.timeout)
-        # Network ingestion and local tool execution must not inherit latency from a
-        # caller's reporter or UI rendering. An unbounded in-process queue preserves
-        # event order while the producer keeps the server's dependency graph moving.
-        events = _hydrated_client_events(
-            _telemetry_client_events(
-                _resolve_canonical_tool_interrupts(
-                    _stream_with_local_tools(
-                        events=self._stream_session_unobserved(
-                            accepted.session_id,
-                            options=resolved_options,
-                        ),
-                        tool_runtime=tool_runtime,
-                        tool_http=tool_http,
-                        session_id=accepted.session_id,
-                        private_publisher=self.private_artifacts,
-                        image_refs=tuple(
-                            ref
-                            for message in to_contract_messages(messages)
-                            for ref in (message.artifact_refs or ())
-                        ),
-                    ),
-                    client=self,
-                    tools=all_tools,
-                    options=resolved_options,
-                ),
-            ),
-            private_data=resolution_data if self._restore_private_values else None,
-            session_id=accepted.session_id,
-        )
+        terminal = False
+        events: AsyncIterator[StreamEvent] | None = None
         try:
+            # Report acceptance before consuming SSE so cancelled/failed runs remain traceable.
+            _report_invoke_accepted(accepted.session_id)
+            # Delegate agents' and swarm members' tools execute here too: the server runs
+            # them as nested sessions, but their tool calls broker back over this stream.
+            all_tools = invocation_tools(tools, swarm_members)
+            # Local resolution only. This map is built AFTER the invoke was sent, so the
+            # caller's named known-PII values never change what the server was told about
+            # `private_data` - they only let this process recognise its own values coming
+            # back under the server's `user_<name>` key.
+            resolution_data = _local_resolution_data(messages, private_data)
+            tool_runtime = LocalToolRuntime(
+                all_tools,
+                private_data=resolution_data,
+                canonical_interrupts=True,
+                thread_id=resolved_options.thread_id,
+            )
+            tool_http = self._http(timeout_seconds=resolved_options.timeout)
+            # Network ingestion and local tool execution must not inherit latency from a
+            # caller's reporter or UI rendering. An unbounded in-process queue preserves
+            # event order while the producer keeps the server's dependency graph moving.
+            events = _hydrated_client_events(
+                _telemetry_client_events(
+                    _resolve_canonical_tool_interrupts(
+                        _stream_with_local_tools(
+                            events=self._stream_session_unobserved(
+                                accepted.session_id,
+                                options=resolved_options,
+                            ),
+                            tool_runtime=tool_runtime,
+                            tool_http=tool_http,
+                            session_id=accepted.session_id,
+                            private_publisher=self.private_artifacts,
+                            image_refs=tuple(
+                                ref
+                                for message in to_contract_messages(messages)
+                                for ref in (message.artifact_refs or ())
+                            ),
+                        ),
+                        client=self,
+                        tools=all_tools,
+                        options=resolved_options,
+                    ),
+                ),
+                private_data=resolution_data if self._restore_private_values else None,
+                session_id=accepted.session_id,
+            )
             async for event in events:
+                if (
+                    event.event_type in {'final', 'error'}
+                    and not event.data.get('parent_session_id')
+                    and event.data.get('session_id', accepted.session_id) == accepted.session_id
+                ):
+                    terminal = True
                 yield event
         finally:
-            await _aclose_stream(events)
+            try:
+                if cancel_on_close and not terminal:
+                    await self._cancel_closed_invoke(accepted.session_id)
+            finally:
+                if events is not None:
+                    await _aclose_stream(events)
 
     async def stream_session(
         self,

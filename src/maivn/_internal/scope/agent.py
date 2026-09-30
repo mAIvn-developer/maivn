@@ -511,8 +511,9 @@ class Agent:
         stream_response: bool = False,
         options: RunOptions | None = None,
         origin: str | None = None,
+        cancel_on_close: bool = False,
     ) -> AsyncGenerator[StreamEvent, None]:
-        """Stream this single-agent scope asynchronously through the API."""
+        """Stream this scope, optionally cancelling its invocation on nonterminal close."""
         _ = (metadata, allow_private_in_system_tools)
         resolved_force_final_tool = resolve_force_final_tool(
             default=self.force_final_tool,
@@ -551,6 +552,7 @@ class Agent:
                 private_data=private_data_mapping(self.private_data),
                 force_final_tool=plan.force_final_tool,
                 options=plan.options,
+                cancel_on_close=cancel_on_close,
             ),
             scope_execution_hooks(self),
             scope=self,
