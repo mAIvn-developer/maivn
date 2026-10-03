@@ -20,6 +20,10 @@ from typing import ClassVar, Protocol, TypeGuard, cast, runtime_checkable
 
 import orjson
 
+from maivn._internal.compat.privacy import PrivateData
+
+from .redaction import private_data_descriptor, redact_private_data
+
 logger: LoggerProtocol = cast(
     'LoggerProtocol',
     cast('object', logging.getLogger('maivn.events._bridge')),
@@ -58,7 +62,11 @@ def _bridge_default(o: object) -> object:
     Prefers structured representations over ``__str__`` so frontends keep typed
     data. Sets become sorted lists; bytes become a UTF-8 string (replace errors)
     so binary payloads don't crash the stream. Falls back to ``str(o)`` last.
+    ``PrivateData`` - on its own or inside a model - becomes its descriptor and
+    never its raw value, even when a payload bypasses ``UIEvent``.
     """
+    if isinstance(o, PrivateData):
+        return private_data_descriptor(o)
     if isinstance(o, datetime | date):
         return o.isoformat()
     if isinstance(o, Decimal):
@@ -72,6 +80,11 @@ def _bridge_default(o: object) -> object:
         return cast('object', dataclasses.asdict(o))
     # Pydantic v2 / v1 - try without importing the dependency.
     if isinstance(o, _SupportsModelDump):
+        # ``model_dump()`` would flatten a nested PrivateData into a plain dict
+        # that still holds ``value``.
+        redacted = redact_private_data(o)
+        if redacted is not o:
+            return redacted
         try:
             return o.model_dump()
         except Exception:  # noqa: BLE001 - model dumps are best-effort fallbacks.

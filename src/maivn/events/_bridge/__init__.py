@@ -3,6 +3,7 @@
 Submodules:
 - bridge: EventBridge implementation
 - emitters: Typed payload emit helpers
+- redaction: PrivateData redaction for every bridge output
 - registry: BridgeRegistry implementation
 - security: Audience-based payload sanitization
 - serialization: SSE-safe JSON serialization helpers
