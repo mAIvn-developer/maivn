@@ -5,7 +5,9 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import cast
 
+from .redaction import redact_private_data
 from .serialization import build_safe_event_payload
 
 # MARK: UIEvent
@@ -25,6 +27,9 @@ class UIEvent:
             self.id = str(uuid.uuid4())
         if not self.timestamp:
             self.timestamp = datetime.now(timezone.utc).isoformat()
+        # Every bridge output (live SSE, history, snapshots, replay, observers)
+        # reads this payload, so a raw PrivateData value is replaced here, once.
+        self.data = cast('dict[str, object]', redact_private_data(self.data))
 
     def to_sse(self) -> dict[str, object]:
         """Build an ``EventSourceResponse``-compatible payload."""
