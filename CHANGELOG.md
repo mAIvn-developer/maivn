@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-03
+
 ### Added
 - `Client.astream` and `Agent.astream` accept `cancel_on_close=False`. Opting in cancels the accepted root invocation when the stream closes before a root final or error, including an interrupt awaiting input. Cancellation cleanup waits at most two seconds; failures preserve the original stream failure. The default retains disconnect and replay behavior.
 
