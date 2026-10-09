@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-09
+
+### Added
+- Expanded the SDK README decision reference with request/result contracts, routing and fallback errors, ordered/native batches, invocation stages and streaming, typed arguments, managed function/tool dependencies, candidate matching, categorized usage and privacy guidance.
+- `InvokeResponse.privacy_guidance` exposes advisory over-redaction suggestions from the final event, including the delivered value. Guidance never changes redaction or unhides model input. It is omitted from the response representation to avoid incidental diagnostic output, but remains present in model/JSON serialization; do not log or persist it.
+- `maivn.decisions`: categorical decisions with a caller-owned fallback (`DecisionClient`, fluent `decide(...)` builders, decision arguments, dependencies and candidate matching). Every primary decision goes through the mAIvn platform (`POST /v1/decisions`) with your normal mAIvn API key and `MAIVN_BASE_URL`. The platform picks the decision model from its signed catalog, shields explicitly marked private values in each request, and bills the call to your project. Results carry the served model and the platform's token receipt. There is no decision-model key and no model name to configure. `DecisionClient(fallback=..., config=..., authorize=..., client=None)` approves each request locally before anything is sent; only requests declared `privacy='public'` are sent. Values you mark private with `DecisionRequest(private_data={key: value})` are shielded into placeholders by the platform before the decision model sees them, and a placeholder verdict is resolved back locally.
+
+### Fixed
+- Declared private values inside cyclic event payloads cannot escape through history, replay, SSE or packet observers. Plain cyclic payloads remain unchanged.
+
 ## [2.1.0] - 2026-10-03
 
 ### Added

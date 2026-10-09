@@ -31,7 +31,18 @@ from maivn._internal.compat.decorators import (
     ToolDependency,
 )
 from maivn._internal.compat.interrupts import typed_interrupt_answer
+from maivn._internal.decisions.dependencies import (
+    dependency_arg_names,
+    dispatch_decision_target,
+    execute_decision_call,
+    validate_decision_dependencies,
+)
 from maivn._internal.hooks import hook_bindings, safe_hook_error
+from maivn._internal.inspection import (
+    LocalInspectionInvoke,
+    dispatch_owner_inspection,
+    inspection_worker,
+)
 from maivn._internal.private_model_inputs import validate_private_models
 from maivn._internal.private_placeholders import resolve_private_placeholders
 from maivn._internal.private_workspace import PrivateWorkspaceValues, workspace_scope
@@ -53,6 +64,14 @@ _REVISION_NOT_OPTED_IN = 'sdk_dependency_revision_not_opted_in'
 _REVISION_STALE = 'sdk_dependency_revision_stale'
 _REVISION_CONFLICT = 'sdk_dependency_revision_conflict'
 _REVISION_NO_DEPENDENCY_CHANGE = 'sdk_dependency_revision_no_dependency_change'
+
+
+@dataclass(frozen=True, slots=True)
+class _DecisionToolSkip:
+    """Content-free tool outcome; deliberately unavailable as a dependency value."""
+
+    status: str = 'skipped'
+    skipped_by: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,12 +142,14 @@ class LocalToolRuntime:
         private_data: Mapping[object, object] | None,
         canonical_interrupts: bool = False,
         thread_id: str | None = None,
+        inspection_context: LocalInspectionInvoke | None = None,
     ) -> None:
         """Bind registered callables and private values for one invocation."""
         self._tools = {tool.name: tool for tool in tools}
         self._private_data = {str(key): value for key, value in (private_data or {}).items()}
         self._canonical_interrupts = canonical_interrupts
         self._thread_id = thread_id
+        self._inspection_context = inspection_context
         # Keys some other tool's dependency edge reads. An agent may call one tool many
         # times with different inputs, and `_results` is what gets INJECTED into a
         # consumer later - so an extra call must not replace the value the graph was
@@ -304,7 +325,8 @@ class LocalToolRuntime:
                     # in a worker while retaining this toolset's execution lane.
                     prior_private = private_workspace
                     private_workspace = True
-                    selected = await asyncio.to_thread(workspace_check, arguments)
+                    selected_check = workspace_check
+                    selected = await inspection_worker(lambda: selected_check(arguments))
                     private_workspace = (
                         prior_private or bool(self._private_data) or selected is True
                     )
@@ -323,7 +345,9 @@ class LocalToolRuntime:
                 arguments=arguments,
                 on_hook=on_hook,
             )
-            raw_result = await self._call_target_in_order(tool, arguments, assess_workspace)
+            raw_result = await self._call_target_in_order(
+                tool, arguments, assess_workspace, tool_call
+            )
             _fire_execution_hook(
                 tool.after_execute,
                 tool=tool,
@@ -338,6 +362,10 @@ class LocalToolRuntime:
                     # A successful retry supersedes the failure its earlier attempt
                     # recorded. Dependents check failures before results, so a stale
                     # entry would poison every consumer of this producer forever.
+                    if isinstance(raw_result, _DecisionToolSkip):
+                        self._failures[key] = 'Producer skipped by decision gate'
+                        self._results.pop(key, None)
+                        continue
                     self._failures.pop(key, None)
                     self._results[key] = raw_result
                     self._base_bindings.setdefault(
@@ -348,7 +376,7 @@ class LocalToolRuntime:
                             result=raw_result,
                         ),
                     )
-            else:
+            elif not isinstance(raw_result, _DecisionToolSkip):
                 branch = cast('_RevisionContext', revision)
                 self._revision_bindings[(branch.invocation_id, branch.root_call_id, tool.name)] = (
                     _ResultBinding(
@@ -491,21 +519,47 @@ class LocalToolRuntime:
             self._failures.pop(key, None)
             self._completion_events[key] = asyncio.Event()
 
-    async def _call_target_in_order(
+    async def _call_target_in_order(  # noqa: C901 - serial lane and cancellation custody.
         self,
         tool: ToolMetadata,
         arguments: Mapping[str, object],
         assess_workspace: Callable[[], Awaitable[None]],
+        tool_call: ToolCall,
     ) -> object:
         """Keep opted-in stateful toolsets ordered before entering worker threads."""
+        inspection_started = False
+
+        def owner_dispatch_started() -> None:
+            nonlocal inspection_started
+            inspection_started = True
 
         async def execute() -> object:
             await assess_workspace()
+            cancelled = False
             try:
-                return await _call_target(tool, arguments, private_data=self._private_data)
+
+                async def dispatch() -> object:
+                    return await _call_target(tool, arguments, private_data=self._private_data)
+
+                return await dispatch_owner_inspection(
+                    tool,
+                    arguments,
+                    self._inspection_context,
+                    tool_call,
+                    dispatch,
+                    self._private_data,
+                    owner_dispatch_started,
+                )
+            except asyncio.CancelledError:
+                cancelled = True
+                raise
             finally:
                 # A call can promote custody itself, including before it fails.
-                await assess_workspace()
+                try:
+                    await assess_workspace()
+                except Exception:  # cleanup cannot replace owned cancellation.
+                    if not cancelled:
+                        raise
 
         if tool.metadata.get('serialize_calls') is not True:
             return await execute()
@@ -516,6 +570,10 @@ class LocalToolRuntime:
             try:
                 return await asyncio.shield(running)
             except asyncio.CancelledError:
+                if inspection_started:
+                    # Async review receives cancellation. Its owned snapshot workers
+                    # join before the same serialized lane can release.
+                    running.cancel()
                 # A sync worker cannot be cancelled once started. Keep its lane
                 # until it exits so a subsequent edit cannot race a hidden writer.
                 while not running.done():
@@ -911,6 +969,10 @@ async def _call_target(
     target = tool.target
     if inspect.isclass(target) and issubclass(target, BaseModel):
         return validate_private_models(target, arguments, private_data)
+    managed = bool(validate_decision_dependencies(target))
+    if dependency_arg_names(target) & arguments.keys():
+        message = 'Decision dependency arguments cannot be supplied by the caller'
+        raise ValueError(message)
     try:
         hints = get_type_hints(target, include_extras=True)
     except (TypeError, NameError):
@@ -919,13 +981,22 @@ async def _call_target(
         name: validate_private_models(hints[name], value, private_data) if name in hints else value
         for name, value in arguments.items()
     }
-    if inspect.iscoroutinefunction(target):
-        return await target(**arguments)
-    with owning_tool_loop():
-        result = await asyncio.to_thread(target, **arguments)
-    if inspect.isawaitable(result):
-        return await cast('Awaitable[object]', result)
-    return result
+
+    async def dispatch(prepared: Mapping[str, object]) -> object:
+        if managed:
+            return await dispatch_decision_target(target, prepared)
+        if inspect.iscoroutinefunction(target):
+            return await target(**prepared)
+        with owning_tool_loop():
+            result = await asyncio.to_thread(target, **prepared)
+        if inspect.isawaitable(result):
+            return await cast('Awaitable[object]', result)
+        return result
+
+    outcome = await execute_decision_call(target, arguments, dispatch)
+    if outcome.status == 'skipped':
+        return _DecisionToolSkip(skipped_by=outcome.skipped_by)
+    return outcome.value
 
 
 def _fire_execution_hook(  # noqa: PLR0913 - one keyword per payload field.

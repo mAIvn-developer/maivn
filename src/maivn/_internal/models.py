@@ -20,6 +20,7 @@ from pydantic import (
 )
 
 from maivn._internal.compat.options import PlanningChoice
+from maivn._internal.token_usage import TokenUsageByCategory, model_token_usage
 
 JsonObject: TypeAlias = dict[str, Any]
 ModelDirective: TypeAlias = Literal['auto', 'fast', 'balanced', 'max', 'ultra', 'force']
@@ -235,6 +236,11 @@ class InvokeResponse(BaseModel):
         exclude=True,
         description='Local display provenance; JSON Pointers and code-point offsets in response.',
     )
+    privacy_guidance: list[JsonObject] = Field(
+        default_factory=list,
+        repr=False,
+        description='Advisory over-redaction guidance delivered by the final event.',
+    )
     result: Any | None = Field(default=None, description='V1-compatible structured/final result.')
     assistant_id: StrictStr | None = Field(default=None, description='V1-compatible assistant id.')
     artifacts: tuple[ArtifactRef, ...] = Field(
@@ -259,6 +265,11 @@ class InvokeResponse(BaseModel):
         if not isinstance(block, dict):
             return None
         return ProviderUsage.model_validate(cast('JsonObject', block))
+
+    @property
+    def token_usage_by_category(self) -> TokenUsageByCategory:
+        """Return invocation LLM counts; decision wrappers add their own receipts."""
+        return model_token_usage(self.usage)
 
     @property
     def token_usage(self) -> JsonObject | None:

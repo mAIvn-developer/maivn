@@ -48,7 +48,33 @@ def redact_private_data(value: object) -> object:
     are never mutated: a dataclass or model becomes a dict of its fields (the
     shape the SSE serializer gives it) and a set becomes a list.
     """
+    if not _contains_private_data(value):
+        return value
     return _redact(value, set())
+
+
+def _contains_private_data(value: object) -> bool:
+    """Find declared carriers with an iterative walk, including cyclic/deep containers."""
+    pending = [value]
+    visited: set[int] = set()
+    while pending:
+        item = pending.pop()
+        if isinstance(item, PrivateData):
+            return True
+        if not _is_container(item) or id(item) in visited:
+            continue
+        visited.add(id(item))
+        if isinstance(item, dict):
+            pending.extend(cast('dict[object, object]', item).values())
+        elif isinstance(item, list | tuple | set | frozenset):
+            pending.extend(cast('Iterable[object]', item))
+        elif isinstance(item, RootModel):
+            pending.append(cast('object', item.root))
+        elif isinstance(item, BaseModel):
+            pending.extend(_model_fields(item).values())
+        else:
+            pending.extend(_dataclass_fields(item).values())
+    return False
 
 
 def _redact(value: object, active_ids: set[int]) -> object:
@@ -57,10 +83,11 @@ def _redact(value: object, active_ids: set[int]) -> object:
     if not _is_container(value):
         return value
 
-    # A container already on the walk path is a cycle; leave it as it is.
+    # A cycle must not retain the original container holding a raw declared value.
+    # This walk runs only when a PrivateData carrier exists; plain payloads stay intact.
     value_id = id(value)
     if value_id in active_ids:
-        return value
+        return None
     active_ids.add(value_id)
     try:
         redacted = _redact_container(value, active_ids)

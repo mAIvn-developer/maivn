@@ -121,6 +121,9 @@ if TYPE_CHECKING:
     from maivn._internal.claiming import ClaimedWork, ClaimListener, WorkRunner
     from maivn._internal.compat.mcp import MCPServer
     from maivn._internal.compat.privacy import PrivateData
+    from maivn._internal.decisions.flow import DecisionInvocationBuilder
+    from maivn._internal.decisions.flow_models import DecisionQuestion
+    from maivn._internal.decisions.runtime import DecisionClient
     from maivn._internal.models import (
         ApprovalDecision,
         InvokeResponse,
@@ -218,6 +221,31 @@ class Agent:
                     'or MAIVN_API_KEY in the process environment.'
                 )
                 raise ValueError(message) from exc
+
+    def decide(
+        self,
+        name: str,
+        *,
+        client: DecisionClient,
+        questions: Mapping[str, DecisionQuestion],
+        at: Literal['before', 'after'] = 'before',
+        require: Mapping[str, str] | None = None,
+        max_concurrency: int = 4,
+        native_batch: bool = False,
+    ) -> DecisionInvocationBuilder:
+        """Declare optional decisions around an invocation without executing them."""
+        from maivn._internal.decisions.flow import (  # noqa: PLC0415 - avoid initialization cycles.
+            DecisionInvocationBuilder,
+        )
+
+        return DecisionInvocationBuilder(self, client).decide(
+            name,
+            questions=questions,
+            at=at,
+            require=require,
+            max_concurrency=max_concurrency,
+            native_batch=native_batch,
+        )
 
     def invoke(
         self,

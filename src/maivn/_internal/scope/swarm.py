@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from maivn._internal.api.async_stream import run_blocking
 from maivn._internal.client import Client
@@ -104,6 +104,9 @@ if TYPE_CHECKING:
     from maivn._internal.compat.tooling import (
         ToolTarget,
     )
+    from maivn._internal.decisions.flow import DecisionInvocationBuilder
+    from maivn._internal.decisions.flow_models import DecisionQuestion
+    from maivn._internal.decisions.runtime import DecisionClient
     from maivn._internal.models import (
         ApprovalDecision,
         InvokeResponse,
@@ -212,6 +215,31 @@ class Swarm:
     def member(self) -> SwarmMemberDecoratorBuilder:
         """Build a v1-compatible member-agent registration decorator."""
         return SwarmMemberDecoratorBuilder(self)
+
+    def decide(
+        self,
+        name: str,
+        *,
+        client: DecisionClient,
+        questions: Mapping[str, DecisionQuestion],
+        at: Literal['before', 'after'] = 'before',
+        require: Mapping[str, str] | None = None,
+        max_concurrency: int = 4,
+        native_batch: bool = False,
+    ) -> DecisionInvocationBuilder:
+        """Declare optional decisions around an invocation without executing them."""
+        from maivn._internal.decisions.flow import (  # noqa: PLC0415 - avoid initialization cycles.
+            DecisionInvocationBuilder,
+        )
+
+        return DecisionInvocationBuilder(self, client).decide(
+            name,
+            questions=questions,
+            at=at,
+            require=require,
+            max_concurrency=max_concurrency,
+            native_batch=native_batch,
+        )
 
     def invoke(
         self,

@@ -162,6 +162,7 @@ from maivn._internal.compat.scheduling import (
 )
 from maivn._internal.compat.tooling import ToolingScopeMixin, toolify_options, toolset_options
 from maivn._internal.config import ClientConfig
+from maivn._internal.decisions.dependencies import depends_on_decision
 from maivn._internal.errors import (
     AsyncContextError,
     ConfigurationError,
@@ -235,6 +236,7 @@ from maivn._internal.skills import (
     parse_skill_markdown,
 )
 from maivn._internal.thread import BoundThread
+from maivn._internal.token_usage import TokenCategoryUsage, TokenUsageByCategory, TokenUsageCategory
 from maivn._internal.triggers import (
     Trigger,
     TriggerFireReceipt,
@@ -340,6 +342,10 @@ __all__ = [  # noqa: RUF022 - Keep v1 public export order for compatibility.
     'BackpressurePolicy',
     'compose_argument_policy',
     'depends_on_agent',
+    'depends_on_decision',
+    'TokenCategoryUsage',
+    'TokenUsageByCategory',
+    'TokenUsageCategory',
     'depends_on_await_for',
     'depends_on_private_data',
     'depends_on_interrupt',

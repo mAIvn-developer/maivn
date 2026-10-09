@@ -329,3 +329,37 @@ def test_root_model_keeps_its_root_shape() -> None:
     payload = cast('dict[str, dict[str, object]]', json.loads(cast('str', event.to_sse()['data'])))
 
     assert payload['data']['wallet'] == [DESCRIPTOR]
+
+
+@pytest.mark.parametrize('audience', AUDIENCES)
+def test_cyclic_declared_private_payload_never_reaches_an_observer_raw(
+    audience: BridgeAudience,
+) -> None:
+    """A cycle cannot reconnect the rebuilt event to the original private container."""
+    data: dict[str, object] = {'response': 'done', 'card': _card()}
+    data['cycle'] = data
+    seen: list[UIEvent] = []
+    bridge = EventBridge('private-cycle-session', audience=audience, on_packet=seen.append)
+    asyncio.run(bridge.emit('final', data))
+    assert data['cycle'] is data
+    assert isinstance(data['card'], PrivateData)
+    assert seen
+    _assert_redacted(json.dumps(seen[0].to_dict()), expected=2)
+    _assert_redacted(json.dumps(bridge.get_history()), expected=2)
+    _assert_redacted(_live_sse_data(bridge), expected=2)
+
+
+def test_plain_cyclic_and_deep_payloads_remain_untouched() -> None:
+    """The declared-carrier check terminates without recursion or scanning plain text."""
+    from maivn.events._bridge.redaction import (  # noqa: PLC0415 - exercise the private boundary.
+        redact_private_data,
+    )
+
+    original: dict[str, object] = {'text': RAW}
+    original['cycle'] = original
+    cursor = original
+    for _ in range(2000):
+        child: dict[str, object] = {}
+        cursor['child'] = child
+        cursor = child
+    assert redact_private_data(original) is original

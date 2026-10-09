@@ -5,9 +5,9 @@ from __future__ import annotations
 import inspect
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
-from maivn._internal.api.async_stream import run_blocking
+from maivn._internal.api.async_stream import close_async_iterator, run_blocking
 from maivn._internal.compat.interrupts import FollowupQuestion
 from maivn._internal.compat.invocation import (
     coerce_structured_response,
@@ -23,6 +23,9 @@ if TYPE_CHECKING:
 
     from maivn._internal.client import Client
     from maivn._internal.compat.interrupts import FollowupQuestionsConfig
+    from maivn._internal.decisions.flow import DecisionInvocationBuilder
+    from maivn._internal.decisions.flow_models import DecisionQuestion
+    from maivn._internal.decisions.runtime import DecisionClient
     from maivn._internal.models import InvokeResponse, JsonObject, StreamEvent
     from maivn._internal.scope.agent import Agent
     from maivn._internal.scope.swarm import Swarm
@@ -35,6 +38,31 @@ class FollowupInvocationBuilder:
 
     _scope: Agent | Swarm
     _config: FollowupQuestionsConfig
+
+    def decide(  # noqa: PLR0913 - match the shared public decision builder contract.
+        self,
+        name: str,
+        *,
+        client: DecisionClient,
+        questions: Mapping[str, DecisionQuestion],
+        at: Literal['before', 'after'] = 'before',
+        require: Mapping[str, str] | None = None,
+        max_concurrency: int = 4,
+        native_batch: bool = False,
+    ) -> DecisionInvocationBuilder:
+        """Declare optional decisions around an invocation without executing them."""
+        from maivn._internal.decisions.flow import (  # noqa: PLC0415 - avoid initialization cycles.
+            DecisionInvocationBuilder,
+        )
+
+        return DecisionInvocationBuilder(self, client).decide(
+            name,
+            questions=questions,
+            at=at,
+            require=require,
+            max_concurrency=max_concurrency,
+            native_batch=native_batch,
+        )
 
     def invoke(self, messages: SdkMessagesInput, **kwargs: Any) -> InvokeResponse:
         """Invoke, resolving typed follow-up checkpoints through the local handler."""
@@ -112,26 +140,29 @@ class FollowupInvocationBuilder:
         self,
         events: AsyncIterator[StreamEvent],
     ) -> AsyncIterator[StreamEvent]:
-        async for event in events:
-            yield event
-            followup = _followup_from_event(event)
-            if followup is None:
-                continue
-            question, schema = followup
-            try:
-                answer = self._config.input_handler(question, schema)
-                if inspect.isawaitable(answer):
-                    answer = await cast('Awaitable[object]', answer)
-            except EOFError:
-                # Match the synchronous path: an unavailable handler leaves the
-                # checkpoint pending until the server resolves its outcome.
-                continue
-            await self._client().asubmit_interrupt_response(
-                question.thread_id,
-                question.checkpoint_id,
-                answer=answer,
-                responded_by='sdk-user',
-            )
+        try:
+            async for event in events:
+                yield event
+                followup = _followup_from_event(event)
+                if followup is None:
+                    continue
+                question, schema = followup
+                try:
+                    answer = self._config.input_handler(question, schema)
+                    if inspect.isawaitable(answer):
+                        answer = await cast('Awaitable[object]', answer)
+                except EOFError:
+                    # Match the synchronous path: an unavailable handler leaves the
+                    # checkpoint pending until the server resolves its outcome.
+                    continue
+                await self._client().asubmit_interrupt_response(
+                    question.thread_id,
+                    question.checkpoint_id,
+                    answer=answer,
+                    responded_by='sdk-user',
+                )
+        finally:
+            await close_async_iterator(events)
 
     def _client(self) -> Client:
         """Return the client owned by the bound scope without widening public API."""

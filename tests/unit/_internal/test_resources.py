@@ -9,7 +9,8 @@ from http import HTTPStatus
 from typing import Any, TypeAlias, cast
 
 import httpx
-from pydantic import AnyUrl
+import pytest
+from pydantic import AnyUrl, ValidationError
 
 from maivn import (
     Client,
@@ -18,10 +19,48 @@ from maivn import (
     ResourceScopeRequest,
     ResourceUploadOptions,
 )
+from maivn._internal.resources import ResourceRecord
 
 JsonObject: TypeAlias = dict[str, Any]
 _SyncHandler: TypeAlias = Callable[[httpx.Request], httpx.Response]
 _AsyncHandler: TypeAlias = Callable[[httpx.Request], Coroutine[None, None, httpx.Response]]
+
+
+@pytest.mark.parametrize(
+    'navigation_source',
+    [
+        None,
+        {
+            'generation_id': 'a' * 64,
+            'coordinate_space': 'converted_markdown_codepoints',
+            'markdown_sha256': 'b' * 64,
+        },
+    ],
+)
+def test_resource_reads_hide_server_viewer_identity(navigation_source: JsonObject | None) -> None:
+    """Source viewer transport metadata does not change the ordinary SDK resource shape."""
+    payload = _resource_json()
+    payload['navigation_source'] = navigation_source
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            HTTPStatus.OK,
+            json={'items': [payload]} if request.url.path == '/v1/resources' else payload,
+        )
+
+    client = _client(handler)
+    detail = client.resources.get('resource-sdk')
+    listed = client.resources.list()
+    assert detail.resource_id == listed[0].resource_id
+    assert 'navigation_source' not in detail.model_dump()
+
+
+def test_resource_viewer_compatibility_preserves_strict_other_fields() -> None:
+    """Only recognized server viewer metadata is omitted from SDK parsing."""
+    payload = _resource_json()
+    payload.update({'navigation_source': None, 'unexpected_resource_field': True})
+    with pytest.raises(ValidationError, match='unexpected_resource_field'):
+        ResourceRecord.model_validate(payload)
 
 
 def test_client_resource_methods_map_to_v1_resource_routes() -> None:

@@ -48,6 +48,10 @@ from maivn._internal.compat.decorators import (
     depends_on_tool,
 )
 from maivn._internal.compat.permissions import DESTRUCTIVE_FLAG_NAMES
+from maivn._internal.decisions.dependencies import (
+    DECISION_DEPENDENCIES_ATTR,
+    validate_decision_dependencies,
+)
 from maivn._internal.models import JsonObject, ToolMetadata
 from maivn._internal.private_model_inputs import PrivateInputJsonSchema
 from maivn._internal.schema_references import prune_unused_definitions
@@ -849,6 +853,7 @@ def _derive_default_prefix(cls: type[object]) -> str:
 
 
 def _input_schema_for(func: ToolTarget) -> JsonObject:
+    validate_decision_dependencies(func)
     if isinstance(func, type) and issubclass(func, BaseModel):
         schema = func.model_json_schema(schema_generator=PrivateInputJsonSchema)
         dependency_args = _dependency_arg_names(func)
@@ -976,6 +981,7 @@ def _dependency_arg_names(func: object) -> frozenset[str]:
         PRIVATE_DATA_DEPENDENCIES_ATTR,
         TOOL_DEPENDENCIES_ATTR,
         INTERRUPT_DEPENDENCIES_ATTR,
+        DECISION_DEPENDENCIES_ATTR,
     ):
         raw = getattr(func, attr_name, ())
         if isinstance(raw, list):

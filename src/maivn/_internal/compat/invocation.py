@@ -6,11 +6,12 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, TypeAlias, cast
+from typing import TYPE_CHECKING, Literal, TypeAlias, cast
 
 from maivn_contracts.messages import Message
 from pydantic import BaseModel, ValidationError
 
+from maivn._internal.api.async_stream import close_async_iterator
 from maivn._internal.error_diagnostics import attach_error_diagnostics
 from maivn._internal.errors import DurableBoundaryRefusedError, MaivnSDKError
 from maivn._internal.event_message import message_from_event
@@ -23,6 +24,9 @@ if TYPE_CHECKING:
         SessionOrchestrationConfig,
         SystemToolsConfig,
     )
+    from maivn._internal.decisions.flow import DecisionInvocationBuilder
+    from maivn._internal.decisions.flow_models import DecisionQuestion
+    from maivn._internal.decisions.runtime import DecisionClient
     from maivn._internal.models import RunOptions
 
 EventPayloadSink: TypeAlias = Callable[[dict[str, object]], None]
@@ -39,6 +43,37 @@ class StructuredOutputInvocationBuilder:
         """Create a structured-output invocable bound to one scope."""
         self._scope = scope
         self._model = model
+
+    def decide(
+        self,
+        name: str,
+        *,
+        client: DecisionClient,
+        questions: Mapping[str, DecisionQuestion],
+        at: Literal['before', 'after'] = 'before',
+        require: Mapping[str, str] | None = None,
+        max_concurrency: int = 4,
+        native_batch: bool = False,
+    ) -> DecisionInvocationBuilder:
+        """Declare optional decisions around an invocation without executing them."""
+        from maivn._internal.decisions.flow import (  # noqa: PLC0415 - avoid initialization cycles.
+            DecisionInvocationBuilder,
+        )
+
+        return DecisionInvocationBuilder(self, client, _output_model=self._model).decide(
+            name,
+            questions=questions,
+            at=at,
+            require=require,
+            max_concurrency=max_concurrency,
+            native_batch=native_batch,
+        )
+
+    def allow_followup_questions(self, **kwargs: object) -> StructuredOutputInvocationBuilder:
+        """Retain output validation while configuring the underlying follow-up policy."""
+        configure = _scope_method(self._scope, 'allow_followup_questions')
+        scope = configure(**kwargs)
+        return StructuredOutputInvocationBuilder(scope, self._model)
 
     def invoke(
         self,
@@ -138,8 +173,12 @@ class StructuredOutputInvocationBuilder:
             'Callable[..., AsyncIterator[StreamEvent]]',
             _scope_method(self._scope, 'astream'),
         )
-        async for event in astream(messages, structured_output=self._model, **kwargs):
-            yield event
+        events = astream(messages, structured_output=self._model, **kwargs)
+        try:
+            async for event in events:
+                yield event
+        finally:
+            await close_async_iterator(events)
 
 
 class EventInvocationBuilder:
@@ -160,6 +199,43 @@ class EventInvocationBuilder:
         self._exclude = _string_filter(exclude)
         self._on_event = on_event
         self._auto_verbose = auto_verbose
+
+    def decide(
+        self,
+        name: str,
+        *,
+        client: DecisionClient,
+        questions: Mapping[str, DecisionQuestion],
+        at: Literal['before', 'after'] = 'before',
+        require: Mapping[str, str] | None = None,
+        max_concurrency: int = 4,
+        native_batch: bool = False,
+    ) -> DecisionInvocationBuilder:
+        """Declare optional decisions around an invocation without executing them."""
+        from maivn._internal.decisions.flow import (  # noqa: PLC0415 - avoid initialization cycles.
+            DecisionInvocationBuilder,
+        )
+
+        return DecisionInvocationBuilder(self, client).decide(
+            name,
+            questions=questions,
+            at=at,
+            require=require,
+            max_concurrency=max_concurrency,
+            native_batch=native_batch,
+        )
+
+    def allow_followup_questions(self, **kwargs: object) -> EventInvocationBuilder:
+        """Retain event routing while configuring the underlying follow-up policy."""
+        configure = _scope_method(self._scope, 'allow_followup_questions')
+        scope = configure(**kwargs)
+        return EventInvocationBuilder(
+            scope,
+            include=self._include,
+            exclude=self._exclude,
+            on_event=self._on_event,
+            auto_verbose=self._auto_verbose,
+        )
 
     def invoke(self, *args: object, **kwargs: object) -> InvokeResponse:
         """Invoke by consuming the scope's stream and projecting the final event."""
@@ -189,9 +265,13 @@ class EventInvocationBuilder:
         method = getattr(self._scope, 'astream', None)
         if callable(method):
             astream = cast('Callable[..., AsyncIterator[StreamEvent]]', method)
-            async for event in astream(*args, **self._prepare_call_kwargs(kwargs)):
-                self._route_event(event)
-                yield event
+            events = astream(*args, **self._prepare_call_kwargs(kwargs))
+            try:
+                async for event in events:
+                    self._route_event(event)
+                    yield event
+            finally:
+                await close_async_iterator(events)
             return
 
         events = await asyncio.to_thread(lambda: list(self.stream(*args, **kwargs)))
@@ -285,6 +365,7 @@ def response_from_stream_events(events: Iterable[StreamEvent]) -> InvokeResponse
         ),
         response=content,
         private_value_restorations=restorations,
+        privacy_guidance=_object_list(payload.get('privacy_guidance')),
         result=result,
         assistant_id=_first_string(payload.get('assistant_id'), data.get('assistant_id')),
         artifacts=tuple(final_message.artifact_refs or ()),
@@ -551,6 +632,16 @@ def _mapping_value(value: object) -> dict[str, object] | None:
     if isinstance(value, Mapping):
         return dict(cast('Mapping[str, object]', value))
     return None
+
+
+def _object_list(value: object) -> list[JsonObject]:
+    if not isinstance(value, list):
+        return []
+    return [
+        dict(cast('JsonObject', item))
+        for item in cast('list[object]', value)
+        if isinstance(item, dict)
+    ]
 
 
 def _first_string(*values: object) -> str | None:

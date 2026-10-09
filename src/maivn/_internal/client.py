@@ -38,6 +38,7 @@ from maivn._internal.compat.invocation import response_from_stream_events
 from maivn._internal.config import ClientConfig
 from maivn._internal.error_diagnostics import attach_error_diagnostics, diagnostic_facts
 from maivn._internal.errors import MaivnHTTPError
+from maivn._internal.inspection import capture_invoke_inspection
 from maivn._internal.memory import MemoryClient
 from maivn._internal.models import (
     ApprovalDecision,
@@ -1052,6 +1053,15 @@ class Client:
             resolved_options.thread_id,
             private_data,
         )
+        messages, inspection_context = capture_invoke_inspection(
+            messages,
+            private_data=private_data,
+            thread_id=resolved_options.thread_id,
+            project_id=resolved_options.project_id,
+            complete_history=(
+                self.config.thread_id is None and (options is None or options.thread_id is None)
+            ),
+        )
         accepted = await self._start_invoke(
             messages,
             options=resolved_options,
@@ -1078,6 +1088,11 @@ class Client:
                 private_data=resolution_data,
                 canonical_interrupts=True,
                 thread_id=resolved_options.thread_id,
+                inspection_context=(
+                    inspection_context.accepted(accepted.session_id)
+                    if inspection_context is not None
+                    else None
+                ),
             )
             tool_http = self._http(timeout_seconds=resolved_options.timeout)
             # Network ingestion and local tool execution must not inherit latency from a
@@ -1429,6 +1444,12 @@ class Client:
         """Asynchronously rewind a thread and stream the accepted session."""
         resolved_options = self._options(options).model_copy(update={'thread_id': thread_id})
         private_data = await self._thread_private_data(thread_id, private_data)
+        message, inspection_context = capture_invoke_inspection(
+            message,
+            private_data=private_data,
+            thread_id=thread_id,
+            project_id=resolved_options.project_id,
+        )
         accepted = await self._dispatch_time_travel_thread(
             thread_id,
             checkpoint_id=checkpoint_id,
@@ -1448,6 +1469,11 @@ class Client:
             private_data=resolution_data,
             canonical_interrupts=True,
             thread_id=resolved_options.thread_id,
+            inspection_context=(
+                inspection_context.accepted(accepted.session_id)
+                if inspection_context is not None
+                else None
+            ),
         )
         tool_http = self._http(timeout_seconds=resolved_options.timeout)
         events = _hydrated_client_events(

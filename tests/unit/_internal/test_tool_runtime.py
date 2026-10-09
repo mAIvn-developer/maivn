@@ -1176,10 +1176,11 @@ def test_dependency_revision_allows_one_concurrent_generation_winner(
         tool: ToolMetadata,
         arguments: Mapping[str, object],
         assess_workspace: Callable[[], Awaitable[None]],
+        tool_call: ToolCall,
     ) -> object:
         entered.set()
         await release.wait()
-        return await original(tool, arguments, assess_workspace)
+        return await original(tool, arguments, assess_workspace, tool_call)
 
     async def scenario() -> tuple[object, object]:
         await runtime.outcome_for_event(

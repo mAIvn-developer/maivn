@@ -206,6 +206,15 @@ def stream_async_iterator(
         bridge.close()
 
 
+async def close_async_iterator(source: AsyncIterator[StreamEvent]) -> None:
+    """Close an owned async source when it exposes aclose, awaiting its cleanup."""
+    close = getattr(source, 'aclose', None)
+    if callable(close):
+        closing = close()
+        if inspect.isawaitable(closing):
+            await closing
+
+
 def _raise_if_loop_is_running() -> None:
     try:
         _ = asyncio.get_running_loop()

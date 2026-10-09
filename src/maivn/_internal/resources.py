@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import base64
-from typing import TYPE_CHECKING, Any, Literal, TypeAlias
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias, cast
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, model_validator
 
 from maivn._internal.api.async_stream import run_blocking
 from maivn._internal.memory import MemoryScope
@@ -123,6 +123,17 @@ class ResourceRecord(BaseModel):
     markdown: StrictStr | None = Field(default=None, min_length=1)
     structure: tuple[JsonObject, ...] = ()
     failure_reason: StrictStr | None = Field(default=None, min_length=1, max_length=2048)
+
+    @model_validator(mode='before')
+    @classmethod
+    def _omit_viewer_source_identity(cls, value: object) -> object:
+        """Keep server viewer metadata out of the unchanged SDK resource contract."""
+        if not isinstance(value, dict):
+            return value
+        fields = cast('dict[str, object]', value)
+        if 'navigation_source' in fields:
+            return {key: item for key, item in fields.items() if key != 'navigation_source'}
+        return fields
 
 
 class ResourceDeleteResponse(BaseModel):
