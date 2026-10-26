@@ -90,7 +90,15 @@ class RichReporter(SimpleReporter):
         """Render the final response once, avoiding a duplicate streamed transcript."""
         if not self.enabled:
             return
-        if any(text == response for text in self._streamed_text_by_assistant.values()):
+        stream_id = next(
+            (key for key, text in self._streamed_text_by_assistant.items() if text == response),
+            None,
+        )
+        if stream_id is not None:
+            # Print the tail held back as a possible placeholder prefix, as Tier 0 does.
+            printed = self._printed_text_by_assistant.get(stream_id, '')
+            if response.startswith(printed) and len(response) > len(printed):
+                self._render_stream_text(response[len(printed) :])
             self.console.print()
             self._stream_open = False
         else:
@@ -98,6 +106,7 @@ class RichReporter(SimpleReporter):
             rendered = Text(display_response(response))
             self.console.print(Panel(rendered, title='FINAL RESPONSE', border_style='green'))
         self._streamed_text_by_assistant.clear()
+        self._printed_text_by_assistant.clear()
 
     def print_summary(self, token_usage: object | None = None) -> None:
         """Render stable tool, duration, and token telemetry in a panel."""

@@ -21,8 +21,9 @@ def get_logger(log_file_path: Path | str | None = None) -> logging.Logger:
             logger.addHandler(logging.NullHandler())
         if log_file_path is not None and not _configured_log_file_paths:
             path = Path(log_file_path)
-            _configured_log_file_paths.append(path)
+            # Recorded only once attached: a path that fails must not block a later one.
             _attach_file_handler(logger, path)
+            _configured_log_file_paths.append(path)
         return logger
 
 

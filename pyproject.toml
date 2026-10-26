@@ -4,7 +4,7 @@ build-backend = 'hatchling.build'
 
 [project]
 name = 'maivn'
-version = '2.2.0'
+version = '2.3.0'
 description = 'Python SDK for mAIvn Platform v2.'
 readme = 'README.md'
 requires-python = '>=3.10'
@@ -13,7 +13,7 @@ license-files = ['LICENSE', 'NOTICE']
 dependencies = [
   'croniter>=2.0.1',
   'httpx>=0.28',
-  'maivn-contracts>=0.1.0,<0.2',
+  'maivn-contracts>=0.1.1,<0.2',
   'orjson>=3',
   'private-data-vault>=0.1.0,<0.2',
   'pydantic>=2.13.5',
@@ -40,6 +40,8 @@ rich = ['rich>=14.3.4']
 
 [dependency-groups]
 dev = [
+  # Only the opt-in live Postgres sender proof (tests/unit/test_postgres_sender_live.py).
+  'asyncpg>=0.30',
   'fastapi>=0.115',
   'sse-starlette>=2',
   'rich>=14.3.4',

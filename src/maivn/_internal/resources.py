@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypeAlias, cast
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, model_validator
 
 from maivn._internal.api.async_stream import run_blocking
+from maivn._internal.compat.privacy import PIIWhitelist
 from maivn._internal.memory import MemoryScope
 from maivn._internal.wire import (
     RESOURCE_BIND_PATH,
@@ -57,6 +58,7 @@ class ResourceScopeRequest(BaseModel):
     project_id: StrictStr | None = Field(default=None, min_length=1)
     organization_id: StrictStr | None = Field(default=None, min_length=1)
     sharing_scope: PortalScope = 'project'
+    shared: StrictBool = False
 
 
 class _ResourceUpload(BaseModel):
@@ -72,6 +74,7 @@ class _ResourceUpload(BaseModel):
     description: StrictStr | None = Field(default=None, max_length=4000)
     tags: tuple[StrictStr, ...] = Field(default=(), max_length=32)
     metadata: JsonObject = Field(default_factory=dict)
+    pii_whitelist: PIIWhitelist | None = None
 
 
 class ResourceUploadOptions(BaseModel):
@@ -84,6 +87,15 @@ class ResourceUploadOptions(BaseModel):
     description: StrictStr | None = Field(default=None, max_length=4000)
     tags: tuple[StrictStr, ...] = Field(default=(), max_length=32)
     metadata: JsonObject = Field(default_factory=dict)
+    pii_whitelist: PIIWhitelist | None = Field(
+        default=None,
+        description=(
+            'What redaction may leave visible in a project-custody upload, such as '
+            "a timesheet's dates and times. Applies to text documents, photographs "
+            'and scanned PDFs alike; faces and licence plates are always covered. '
+            'Ignored for ordinary custody.'
+        ),
+    )
 
 
 class ResourcePatch(BaseModel):
@@ -155,6 +167,11 @@ class _ResourceListResponse(BaseModel):
 class ResourcesClient:
     """Root facade for resource routes."""
 
+    def for_user(self, user_id: str) -> ResourcesClient:
+        """Return independent customer management; derive user_id on a trusted backend."""
+        http = self._get_http().for_user(user_id)
+        return ResourcesClient(lambda: http)
+
     def __init__(self, http: Callable[[], HttpJsonClient]) -> None:
         """Create a resources facade backed by a bound HTTP client accessor."""
         self._get_http = http
@@ -199,6 +216,7 @@ class ResourcesClient:
             description=resolved_options.description,
             tags=tuple(resolved_options.tags),
             metadata=dict(resolved_options.metadata),
+            pii_whitelist=resolved_options.pii_whitelist,
         )
         return ResourceRecord.model_validate(
             await self._get_http().post(RESOURCES_PATH, _dump_model(request)),

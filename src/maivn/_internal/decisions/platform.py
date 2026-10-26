@@ -22,6 +22,7 @@ from maivn._internal.decisions.models import (
     Key,
     Probability,
 )
+from maivn._internal.decisions.session import linked_session_id
 from maivn._internal.private_placeholders import resolve_private_placeholders
 
 if TYPE_CHECKING:
@@ -100,9 +101,11 @@ class PlatformDecisions:
         *,
         authorize: Callable[[DecisionRequest], bool],
         client: Client | None = None,
+        session_id: str | None = None,
     ) -> None:
         self._authorize = authorize
         self._client = client
+        self._session_id = session_id
 
     def _platform(self) -> Client:
         if self._client is None:
@@ -129,8 +132,12 @@ class PlatformDecisions:
         validated = [DecisionRequest.model_validate(request) for request in requests]
         if not validated:
             return []
-        if any(request.privacy != 'public' for request in validated) or any(
-            (request.state, request.private_data) != (validated[0].state, validated[0].private_data)
+        if any(
+            request.privacy != 'public' or (request.images and request.private_data)
+            for request in validated
+        ) or any(
+            (request.state, request.private_data, request.images)
+            != (validated[0].state, validated[0].private_data, validated[0].images)
             for request in validated
         ):
             raise ProviderError(DecisionStatus.BLOCKED)
@@ -155,9 +162,14 @@ class PlatformDecisions:
                 for wire_name, request in zip(wire_names, validated, strict=True)
             ],
         }
+        if validated[0].images:
+            body['images'] = [image.model_dump(mode='json') for image in validated[0].images]
         if validated[0].private_data:
             # Marked values travel only to the platform shield, never to a model.
             body['private_data'] = validated[0].private_values
+        linked = linked_session_id(self._session_id)
+        if linked:
+            body['session_id'] = linked
         try:
             # The SDK's own authenticated client; the runtime owns the total deadline.
             http = self._platform()._http()  # noqa: SLF001 - reuse the authenticated SDK transport.  # pyright: ignore[reportPrivateUsage]

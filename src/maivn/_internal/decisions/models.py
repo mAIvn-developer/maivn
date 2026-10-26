@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from enum import Enum
 from typing import TYPE_CHECKING, Annotated, Literal, cast
 
+from maivn_contracts.decisions import DecisionImage
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from maivn._internal.decisions.usage import summarize_decision_usage
@@ -43,6 +44,9 @@ class DecisionRequest(_Frozen):
 
     name: Key
     state: Text = Field(repr=False)
+    images: tuple[DecisionImage, ...] = Field(
+        default=(), max_length=4, repr=False, exclude_if=lambda images: not images
+    )
     instructions: str = Field(min_length=1, max_length=4096, repr=False)
     choices: tuple[DecisionChoice, ...] = Field(min_length=2, max_length=32, repr=False)
     privacy: Literal['public', 'private', 'unknown'] = 'unknown'

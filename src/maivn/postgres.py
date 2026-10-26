@@ -42,6 +42,12 @@ class PostgresSenderPlan:
     no extension is installed, and no shared pg_net permission is changed.
     Installation fails atomically if the name already exists. Existing queue
     grants require an owner review before adding another sender to this database.
+
+    On stock Supabase, ``pg_net`` is owned by ``supabase_admin`` and grants PUBLIC
+    access to its queue and functions, which this sender refuses. Enable ``pg_net``
+    from the Supabase dashboard, then have a superuser revoke those PUBLIC grants and
+    hand ``pg_net``'s objects to the installing owner, before a non-superuser
+    (``CREATEROLE``) owner can install the sender.
     """
 
     prepare_sql: str
@@ -55,6 +61,9 @@ class PostgresSenderPlan:
         unlogged queue and is not a durable outbox. The receiver requires delivery
         within its signing window; a long source transaction can expire it.
         """
+        if not isinstance(secret, str):  # pyright: ignore[reportUnnecessaryIsInstance]
+            message = 'The connection signing secret must be a string.'
+            raise TypeError(message)
         if len(secret.encode('utf-8')) < _MIN_SECRET_BYTES:
             message = 'The connection signing secret must contain at least 32 UTF-8 bytes.'
             raise ValueError(message)
@@ -119,5 +128,6 @@ def postgres_sender_plan(
         f'CREATE TRIGGER {name}_signed_change AFTER INSERT OR UPDATE OR DELETE ON {source}\n'
         f'FOR EACH ROW EXECUTE FUNCTION {private}.send_change();\n'
         f'REVOKE EXECUTE ON FUNCTION {private}.send_change() FROM CURRENT_USER;\n'
+        f'REVOKE {replacements["__SENDER_ROLE__"]} FROM CURRENT_USER;\n'
     )
     return PostgresSenderPlan(prepare_sql=prepare, bind_sql=bind, attach_sql=attach)

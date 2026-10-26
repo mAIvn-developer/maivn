@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
 JsonObject: TypeAlias = dict[str, Any]
 SkillSharingScope: TypeAlias = Literal['agent', 'swarm', 'project', 'org']
@@ -23,6 +23,8 @@ class SkillScopeRequest(BaseModel):
     agent_id: StrictStr | None = Field(default=None, min_length=1)
     swarm_id: StrictStr | None = Field(default=None, min_length=1)
     sharing_scope: SkillSharingScope = 'project'
+    owner_user_id: StrictStr | None = Field(default=None, min_length=1, max_length=256)
+    shared: StrictBool = False
 
 
 class SkillStep(BaseModel):
@@ -62,7 +64,14 @@ class Skill(BaseModel):
 
 
 class SkillSet(BaseModel):
-    """SDK-owned model for authoring and receiving skill-set trees."""
+    """SDK-owned model for authoring and receiving skill-set trees.
+
+    ``children`` holds a set's member skills, then its nested sets. Author trees
+    with it in code; ``skill_sets.get`` returns a fetched set with its whole tree
+    assembled. Sets returned by ``list``, ``create``, ``add_skill`` and
+    ``add_child_set`` have empty ``children``; read ``member_skill_ids`` and
+    ``parent_set_id`` there instead.
+    """
 
     model_config = ConfigDict(extra='forbid', frozen=True)
 

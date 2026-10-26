@@ -58,12 +58,22 @@ def messages_with_system_prompt(
     return [system_message.to_contract(), *normalized]
 
 
+_MODEL_FIELDS = frozenset({'model', 'model_directive'})
+
+
 def _model_options(options: RunOptions | None, model: str) -> RunOptions:
-    if options is not None:
+    """Apply the scope's model unless the caller's options chose one themselves."""
+    if options is not None and options.model_fields_set & _MODEL_FIELDS:
         return options
     if model in MODEL_DIRECTIVES:
-        return RunOptions(model=DEFAULT_MODEL, model_directive=cast('ModelDirective', model))
-    return RunOptions(model=model)
+        scope = RunOptions(model=DEFAULT_MODEL, model_directive=cast('ModelDirective', model))
+    else:
+        scope = RunOptions(model=model)
+    if options is None:
+        return scope
+    return options.model_copy(
+        update={'model': scope.model, 'model_directive': scope.model_directive},
+    )
 
 
 def scope_options(

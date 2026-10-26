@@ -177,6 +177,10 @@ REVOKE ALL ON FUNCTION __PRIVATE_SCHEMA__.send_change() FROM PUBLIC;
 -- Inspect/remove any installing-role default ACL grants to other roles before
 -- committing; app roles must receive no EXECUTE or private schema/table grants.
 -- Ownership transfer requires CREATE in the containing schema temporarily.
+-- PostgreSQL 16+ also requires that the installer may SET ROLE to the new
+-- owner, which a non-superuser CREATEROLE installer lacks for the role it just
+-- created. The membership is temporary: attaching the trigger revokes it.
+GRANT __SENDER_ROLE__ TO CURRENT_USER;
 GRANT CREATE ON SCHEMA __PRIVATE_SCHEMA__ TO __SENDER_ROLE__;
 ALTER FUNCTION __PRIVATE_SCHEMA__.send_change() OWNER TO __SENDER_ROLE__;
 REVOKE CREATE ON SCHEMA __PRIVATE_SCHEMA__ FROM __SENDER_ROLE__;

@@ -39,6 +39,8 @@ class DecisionClient:
     process. ``client`` is an ordinary :class:`maivn.Client`; without one, a default
     client reads ``MAIVN_BASE_URL`` and ``MAIVN_API_KEY`` on first use. The platform
     chooses the decision model; no model name or decision-model key is configured here.
+    ``session_id`` links every decision to that run; without it, decisions link to the open
+    :func:`maivn.decisions.decision_run` or to the agent run whose local tool is executing.
     The baseline must honor the caller's privacy policy.
     """
 
@@ -49,8 +51,11 @@ class DecisionClient:
         config: DecisionConfig,
         authorize: Callable[[DecisionRequest], bool],
         client: Client | None = None,
+        session_id: str | None = None,
     ) -> None:
-        self._provider: DecisionBackend = PlatformDecisions(authorize=authorize, client=client)
+        self._provider: DecisionBackend = PlatformDecisions(
+            authorize=authorize, client=client, session_id=session_id
+        )
         self._fallback = fallback
         self._config = DecisionConfig.model_validate(config)
 
@@ -98,7 +103,7 @@ class DecisionClient:
         started = perf_counter()
         failure: ProviderError | None = None
         prediction: DecisionPrediction | None = None
-        if request.privacy != 'public':
+        if request.privacy != 'public' or (request.images and request.private_data):
             status = DecisionStatus.BLOCKED
         elif not self._config.enabled:
             status = DecisionStatus.DISABLED
@@ -227,11 +232,11 @@ class DecisionClient:
         max_concurrency: int,
     ) -> list[DecisionResult]:
         validated = [DecisionRequest.model_validate(request) for request in requests]
-        groups: dict[tuple[str, tuple[tuple[str, str], ...]], list[int]] = {}
+        groups: dict[tuple[object, ...], list[int]] = {}
         units: list[list[int]] = []
         for index, request in enumerate(validated):
-            if request.privacy == 'public':
-                key = (request.state, request.private_data)
+            if request.privacy == 'public' and not (request.images and request.private_data):
+                key = (request.state, request.private_data, request.images)
                 groups.setdefault(key, []).append(index)
             else:
                 units.append([index])
@@ -242,7 +247,9 @@ class DecisionClient:
 
         async def unit(indices: list[int]) -> list[DecisionResult]:
             async with semaphore:
-                if validated[indices[0]].privacy != 'public':
+                if validated[indices[0]].privacy != 'public' or (
+                    validated[indices[0]].images and validated[indices[0]].private_data
+                ):
                     return [await self.adecide(validated[indices[0]])]
                 return await self._native_unit([validated[index] for index in indices])
 

@@ -124,6 +124,15 @@ def _descriptors(node: object) -> list[dict[str, object]]:
     return []
 
 
+def _raw_dump(o: object) -> object:
+    """Serialize the caller's objects as they are, raw values included."""
+    if isinstance(o, BaseModel):
+        return o.model_dump()
+    if dataclasses.is_dataclass(o) and not isinstance(o, type):
+        return dataclasses.asdict(o)
+    return sorted(cast('set[object]', o), key=repr)
+
+
 def _assert_redacted(serialized: str, *, expected: int) -> None:
     assert RAW not in serialized
     found = _descriptors(json.loads(serialized))
@@ -253,7 +262,7 @@ def test_caller_objects_are_not_mutated(audience: BridgeAudience, payload_name: 
     _ = json.dumps(bridge.get_history(), default=str)
 
     assert payload == before
-    assert RAW in repr(payload)
+    assert RAW in json.dumps(payload, default=_raw_dump)
 
 
 def test_dataclass_and_model_values_keep_their_identity() -> None:

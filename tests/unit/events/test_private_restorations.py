@@ -4,7 +4,7 @@ import asyncio
 from typing import Any, cast
 
 from maivn._internal.client import (
-    _hydrated_client_event,  # pyright: ignore[reportPrivateUsage] - local egress seam under test
+    _hydrated_client_event,  # local egress seam under test
 )
 from maivn._internal.models import StreamEvent
 from maivn.events import NormalizedStreamState, forward_normalized_event, normalize_stream_event

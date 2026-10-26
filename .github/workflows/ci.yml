@@ -53,4 +53,4 @@ jobs:
           uv pip install --python .ci/bin/python dist/*.whl
 
       - name: Import smoke test
-        run: .ci/bin/python -c "import maivn, maivn_contracts, private_data_vault; print(maivn.__version__)" && .ci/bin/maivn --help
+        run: .ci/bin/python scripts/consumer_smoke.py && .ci/bin/maivn --help

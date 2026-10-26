@@ -223,7 +223,7 @@ async def generate_sse_events(
                 if live_event.type in bridge.TERMINAL_EVENTS:
                     bridge.stream_mark_closed()
                     break
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 yield _build_keepalive_frame()
 
     except (asyncio.CancelledError, GeneratorExit):

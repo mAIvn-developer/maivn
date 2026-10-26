@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import copy
+import warnings
 from collections.abc import Callable, Mapping, Sequence
 from inspect import Parameter, signature
 from typing import TYPE_CHECKING, cast, get_type_hints
 from uuid import uuid4
 
+from maivn_contracts.runtime.customer_scope import memory_owner_user_id
 from pydantic import BaseModel, TypeAdapter
 
+from maivn._internal.compat._tool_schemas import SCHEMA_FALLBACK_ERRORS
 from maivn._internal.compat.decorators import (
     ARGUMENT_PRODUCER_REQUIREMENTS_ATTR,
     COMPOSE_ARGUMENT_POLICIES_ATTR,
@@ -23,6 +26,7 @@ from maivn._internal.compat.decorators import (
 )
 from maivn._internal.compat.options import SystemToolsConfig
 from maivn._internal.config import DEFAULT_TOOL_EXECUTION_TIMEOUT
+from maivn._internal.tool_authority import registration_safety_labels
 from maivn.messages import to_contract_messages
 
 if TYPE_CHECKING:
@@ -39,7 +43,6 @@ ARTIFACT_PREVIEW_PATH = '/v1/artifacts/{artifact_id}/revisions/{revision}/previe
 SESSION_EVENTS_PATH = '/v1/sessions/{session_id}/events'
 SESSION_CANCEL_PATH = '/v1/sessions/{session_id}/cancel'
 SESSION_USAGE_PATH = '/v1/sessions/{session_id}/usage'
-TOOL_RESULT_PATH = '/v1/sessions/{session_id}/tools/{call_id}/result'
 TOOL_RESULT_BATCH_PATH = '/v1/sessions/{session_id}/tools/results'
 THREADS_PATH = '/v1/threads'
 THREAD_MESSAGES_PATH = '/v1/threads/{thread_id}/messages'
@@ -51,7 +54,7 @@ THREAD_STATE_PATH = '/v1/threads/{thread_id}'
 SKILLS_PATH = '/v1/skills'
 SKILL_PATH = '/v1/skills/{skill_id}'
 SKILL_SETS_PATH = '/v1/skill-sets'
-SKILL_SET_PATH = '/v1/skill-sets/{set_id}'
+SKILL_SET_INDEX_PATH = '/v1/skill-sets/{set_id}/index'
 SKILL_SET_SKILLS_COLLECTION_PATH = '/v1/skill-sets/{set_id}/skills'
 SKILL_SET_SKILLS_PATH = '/v1/skill-sets/{set_id}/skills/{skill_id}'
 SKILL_SET_CHILD_SET_PATH = '/v1/skill-sets/{set_id}/skill-sets/{child_set_id}'
@@ -85,6 +88,18 @@ def run_config_payload(options: RunOptions) -> JsonObject:
     sent by ``skill_selection_payload`` instead: RunConfig forbids unknown fields, so
     putting them here made every skill-bearing invoke fail validation at the server.
     """
+    owner = memory_owner_user_id(options.user_id)
+    memory_enabled = options.memory is None or (
+        options.memory.get('enabled', True) and options.memory.get('level') != 'none'
+    )
+    if owner is None and memory_enabled:
+        warnings.warn(
+            'Private memory is disabled for the default/absent customer subject. '
+            'Set user_id from an authenticated customer session on your trusted backend; '
+            'the platform does not independently verify end-user identity.',
+            UserWarning,
+            stacklevel=2,
+        )
     payload: JsonObject = {
         'user_id': options.user_id,
         'thread_id': options.thread_id or _new_id('thr'),
@@ -98,6 +113,7 @@ def run_config_payload(options: RunOptions) -> JsonObject:
     _set_optional(payload, 'sdk_deployment_timezone', options.sdk_deployment_timezone)
     _set_optional(payload, 'model_directive', options.model_directive)
     _set_optional(payload, 'routing_preference', options.routing_preference)
+    _set_optional(payload, 'max_expense_usd', options.max_expense_usd)
     _set_optional(payload, 'system_model_choices', options.system_model_choices)
     if options.planning is not None:
         payload['planning'] = options.planning.model_dump(mode='json', exclude_none=True)
@@ -415,6 +431,7 @@ _TOOL_TIMEOUT_MS = min(int(DEFAULT_TOOL_EXECUTION_TIMEOUT * 1000), _MAX_CONTRACT
 
 
 def _function_tool_spec(tool: ToolMetadata) -> JsonObject:
+    labels = registration_safety_labels(tool.metadata)
     payload: JsonObject = {
         'tool_id': tool.name,
         'namespace': 'sdk',
@@ -426,6 +443,7 @@ def _function_tool_spec(tool: ToolMetadata) -> JsonObject:
         'description': tool.description or f'Execute {tool.name}.',
         'input_schema': copy.deepcopy(tool.input_schema),
     }
+    payload.update(labels.model_dump(mode='json', exclude_none=True))
     if isinstance(tool.output_schema, dict):
         payload['output_schema'] = dict(cast('Mapping[str, object]', tool.output_schema))
     if isinstance(tool.target, type) and issubclass(tool.target, BaseModel):
@@ -551,7 +569,7 @@ def _interrupt_response_schema(
     if annotation is not None and annotation is not Parameter.empty:
         try:
             schema = TypeAdapter(annotation).json_schema()
-        except (TypeError, ValueError):
+        except SCHEMA_FALLBACK_ERRORS:
             schema = _fallback_interrupt_schema(dependency)
     else:
         schema = _fallback_interrupt_schema(dependency)
@@ -563,7 +581,10 @@ def _interrupt_response_schema(
         # to ``{'type': 'string'}`` and Studio can only offer free text.
         schema = declared_schema
     if dependency.choices:
-        schema = {**schema, 'enum': list(dependency.choices)}
+        # Choices are strings, and a single choice renders only as a string enum; keep just
+        # the presentation keys of whatever the annotation produced.
+        labels = {key: schema[key] for key in ('title', 'description') if key in schema}
+        schema = {**labels, 'type': 'string', 'enum': list(dependency.choices)}
     return schema
 
 
@@ -655,7 +676,7 @@ __all__ = [
     'SKILL_PATH',
     'SKILL_SETS_PATH',
     'SKILL_SET_CHILD_SET_PATH',
-    'SKILL_SET_PATH',
+    'SKILL_SET_INDEX_PATH',
     'SKILL_SET_SKILLS_COLLECTION_PATH',
     'SKILL_SET_SKILLS_PATH',
     'THREADS_PATH',
@@ -666,7 +687,6 @@ __all__ = [
     'THREAD_STATE_PATH',
     'THREAD_TIME_TRAVEL_PATH',
     'TOOL_RESULT_BATCH_PATH',
-    'TOOL_RESULT_PATH',
     'delegate_tools',
     'invocation_options',
     'invocation_tools',

@@ -46,5 +46,14 @@ jobs:
       - name: Validate distributions
         run: uvx twine check dist/*
 
+      - name: Clean wheel consumer smoke (Python 3.10 and 3.12)
+        run: |
+          for version in 3.10 3.12; do
+            uv venv ".consumer-$version" --python "$version"
+            uv pip install --python ".consumer-$version/bin/python" dist/*.whl
+            ".consumer-$version/bin/python" scripts/consumer_smoke.py
+            ".consumer-$version/bin/maivn" --help
+          done
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

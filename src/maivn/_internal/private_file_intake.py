@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import hmac
 import os
@@ -32,6 +31,7 @@ from maivn._internal.private_artifacts import (
     rfc3339,
     trusted_origin,
 )
+from maivn._internal.tls import tls_context
 from maivn._internal.transport.leases import lease_transport
 
 if TYPE_CHECKING:
@@ -106,8 +106,6 @@ async def publish_private_file(  # noqa: PLR0913 - explicit generated-output coo
             output=generated.path,
             source=source,
         )
-    except asyncio.CancelledError:
-        raise
     except Exception:  # noqa: BLE001 - value-free private SDK boundary.
         result = None
     if result is None:
@@ -190,8 +188,6 @@ async def upload_private_file(
             )
             status = await client._bind_and_poll(work, accepted)  # noqa: SLF001 # pyright: ignore[reportPrivateUsage]
             result = _verified_artifact(status.artifact, work, operation_id)
-    except asyncio.CancelledError:
-        raise
     except Exception:  # noqa: BLE001 - no private paths, bytes or transport diagnostics escape.
         result = None
     if result is None:
@@ -231,6 +227,7 @@ async def _complete_upload(  # noqa: PLR0913 - exact upload authority and bounde
         timeout=client._timeout_seconds,  # noqa: SLF001 # pyright: ignore[reportPrivateUsage]
         follow_redirects=False,
         trust_env=False,
+        verify=tls_context(trust_env=False),
     ) as direct:
         for part, stream, limit in parts:
             async with direct.stream(

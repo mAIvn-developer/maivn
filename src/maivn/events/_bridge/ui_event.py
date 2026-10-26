@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import cast
 
 from .redaction import redact_private_data
-from .serialization import build_safe_event_payload
+from .serialization import build_safe_event_payload, wire_text
 
 # MARK: UIEvent
 
@@ -40,8 +40,8 @@ class UIEvent:
             'timestamp': self.timestamp,
         }
         return {
-            'event': self.type,
-            'id': self.id,
+            'event': wire_text(self.type),
+            'id': wire_text(self.id),
             'data': build_safe_event_payload(
                 payload,
                 event_id=self.id,

@@ -75,7 +75,7 @@ async def iter_sse_events(lines: AsyncIterator[str]) -> AsyncIterator[StreamEven
 
 def _parse_event_id(line: str) -> int:
     raw_position = line.split(':', 1)[1].strip()
-    if not raw_position.isdecimal():
+    if not (raw_position.isascii() and raw_position.isdecimal()):
         message = 'SSE id field must be a non-negative integer'
         raise SseParseError(message)
     return int(raw_position)
@@ -85,10 +85,11 @@ def _parse_data(data: str) -> JsonObject:
     if not data:
         return {}
     try:
-        value = json.loads(data)
-    except json.JSONDecodeError as exc:
-        message = 'SSE data field must contain a JSON object'
-        raise SseParseError(message) from exc
+        value: object = json.loads(data)
+    except json.JSONDecodeError:
+        # Raise outside the handler: the decode error's `doc` holds the whole frame,
+        # which must not ride along as this error's cause or context.
+        value = None
     if not isinstance(value, dict):
         message = 'SSE data field must contain a JSON object'
         raise SseParseError(message)

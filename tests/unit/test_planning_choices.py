@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any, cast
+
 import pytest
+from jsonschema import Draft202012Validator
+from pydantic import ValidationError as PydanticValidationError
 
 from maivn import ModelChoice, ModelConfig, PlanningChoice
 from maivn._internal.models import RunOptions
 from maivn._internal.wire import run_config_payload
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def test_model_config_coerces_planning_strings_without_changing_response_scopes() -> None:
@@ -80,3 +87,35 @@ def test_omitted_planning_keeps_legacy_run_config_bytes() -> None:
         'thread_id': 'thr-legacy',
         'model_directive': 'max',
     }
+
+
+def _model_accepts(payload: dict[str, Any]) -> bool:
+    try:
+        PlanningChoice.model_validate(payload)
+    except PydanticValidationError:
+        return False
+    return True
+
+
+@pytest.mark.parametrize(
+    ('payload', 'accepted'),
+    [
+        ({'tier': 'deep'}, True),
+        ({'model_id': 'synthetic-planning-model'}, True),
+        ({'tier': 'deep', 'model_id': None}, True),
+        ({'tier': None, 'model_id': 'synthetic-planning-model'}, True),
+        ({}, False),
+        ({'tier': None, 'model_id': None}, False),
+        ({'tier': 'deep', 'model_id': ''}, False),
+        ({'tier': 'deep', 'model_id': 'synthetic-planning-model'}, False),
+    ],
+)
+def test_planning_choice_schema_agrees_with_the_model(
+    payload: dict[str, Any], *, accepted: bool
+) -> None:
+    """The published planning schema reaches the model's verdict, including a null selector."""
+    validator = Draft202012Validator(PlanningChoice.model_json_schema())
+    is_valid = cast('Callable[[object], bool]', validator.is_valid)
+
+    assert _model_accepts(payload) is accepted
+    assert is_valid(payload) is accepted

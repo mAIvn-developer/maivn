@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import ClassVar, Literal, TypeAlias, cast
+from typing import ClassVar, Literal, TypeAlias, cast, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -29,8 +29,21 @@ StopStrategy: TypeAlias = Literal[
     'max_cycles',
     'blocker_detected',
 ]
-_MODEL_TIERS = frozenset(('auto', 'fast', 'balanced', 'max', 'ultra'))
-_PLANNING_TIERS = frozenset(('auto', 'standard', 'advanced', 'deep'))
+_MODEL_TIERS = frozenset(get_args(ModelTier))
+_PLANNING_TIERS = frozenset(get_args(PlanningTier))
+
+
+def _choice_from_string(value: object, tiers: frozenset[str], kind: str) -> object:
+    """Read a bare string as a tier when it names one, otherwise as an exact model id."""
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if not stripped:
+        message = f'{kind} choice strings must not be empty'
+        raise ValueError(message)
+    if stripped in tiers:
+        return {'tier': stripped}
+    return {'model_id': stripped}
 
 
 class ModelChoice(BaseModel):
@@ -44,15 +57,7 @@ class ModelChoice(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def _coerce_string_choice(cls, value: object) -> object:
-        if isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                message = 'model choice strings must not be empty'
-                raise ValueError(message)
-            if stripped in _MODEL_TIERS:
-                return {'tier': stripped}
-            return {'model_id': stripped}
-        return value
+        return _choice_from_string(value, _MODEL_TIERS, 'model')
 
     @model_validator(mode='after')
     def _validate_exactly_one_choice(self) -> ModelChoice:
@@ -75,14 +80,21 @@ class PlanningChoice(BaseModel):
                     'additionalProperties': False,
                     'required': ['tier'],
                     'properties': {
-                        'tier': {'type': 'string', 'enum': ['auto', 'standard', 'advanced', 'deep']}
+                        'tier': {
+                            'type': 'string',
+                            'enum': ['auto', 'standard', 'advanced', 'deep'],
+                        },
+                        'model_id': {'type': 'null'},
                     },
                 },
                 {
                     'type': 'object',
                     'additionalProperties': False,
                     'required': ['model_id'],
-                    'properties': {'model_id': {'type': 'string', 'minLength': 1}},
+                    'properties': {
+                        'tier': {'type': 'null'},
+                        'model_id': {'type': 'string', 'minLength': 1},
+                    },
                 },
             ],
         },
@@ -94,15 +106,7 @@ class PlanningChoice(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def _coerce_string_choice(cls, value: object) -> object:
-        if isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                message = 'planning choice strings must not be empty'
-                raise ValueError(message)
-            if stripped in _PLANNING_TIERS:
-                return {'tier': stripped}
-            return {'model_id': stripped}
-        return value
+        return _choice_from_string(value, _PLANNING_TIERS, 'planning')
 
     @model_validator(mode='after')
     def _validate_exactly_one_choice(self) -> PlanningChoice:

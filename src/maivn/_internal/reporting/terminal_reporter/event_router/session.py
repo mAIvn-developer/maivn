@@ -41,11 +41,14 @@ class SessionRouterMixin:
         )
 
     def report_private_data(self, private_data: dict[str, object]) -> None:
-        """Forward private invocation data to the wrapped reporter."""
+        """Forward private invocation data to the wrapped reporter.
+
+        The event sink receives each key with its placeholder, never a value.
+        """
         self._forward(
             category='lifecycle',
             event_name='private_data',
-            payload={'private_data': private_data},
+            payload={'private_data': {key: '{_{' + key + '}_}' for key in private_data}},
             forward=lambda: self._reporter.report_private_data(private_data),
         )
 

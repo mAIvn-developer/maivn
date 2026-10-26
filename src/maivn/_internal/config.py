@@ -38,10 +38,12 @@ class _VaultEnvSettings(BaseSettings):
 
 def local_vault_from_environment() -> LocalVaultConfig:
     """Use hosting secret injection without changing ordinary Client construction."""
+    key_supplied = True
     try:
         settings = _VaultEnvSettings()
         encoded_key = settings.key
         if encoded_key is None:
+            key_supplied = False
             return LocalVaultConfig(directory=settings.directory)
 
         def key_provider() -> bytes:
@@ -52,7 +54,14 @@ def local_vault_from_environment() -> LocalVaultConfig:
             key_provider=key_provider,
         )
     except Exception:  # noqa: BLE001 - environment validation must not echo secret values.
-        message = 'Set MAIVN_VAULT_DIRECTORY to durable storage when supplying MAIVN_VAULT_KEY.'
+        # Without a key, the only refusal is a blank directory.
+        message = (
+            'Set MAIVN_VAULT_DIRECTORY to durable storage when supplying MAIVN_VAULT_KEY.'
+            if key_supplied
+            else (
+                'MAIVN_VAULT_DIRECTORY is blank; set it to a durable storage directory or unset it.'
+            )
+        )
         raise VaultSetupError(message) from None
 
 

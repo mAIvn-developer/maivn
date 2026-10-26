@@ -15,6 +15,8 @@ from pydantic import AnyUrl, ValidationError
 from maivn import (
     Client,
     ClientConfig,
+    PIIWhitelist,
+    PIIWhitelistEntry,
     ResourcePatch,
     ResourceScopeRequest,
     ResourceUploadOptions,
@@ -228,3 +230,32 @@ def _resource_upload_payload() -> JsonObject:
         'tags': ['renewal', 'plan'],
         'metadata': {'source': 'sdk'},
     }
+
+
+def test_upload_sends_the_callers_whitelist_for_redaction() -> None:
+    """A timesheet upload can approve its dates and times, as a redacted message can."""
+    bodies: list[JsonObject | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(_json_body(request))
+        return httpx.Response(HTTPStatus.OK, json=_resource_json())
+
+    whitelist = PIIWhitelist(
+        entries=(
+            PIIWhitelistEntry(
+                entity_type='datetime', justification='Dates and times are the timesheet.'
+            ),
+        ),
+    )
+    _client(handler).resources.upload(
+        b'\x89PNG timesheet',
+        media_type='image/png',
+        name='timesheet.png',
+        options=ResourceUploadOptions(pii_whitelist=whitelist),
+    )
+
+    assert bodies[0] is not None
+    assert bodies[0]['pii_whitelist'] == whitelist.model_dump(
+        mode='json', exclude_none=True, exclude_defaults=True
+    )
+    assert bodies[0]['pii_whitelist']['entries'][0]['entity_type'] == 'datetime'

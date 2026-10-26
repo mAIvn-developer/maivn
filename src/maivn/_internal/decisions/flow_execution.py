@@ -148,16 +148,17 @@ def _stage_units(
 ) -> list[list[int]]:
     if not native_batch:
         return [[index] for index in range(len(requests))]
-    groups: dict[str, list[int]] = {}
+    groups: dict[tuple[object, ...], list[int]] = {}
     units: list[list[int]] = []
     for index, (_, request) in enumerate(requests):
-        if request.privacy != 'public':
+        if request.privacy != 'public' or (request.images and request.private_data):
             units.append([index])
         else:
-            if request.state not in groups:
-                groups[request.state] = []
-                units.append(groups[request.state])
-            groups[request.state].append(index)
+            key = (request.state, request.private_data, request.images)
+            if key not in groups:
+                groups[key] = []
+                units.append(groups[key])
+            groups[key].append(index)
     return units
 
 

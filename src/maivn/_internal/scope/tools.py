@@ -6,10 +6,10 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
+from maivn._internal.compat._tool_graph import compile_tool_metadata_graph
 from maivn._internal.compat.decorators import TOOL_DEPENDENCIES_ATTR, ToolDependency
 from maivn._internal.compat.mcp import MCPServer, hide_tool_args_from_model
-from maivn._internal.compat.tooling import compile_tool_metadata_graph
-from maivn._internal.hooks import HookBinding, compose_hooks
+from maivn._internal.hooks import HookBinding, compose_hooks, scope_hook_binding
 from maivn._internal.models import JsonObject, ToolMetadata
 from maivn._internal.private_placeholders import resolve_private_placeholders
 
@@ -83,13 +83,13 @@ def _with_scope_execution_hooks(
         binding
         for item in scope_chain
         if _scope_hook_applies_to_tool(item, compiled_scope=scope)
-        and (binding := _scope_binding(item, 'before_execute')) is not None
+        and (binding := scope_hook_binding(item, 'before_execute')) is not None
     ]
     scope_after = [
         binding
         for item in reversed(scope_chain)
         if _scope_hook_applies_to_tool(item, compiled_scope=scope)
-        and (binding := _scope_binding(item, 'after_execute')) is not None
+        and (binding := scope_hook_binding(item, 'after_execute')) is not None
     ]
     if not scope_before and not scope_after:
         return tools
@@ -144,24 +144,6 @@ def _scope_hook_applies_to_tool(item: object, *, compiled_scope: object) -> bool
         return True
     _ = compiled_scope
     return False
-
-
-def _scope_binding(item: object, attribute: str) -> HookBinding | None:
-    """Bind one scope's hook to the card that scope owns."""
-    hook = getattr(item, attribute, None)
-    if not callable(hook):
-        return None
-    # A swarm is the only scope that holds member agents; everything else in
-    # the chain renders as an agent card. Duck-typed on purpose - this module
-    # compiles any scope shape and must not import the scope classes.
-    is_swarm = isinstance(getattr(item, 'agents', None), list)
-    name = getattr(item, 'name', None)
-    return HookBinding(
-        hook=hook,
-        source='swarm' if is_swarm else 'scope',
-        target_type='swarm' if is_swarm else 'agent',
-        target_name=name if isinstance(name, str) and name else None,
-    )
 
 
 def _tool_binding(

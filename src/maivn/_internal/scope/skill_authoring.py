@@ -56,10 +56,19 @@ def skill_set_from_input(skill_set: SkillSet | str | Path) -> SkillSet:
 
 
 def _skill_with_scope(skill: Skill, scope: SkillScopeRequest) -> Skill:
+    if skill.scope.owner_user_id is not None or skill.origin == 'ai_generated':
+        message = (
+            'create a new authored skill with your own content '
+            'to share private or extracted knowledge'
+        )
+        raise ValueError(message)
     return skill.model_copy(update={'scope': scope})
 
 
 def skill_set_with_scope(skill_set: SkillSet, scope: SkillScopeRequest) -> SkillSet:
+    if skill_set.scope.owner_user_id is not None:
+        message = 'create a new authored skill set with your own content to share private knowledge'
+        raise ValueError(message)
     children = tuple(
         _skill_with_scope(child, scope)
         if isinstance(child, Skill)
@@ -77,11 +86,11 @@ def _skill_steps(steps: Sequence[SkillStep | str]) -> tuple[SkillStep, ...]:
 
 
 def agent_scope(agent_id: str) -> SkillScopeRequest:
-    return SkillScopeRequest(agent_id=agent_id, sharing_scope='agent')
+    return SkillScopeRequest(agent_id=agent_id, sharing_scope='agent', shared=True)
 
 
 def swarm_scope(swarm_id: str) -> SkillScopeRequest:
-    return SkillScopeRequest(swarm_id=swarm_id, sharing_scope='swarm')
+    return SkillScopeRequest(swarm_id=swarm_id, sharing_scope='swarm', shared=True)
 
 
 def append_unique(values: list[str], value: str) -> None:

@@ -195,7 +195,7 @@ def test_public_api_has_no_model_name_or_decision_model_key() -> None:
     with pytest.raises(ValidationError):
         DecisionConfig.model_validate({'model': 'any-model'})
     parameters = inspect.signature(DecisionClient).parameters
-    assert set(parameters) == {'fallback', 'config', 'authorize', 'client'}
+    assert set(parameters) == {'fallback', 'config', 'authorize', 'client', 'session_id'}
 
 
 def _marked(name: str = 'owner', **private: str) -> DecisionRequest:

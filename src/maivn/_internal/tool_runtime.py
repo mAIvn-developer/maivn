@@ -48,6 +48,7 @@ from maivn._internal.private_placeholders import resolve_private_placeholders
 from maivn._internal.private_workspace import PrivateWorkspaceValues, workspace_scope
 from maivn._internal.reporting.context import get_current_reporter
 from maivn._internal.retained_dependencies import validated_retained_dependencies
+from maivn._internal.tool_authority import registration_safety_labels
 
 if TYPE_CHECKING:
     from maivn_contracts.tools.model import RetainedToolResult
@@ -266,6 +267,17 @@ class LocalToolRuntime:
                 started=started,
                 code='unknown_sdk_tool',
                 message=f'SDK tool is not registered: {tool_call.spec_ref.tool_id}',
+            )
+            if on_completed is not None:
+                on_completed(tool_call, outcome)
+            return outcome
+        denied = registration_safety_labels(tool.metadata).requires_approval
+        if denied:
+            outcome = _error_outcome(
+                tool_call.call_id,
+                started=time.perf_counter(),
+                code='tool_authorization_required',
+                message='Privileged tool execution requires authenticated approval.',
             )
             if on_completed is not None:
                 on_completed(tool_call, outcome)

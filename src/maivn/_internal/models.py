@@ -9,6 +9,7 @@ from typing import Any, Literal, TypeAlias, cast
 from maivn_contracts.artifacts import ArtifactRef
 from maivn_contracts.events import Event
 from maivn_contracts.messages import Message
+from maivn_contracts.runtime import ExpenseCeilingUsd
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -113,6 +114,13 @@ class RunOptions(BaseModel):
     system_model_choices: JsonObject | None = Field(
         default=None,
         description='Explicit think and REPL model choices sent in the runtime config.',
+    )
+    max_expense_usd: ExpenseCeilingUsd | None = Field(
+        default=None,
+        description=(
+            'Exact optional USD expense ceiling; capped runs exclude paid hosted '
+            'search/sandbox and background enrichment. Billing rates are unchanged.'
+        ),
     )
     planning: PlanningChoice | None = Field(
         default=None,

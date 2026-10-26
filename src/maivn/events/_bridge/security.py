@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Literal, cast
 
+from pydantic import BaseModel, RootModel
+
+from maivn._internal.compat.privacy import PrivateData
 from maivn._internal.sanitize import sanitize_user_facing_error_message
+
+from .redaction import dataclass_fields as _dataclass_fields
+from .redaction import private_data_descriptors_only, redact_private_data
 
 # MARK: Configuration
 
@@ -14,6 +23,9 @@ BridgeAudience = Literal['internal', 'frontend_safe']
 EventPayload = dict[str, object]
 
 _REDACTED_VALUE = '<redacted>'
+# Real event payloads nest a handful of levels; anything deeper, or any cycle, is cut
+# and replaced with the redaction marker rather than walked or passed through.
+_MAX_SCRUB_DEPTH = 64
 _INJECTED_DATA_FIELDS = frozenset({'private_data_injected', 'interrupt_data_injected'})
 _REDACTION_DICT_FIELDS = frozenset({'added_private_data', 'merged_private_data'})
 _REDACTION_LIST_FIELDS = frozenset({'matched_known_pii_values', 'unmatched_known_pii_values'})
@@ -66,13 +78,12 @@ class EventBridgeSecurityPolicy:
     def sanitize_event(self, event_type: str, data: EventPayload) -> EventPayload:
         """Return a bridge-safe payload for the configured audience.
 
-        For ``frontend_safe`` bridges, unknown event types are not
-        passed through verbatim. Instead they go through a generic
-        injected-fields scrubber that summarizes any fields named in
-        :data:`_INJECTED_DATA_FIELDS` and removes top-level error
-        details. This is a defense-in-depth fallback so a third-party
-        emitter pushing a custom event type cannot accidentally leak
-        injected private data to the frontend.
+        For ``frontend_safe`` bridges, every payload, whatever its event
+        type, goes through an injected-fields scrubber that summarizes any
+        field named in :data:`_INJECTED_DATA_FIELDS` at any depth. Event
+        types with dedicated handling also have their error and redaction
+        details masked. Unknown event types are logged as a warning so a
+        third-party emitter can add dedicated handling if it needs it.
         """
         if self.audience == 'internal':
             return data
@@ -81,20 +92,12 @@ class EventBridgeSecurityPolicy:
         safe_payload = data
 
         if normalized_event_type == 'tool_event':
-            safe_payload = _sanitize_tool_event_payload(safe_payload)
-        elif normalized_event_type == 'system_tool_complete':
-            safe_payload = _sanitize_result_payload(safe_payload, nested_result_keys=('tool',))
+            safe_payload = _sanitize_error_fields(safe_payload, nested_error_keys=('tool',))
         elif normalized_event_type == 'agent_assignment':
-            safe_payload = _sanitize_result_payload(
-                safe_payload,
-                nested_result_keys=('assignment',),
-            )
             safe_payload = _sanitize_error_fields(
                 safe_payload,
                 nested_error_keys=('assignment',),
             )
-        elif normalized_event_type == 'final':
-            safe_payload = _sanitize_result_payload(safe_payload, nested_result_keys=('output',))
         elif normalized_event_type == 'enrichment':
             safe_payload = _sanitize_enrichment_payload(safe_payload)
         elif normalized_event_type == 'error':
@@ -107,152 +110,115 @@ class EventBridgeSecurityPolicy:
                 'sanitize_event() if it needs custom handling.',
                 event_type,
             )
-            safe_payload = _sanitize_unknown_payload(safe_payload)
 
-        return safe_payload
+        return cast('EventPayload', _InjectedFieldScrubber().scrub(safe_payload))
 
 
 # MARK: Payload Sanitizers
 
 
-def _sanitize_unknown_payload(payload: EventPayload) -> EventPayload:
-    """Best-effort scrub of an unknown event payload for frontend audiences.
+class _InjectedFieldScrubber:
+    """One walk over a payload: injected fields summarized at any depth.
 
-    Walks the payload depth-first and summarizes any field whose name
-    matches a known injected-data field (``private_data_injected``,
-    ``interrupt_data_injected``). Leaves other fields intact so the
-    frontend can still render the event, but prevents accidental
-    exfiltration of injected secrets through custom event types.
+    Each container is walked once; cycles and over-deep nesting are cut. ``scrub`` returns
+    the input object itself when nothing below it changed.
     """
-    return cast('EventPayload', _scrub_injected_fields_recursive(payload))
+
+    def __init__(self) -> None:
+        self._active: set[int] = set()
+        # Results by container identity, so a container reused many times is walked once.
+        # Each entry keeps its container alive: a dumped model's children are temporary, and
+        # a freed object's id could otherwise be reused by a different one later in the walk.
+        self._done: dict[int, tuple[object, object]] = {}
+
+    def scrub(self, value: object) -> object:
+        if isinstance(value, RootModel):
+            # The serializer emits a root model as its root value, so walk that.
+            root = cast('object', value.root)
+            scrubbed_root = self.scrub(root)
+            return cast('object', value) if scrubbed_root is root else scrubbed_root
+        container = _as_container(value)
+        if container is None:
+            return value
+        value_id = id(value)
+        if value_id in self._done:
+            return self._done[value_id][1]
+        if value_id in self._active or len(self._active) >= _MAX_SCRUB_DEPTH:
+            return _REDACTED_VALUE
+        self._active.add(value_id)
+        try:
+            scrubbed = self._scrub_container(container)
+        finally:
+            self._active.remove(value_id)
+        result = value if scrubbed is container else scrubbed
+        self._done[value_id] = (value, result)
+        return result
+
+    def _scrub_container(self, value: EventPayload | list[object] | tuple[object, ...]) -> object:
+        if isinstance(value, dict):
+            scrubbed: EventPayload = {}
+            changed = False
+            for key, item in value.items():
+                if _is_injected_field(key):
+                    scrubbed[key] = _summarize_injected_payload(item)
+                    changed = True
+                    continue
+                new_item = self.scrub(item)
+                changed = changed or new_item is not item
+                scrubbed[key] = new_item
+            return scrubbed if changed else value
+        new_items = [self.scrub(item) for item in value]
+        if all(new is orig for new, orig in zip(new_items, value, strict=True)):
+            return value
+        return tuple(new_items) if isinstance(value, tuple) else new_items
 
 
-def _scrub_injected_fields_recursive(
-    value: object,
-    *,
-    active_ids: set[int] | None = None,
-) -> object:
+def _as_container(value: object) -> EventPayload | list[object] | tuple[object, ...] | None:
+    """Return the walkable view of a container, or None for a leaf.
+
+    ``PrivateData`` is a leaf: serialization replaces it with a value-free descriptor, so
+    it must reach the serializer as itself. Models and dataclasses are read field by
+    field (never dumped), so a ``PrivateData`` inside them survives a rebuild intact.
+    """
+    if isinstance(value, PrivateData):
+        return None
     if isinstance(value, dict):
-        traversable: EventPayload | list[object] = cast('EventPayload', value)
-    elif isinstance(value, list):
-        traversable = cast('list[object]', value)
-    else:
-        return value
-
-    if active_ids is None:
-        active_ids = set()
-    value_id = id(traversable)
-    if value_id in active_ids:
-        return traversable
-
-    active_ids.add(value_id)
-    try:
-        return _scrub_injected_fields_recursive_inner(traversable, active_ids=active_ids)
-    finally:
-        active_ids.remove(value_id)
-
-
-def _scrub_injected_fields_recursive_inner(
-    value: EventPayload | list[object],
-    *,
-    active_ids: set[int],
-) -> object:
-    if isinstance(value, dict):
-        scrubbed: EventPayload = {}
-        changed = False
-        for key, item in value.items():
-            if key in _INJECTED_DATA_FIELDS:
-                scrubbed[key] = _summarize_injected_payload(item)
-                changed = True
-                continue
-            new_item = _scrub_injected_fields_recursive(item, active_ids=active_ids)
-            if new_item is not item:
-                changed = True
-            scrubbed[key] = new_item
-        return scrubbed if changed else value
-    new_list = [_scrub_injected_fields_recursive(item, active_ids=active_ids) for item in value]
-    if any(new is not orig for new, orig in zip(new_list, value, strict=True)):
-        return new_list
-    return value
+        return cast('EventPayload', value)
+    if isinstance(value, list):
+        return cast('list[object]', value)
+    if isinstance(value, tuple):
+        return cast('tuple[object, ...]', value)
+    if isinstance(value, set | frozenset):
+        return list(cast('frozenset[object]', value))
+    if isinstance(value, Mapping):
+        return dict(cast('Mapping[str, object]', value))
+    if isinstance(value, BaseModel):
+        return _model_view(value)
+    if isinstance(value, SimpleNamespace):
+        return cast('EventPayload', vars(value))
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return _dataclass_fields(value)
+    return None
 
 
-def _sanitize_tool_event_payload(payload: EventPayload) -> EventPayload:
-    safe_payload = _sanitize_result_payload(
-        payload,
-        arg_keys=('args',),
-        nested_arg_keys=('tool',),
-        nested_result_keys=('tool',),
-    )
-    return _sanitize_error_fields(safe_payload, nested_error_keys=('tool',))
+def _model_view(model: BaseModel) -> EventPayload | list[object] | tuple[object, ...] | None:
+    """Walk what the serializer will emit for a model, keeping ``PrivateData`` intact.
+
+    Without ``PrivateData`` inside, the model is walked as ``model_dump()`` shows it, so field
+    serializers and serialization aliases apply exactly as on the wire. With ``PrivateData``
+    inside, dumping would flatten it into a plain dict the serializer no longer redacts, so
+    the redaction step replaces it with its value-free descriptor first.
+    """
+    redacted = redact_private_data(model)
+    if redacted is not model:
+        return _as_container(redacted)
+    with private_data_descriptors_only():
+        dumped = cast('object', model.model_dump(mode='python'))
+    return None if isinstance(dumped, BaseModel) else _as_container(dumped)
 
 
-def _sanitize_result_payload(
-    payload: EventPayload,
-    *,
-    arg_keys: tuple[str, ...] = (),
-    nested_arg_keys: tuple[str, ...] = (),
-    nested_result_keys: tuple[str, ...] = (),
-) -> EventPayload:
-    safe_payload = payload
-
-    for arg_key in arg_keys:
-        arg_value = safe_payload.get(arg_key)
-        if isinstance(arg_value, dict):
-            sanitized_args = _sanitize_injected_fields(cast('EventPayload', arg_value))
-            if sanitized_args is not arg_value:
-                safe_payload = _with_value(safe_payload, arg_key, sanitized_args)
-
-    result_value = safe_payload.get('result')
-    if isinstance(result_value, dict):
-        sanitized_result = _sanitize_injected_fields(cast('EventPayload', result_value))
-        if sanitized_result is not result_value:
-            safe_payload = _with_value(safe_payload, 'result', sanitized_result)
-
-    for nested_key in nested_arg_keys:
-        nested_payload = safe_payload.get(nested_key)
-        if not isinstance(nested_payload, dict):
-            continue
-        nested = cast('EventPayload', nested_payload)
-        nested_args = nested.get('args')
-        if not isinstance(nested_args, dict):
-            continue
-        sanitized_args = _sanitize_injected_fields(cast('EventPayload', nested_args))
-        if sanitized_args is nested_args:
-            continue
-        updated_nested = dict(nested)
-        updated_nested['args'] = sanitized_args
-        safe_payload = _with_value(safe_payload, nested_key, updated_nested)
-
-    for nested_key in nested_result_keys:
-        nested_payload = safe_payload.get(nested_key)
-        if not isinstance(nested_payload, dict):
-            continue
-        nested = cast('EventPayload', nested_payload)
-        nested_result = nested.get('result')
-        if not isinstance(nested_result, dict):
-            continue
-        sanitized_result = _sanitize_injected_fields(cast('EventPayload', nested_result))
-        if sanitized_result is nested_result:
-            continue
-        updated_nested = dict(nested)
-        updated_nested['result'] = sanitized_result
-        safe_payload = _with_value(safe_payload, nested_key, updated_nested)
-
-    return safe_payload
-
-
-def _sanitize_injected_fields(value: EventPayload) -> EventPayload:
-    changed = False
-    safe_value: EventPayload = {}
-
-    for key, item in value.items():
-        if key in _INJECTED_DATA_FIELDS:
-            safe_value[key] = _summarize_injected_payload(item)
-            changed = True
-            continue
-        safe_value[key] = item
-
-    return safe_value if changed else value
+def _is_injected_field(key: object) -> bool:
+    return isinstance(key, str) and key.strip().lower() in _INJECTED_DATA_FIELDS
 
 
 def _sanitize_enrichment_payload(payload: EventPayload) -> EventPayload:
@@ -340,14 +306,20 @@ def _sanitize_error_fields(
         if not isinstance(nested_error, str) or not nested_error.strip():
             continue
         safe_error = sanitize_user_facing_error_message(nested_error.strip())
-        if safe_error == nested_error:
-            continue
         updated_nested = dict(nested)
-        if 'error' in nested:
-            updated_nested['error'] = safe_error
-        if 'message' in nested:
-            updated_nested['message'] = safe_error
-        safe_payload = _with_value(safe_payload, nested_key, updated_nested)
+        if safe_error != nested_error:
+            if 'error' in nested:
+                updated_nested['error'] = safe_error
+            if 'message' in nested:
+                updated_nested['message'] = safe_error
+        message = updated_nested.get('message')
+        if isinstance(message, str) and message.strip():
+            # A safe error must not let a leaking message beside it through.
+            safe_message = sanitize_user_facing_error_message(message.strip())
+            if safe_message != message.strip():
+                updated_nested['message'] = safe_message
+        if updated_nested != nested:
+            safe_payload = _with_value(safe_payload, nested_key, updated_nested)
 
     return safe_payload
 
@@ -361,7 +333,8 @@ def _summarize_injected_payload(value: object) -> list[str]:
         return [str(key) for key in mapping.keys()]
     if isinstance(value, list):
         items = cast('list[object]', value)
-        return [str(item) for item in items]
+        # A list cannot tell entry names from entry values, so only item types are shown.
+        return [type(item).__name__ for item in items]
     if value is None:
         return []
     return [type(value).__name__]

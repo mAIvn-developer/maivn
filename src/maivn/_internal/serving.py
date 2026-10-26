@@ -38,7 +38,8 @@ from maivn._internal.claiming import ClaimListener, WorkClaimer, WorkLoop, WorkR
 from maivn._internal.compat.logging import get_logger
 from maivn._internal.config import PROJECT_ID_ENV_VAR
 from maivn._internal.errors import ConfigurationError, MaivnHTTPError, MaivnSDKError
-from maivn._internal.plan_limits import is_plan_limit_error
+from maivn._internal.retry_policy import is_terminal as _is_terminal
+from maivn._internal.retry_policy import is_transient as _is_transient
 from maivn._internal.tracing import sdk_operation
 from maivn._internal.transport.http import JsonObject
 
@@ -77,15 +78,6 @@ STOP_RETRY_ATTEMPTS: Final = 2
 
 SERVING_TRANSPORTS: Final[tuple[ServingTransport, ...]] = ('worker', 'webhook')
 
-# Statuses below 500 that still mean "try again shortly" rather than "you are
-# wrong". Everything at or above 500 is transient by definition.
-_RETRYABLE_STATUSES: Final[frozenset[int]] = frozenset(
-    {HTTPStatus.REQUEST_TIMEOUT, HTTPStatus.TOO_MANY_REQUESTS},
-)
-# The platform said no, and saying it again will not help.
-_TERMINAL_STATUSES: Final[frozenset[int]] = frozenset(
-    {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN},
-)
 
 ServingEventKind: TypeAlias = Literal[
     'announced',
@@ -537,26 +529,6 @@ def _require_transport_pairing(transport: ServingTransport, endpoint_url: str | 
             'platform rather than at a URL of its own'
         )
         raise ValueError(message)
-
-
-def _is_transient(exc: BaseException) -> bool:
-    if is_plan_limit_error(exc):
-        # A plan limit is not congestion. The same 429 will come back on every
-        # attempt, so retrying only delays the message the developer can act on
-        # by the whole backoff budget.
-        return False
-    if isinstance(exc, MaivnHTTPError):
-        return (
-            exc.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR
-            or exc.status_code in _RETRYABLE_STATUSES
-        )
-    # Connection refused, DNS failure, read timeout: the transport never got an
-    # answer, which is exactly the blipped-Wi-Fi case.
-    return isinstance(exc, httpx.TransportError)
-
-
-def _is_terminal(exc: MaivnHTTPError) -> bool:
-    return exc.status_code in _TERMINAL_STATUSES
 
 
 def _detail(exc: BaseException) -> str:

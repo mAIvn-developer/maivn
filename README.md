@@ -461,3 +461,131 @@ still include it. Display it only in a trusted developer interface; do not log o
 persist the guidance or serialize whole responses into diagnostics. Normalized
 SDK event builders do not guarantee a guidance field. Decision results have no
 `privacy_guidance` field.
+
+## Bounded hosted jobs (deployment opt-in)
+
+Hosted jobs start immediately and continue after your HTTP client disconnects.
+The feature is disabled by default. An enabled deployment initially permits at most
+64 aggregate model/tool steps per job and two active jobs per project. The server
+also limits duration to its configured task deadline, never more than 30 minutes.
+Every start must provide all three positive bounds; ordinary invocations are unchanged.
+
+```python
+from maivn import Client, HostedJobOptions, RunOptions
+
+client = Client()
+job = client.jobs.start(
+    ['Summarize the supplied research notes.'],
+    job=HostedJobOptions(
+        idempotency_key='research-summary-2026-10-22',
+        max_steps=20,
+        max_duration_seconds=120,
+    ),
+    options=RunOptions(max_expense_usd='0.50'),
+)
+status = client.jobs.get(job.session_id)
+# client.jobs.cancel(job.session_id) commits a stop for new work.
+```
+
+Async callers use `astart`, `aget`, and `acancel`. Repeating the same idempotency key
+and semantic request returns the original job; a changed request conflicts. Generated
+message IDs and timestamps do not change request identity. The expense ceiling uses
+the same exact decimal and provider-expense accounting as a capped ordinary run;
+the lower server ceiling also applies. Nested models, compaction, and helpers share
+the same root, step limit, expense ceiling, and fixed database deadline. Background
+memory enrichment is skipped.
+
+Jobs support model calls and free system tools. To use registered worker/webhook
+tools, provide `registered_agent={'agent_id': 'registered-agent-id', 'version': 1}`
+in `HostedJobOptions`; the server resolves that immutable registered revision and
+uses its pinned instructions, model, output schema, agents, skills, memory and
+authorized tool surface. The caller supplies messages, private data, thread context
+and the explicit job bounds. Nondefault caller model or policy options alongside
+`registered_agent` are rejected with HTTP 422; default SDK wire values are accepted. SDK-local Python tools, human-input
+continuations, paid hosted search, sandbox, and hosted artifact producers are
+unsupported. Connector/provider fees charged outside mAIvn are outside
+`max_expense_usd`.
+
+`GET /v1/jobs/{session_id}` (the SDK's `get`) returns durable status, the terminal
+reason, step count, retained progress cursor, and any retained shielded final
+message/result. Retained session events are available through the existing
+`/v1/sessions/{session_id}/events` replay endpoint. Reads require the original
+active owner key and project access. The ordinary process-local `/result` endpoint
+is not the durable job result API. Private values remain process-only; status and
+replayed events keep placeholders rather than restoring private values.
+
+Cancellation prevents new work, but cannot undo an external effect already sent.
+Late receipts still settle costs. Server/replica loss ends the job as interrupted
+or execution-outcome-unknown and preserves unknown expense reservations. Jobs never
+resume or replay automatically after a crash. Deployments end running jobs unless
+an independently approved drain is used. Retention rules still apply to progress
+and output.
+
+The deployment must keep `MAIVN_INTERNAL_PLANE_HMAC_SECRET` configured and stable
+across replicas while retained start requests need to be replayed. Job idempotency
+uses a domain-separated keyed digest, including private input, and stores no raw
+request. Records may outlive the 30-minute execution limit under retention.
+Rotating the server secret makes old start retries conflict; reading or cancelling
+an already known job session is unaffected. A new idempotency key starts new work.
+
+
+When no thread is supplied, the SDK derives a credential-scoped thread identifier
+from the idempotency key using a domain-separated keyed digest. The credential is
+never sent as the thread identifier. Keep the same credential and thread context
+for start retries; rotating the credential changes this default and may conflict
+with an existing project-wide idempotency key. Supply the original thread explicitly
+when retrying with the original authorized owner key. A new owner key cannot
+take over that key's existing job or project-wide idempotency key.
+An explicit per-call or configured client thread always takes precedence.
+`client_timezone` and `sdk_deployment_timezone` also participate in request identity;
+retrying from a different host/timezone can return HTTP 409. Preserve these options when
+replaying the same start request.
+
+## Customer memory isolation (behavior change)
+
+Automatic memory and run attachments are private to the exact `user_id` within the
+authenticated project. IDs are opaque and case-sensitive, at most 256 characters,
+without control characters or surrounding whitespace. The default `sdk-user` and
+blank subjects disable private recall, extraction and attachment persistence;
+generation, current prompt attachments and explicitly shared authored knowledge
+remain available. Legacy ownerless records remain hidden from runtime recall.
+
+Set `RunOptions(user_id=...)` from your trusted backend's authenticated customer
+session. The platform authenticates the project key; it does **not** independently
+authenticate that end user. Do not expose a project key and trust a browser-supplied
+ID as customer authorization. Key rotation does not change customer ownership.
+
+Memory, skill and resource clients default to project developer management. Narrow
+all operations with independent facades such as
+`client.memory.for_user(user_id).insights.list()`,
+`client.skills.for_user(user_id)` and `client.resources.for_user(user_id)`.
+These send the developer-asserted `X-Maivn-User-Id` header (percent-encoded UTF-8,
+decoded once by the server, preserving opaque IDs exactly). A supplied invalid, blank
+or default ID is rejected rather than falling back to project management.
+Subject-scoped management sees only that customer's private records. Responses
+include `scope.owner_user_id` and `scope.shared`.
+
+Promotion and binding preserve private ownership. To deliberately share knowledge,
+a project developer must create a new authored record with `scope.shared=True`
+and their own content through the existing create endpoint. Never automatically
+copy conversation-derived private content into a shared record.
+
+Legacy sessions or threads containing recalled memory or compaction without a
+partition version cannot be safely continued. The server returns
+`thread_memory_legacy_requires_new_session`; create a new thread explicitly with
+your trusted customer `user_id`. Existing unbound legacy threads cannot be adopted
+by a customer subject (`thread_user_mismatch`). The SDK surfaces these error codes
+without silently replaying, discarding history or switching threads.
+
+`Agent.add_skill` and `Swarm.add_skill` deliberately author shared knowledge for
+that agent or swarm. They reject existing private or automatically extracted
+skills instead of silently converting them into shared content.
+
+New memory, skill, skill-set and resource creates require either
+`scope.shared=True` for deliberately authored shared content or a customer-scoped
+`for_user(user_id)` facade. Unclassified creates return HTTP 422 with
+`memory_classification_required`. Existing ownerless authored skills, skill sets,
+uploads and promoted insights are also hidden from runtime recall until recreated
+with an explicit classification; the rollout change includes all these record types.
+Thread list summaries remain available for legacy threads and expose the read-only
+`requires_new_session` flag; history and continuation still refuse unsafe legacy state.

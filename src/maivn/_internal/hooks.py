@@ -90,6 +90,24 @@ def hook_bindings(
     )
 
 
+def scope_hook_binding(item: object, attribute: str) -> HookBinding | None:
+    """Bind one scope's hook to the card that scope owns."""
+    hook = getattr(item, attribute, None)
+    if not callable(hook):
+        return None
+    # A swarm is the only scope that holds member agents; everything else in
+    # the chain renders as an agent card. Duck-typed on purpose - this module
+    # compiles any scope shape and must not import the scope classes.
+    is_swarm = isinstance(getattr(item, 'agents', None), list)
+    name = getattr(item, 'name', None)
+    return HookBinding(
+        hook=hook,
+        source='swarm' if is_swarm else 'scope',
+        target_type='swarm' if is_swarm else 'agent',
+        target_name=name if isinstance(name, str) and name else None,
+    )
+
+
 def safe_hook_error(error: Exception) -> str:
     """Return a hook failure descriptor that cannot disclose callback payloads."""
     return type(error).__name__
@@ -101,4 +119,5 @@ __all__ = [
     'compose_hooks',
     'hook_bindings',
     'safe_hook_error',
+    'scope_hook_binding',
 ]

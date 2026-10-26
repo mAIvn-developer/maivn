@@ -11,7 +11,9 @@ their own risk under the mAIvn Platform Disclaimer.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import ClassVar, cast
 from uuid import uuid4
@@ -28,7 +30,16 @@ from maivn_contracts.messages import (
 from maivn_contracts.messages import (
     PIIWhitelist as ContractPIIWhitelist,
 )
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_serializer,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 _MIN_WHITELIST_VALUE_LENGTH = 3
 
@@ -58,6 +69,26 @@ HIPAA_SAFE_HARBOR_CATEGORIES: frozenset[str] = frozenset(
 )
 
 
+PRIVATE_DESCRIPTOR_KEY = '__private__'
+_REDACTED_VALUE = '<redacted>'
+_descriptors_only: ContextVar[bool] = ContextVar('maivn_private_data_descriptors', default=False)
+
+
+@contextmanager
+def private_data_descriptors_only() -> Generator[None, None, None]:
+    """Within this block every pydantic dump shows ``PrivateData`` as its descriptor.
+
+    The event bridge serializes inside it, so a ``PrivateData`` reached by any dump -
+    a model's, a private attribute exposed by a serializer, a non-pydantic object whose
+    ``model_dump()`` delegates to pydantic - never shows its value.
+    """
+    token = _descriptors_only.set(True)
+    try:
+        yield
+    finally:
+        _descriptors_only.reset(token)
+
+
 def _new_message_id() -> str:
     return f'msg-{uuid4().hex}'
 
@@ -71,12 +102,41 @@ class PrivateData(BaseModel):
 
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True, extra='ignore')
 
-    value: object
+    # repr=False: a log line or traceback that formats the model never shows the value.
+    value: object = Field(repr=False)
     name: str | None = None
     pii_type: str | None = None
     label: str | None = None
     description: str | None = None
     format: str | None = None
+
+    @model_serializer(mode='wrap')
+    def _dump_descriptor_on_request(  # noqa: ANN202 - an annotation would change the schema.
+        self,
+        handler: SerializerFunctionWrapHandler,
+    ):
+        """Dump as the value-free descriptor inside :func:`private_data_descriptors_only`."""
+        if _descriptors_only.get():
+            return private_data_descriptor(self)
+        return handler(self)
+
+    @field_serializer('value', mode='wrap')
+    def _hide_value_on_request(  # noqa: ANN202 - an annotation would change the schema.
+        self,
+        value: object,
+        handler: SerializerFunctionWrapHandler,
+    ):
+        """Mask the value too, for a subclass whose own model serializer replaces the above."""
+        return _REDACTED_VALUE if _descriptors_only.get() else handler(value)
+
+
+def private_data_descriptor(item: PrivateData) -> dict[str, object]:
+    """Return a displayable descriptor for ``item``. NEVER includes ``value``."""
+    return {
+        PRIVATE_DESCRIPTOR_KEY: True,
+        'label': item.label or item.name or item.pii_type or 'private data',
+        'pii_type': item.pii_type,
+    }
 
 
 class PIIWhitelistEntry(BaseModel):
@@ -86,7 +146,7 @@ class PIIWhitelistEntry(BaseModel):
 
     entity_type: str | None = None
     pattern: str | None = None
-    value: str | None = None
+    value: str | None = Field(default=None, repr=False)
     justification: str = Field(..., min_length=8, max_length=512)
     label: str | None = Field(default=None, max_length=128)
 
@@ -226,14 +286,21 @@ class RedactedMessage(BaseModel):
 
     model_config: ClassVar[ConfigDict] = ConfigDict(extra='forbid', frozen=True)
 
-    content: str | list[ContentBlock]
-    known_pii_values: list[str | PrivateData] | None = None
+    # repr=False: the content and known values are the private text being protected.
+    content: str | list[ContentBlock] = Field(repr=False)
+    known_pii_values: list[str | PrivateData] | None = Field(default=None, repr=False)
     pii_whitelist: PIIWhitelist | None = None
     attachments: list[Attachment] | None = None
     artifact_refs: tuple[ArtifactRef, ...] | None = None
     metadata: dict[str, MetadataValue] | None = None
     message_id: str = Field(default_factory=_new_message_id, min_length=1)
     ts: str = Field(default_factory=_timestamp)
+
+    @field_validator('known_pii_values', mode='before')
+    @classmethod
+    def _empty_known_values_mean_none(cls, value: object) -> object:
+        """Treat an empty list as no known values; the contract refuses an empty list."""
+        return None if value == [] else value
 
     @field_validator('attachments', mode='before')
     @classmethod

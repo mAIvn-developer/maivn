@@ -9,6 +9,7 @@ v2-native surface. Names present in both v1 and v2 (``MemoryInsight``,
 from __future__ import annotations
 
 from maivn_contracts.artifacts import ArtifactRef, OrdinaryArtifactRef, PrivateArtifactRef
+from maivn_contracts.jobs import HostedJobOptions, HostedJobStatus
 from maivn_contracts.scenarios import (
     ChainedEventSource,
     EmailToInvokeSource,
@@ -253,7 +254,9 @@ class Swarm(_Swarm, ToolingScopeMixin, BaseScope):
     """V1-compatible swarm public class with BaseScope and tooling helpers."""
 
 
-__all__ = [  # noqa: RUF022 - Keep v1 public export order for compatibility.
+__all__ = [  # noqa: RUF022 - preserve the established public export grouping.
+    'HostedJobOptions',
+    'HostedJobStatus',
     'LocalVaultConfig',
     'VaultSetupError',
     '__version__',

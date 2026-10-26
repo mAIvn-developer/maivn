@@ -229,7 +229,7 @@ class SimpleReporter(BaseReporter):
         duration = _format_duration(typed_outcome, started_at=started_at)
         if failed:
             message = _failure_message(payload)
-            text = f'{tool_name}: {message}' if message else tool_name
+            text = f'{tool_name}: {safe_error_message(message)}' if message else tool_name
             return EventLine(verb='Failed', text=text, tone='error', detail=duration)
         return EventLine(verb='Completed', text=tool_name, tone='success', detail=duration)
 
@@ -561,7 +561,7 @@ def _hook_line(payload: dict[str, object]) -> EventLine | None:
     status = _string(payload.get('status'))
     if status == 'failed':
         error = _string(payload.get('error'))
-        detail = error or 'failed'
+        detail = safe_error_message(error) if error else 'failed'
         return EventLine(verb='Hook', text=text, tone='error', detail=detail)
     elapsed_ms = payload.get('elapsed_ms')
     detail = (

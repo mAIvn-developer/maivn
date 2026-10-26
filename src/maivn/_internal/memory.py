@@ -42,6 +42,7 @@ class MemoryScopeRequest(BaseModel):
     agent_id: StrictStr | None = Field(default=None, min_length=1)
     swarm_id: StrictStr | None = Field(default=None, min_length=1)
     sharing_scope: MemorySharingScope = 'project'
+    shared: StrictBool = False
 
 
 class MemoryScope(BaseModel):
@@ -54,6 +55,8 @@ class MemoryScope(BaseModel):
     agent_id: StrictStr | None = Field(default=None, min_length=1)
     swarm_id: StrictStr | None = Field(default=None, min_length=1)
     sharing_scope: MemorySharingScope = 'project'
+    owner_user_id: StrictStr | None = Field(default=None, min_length=1, max_length=256)
+    shared: StrictBool = False
 
 
 class MemorySkillStep(BaseModel):
@@ -206,6 +209,11 @@ class _MemoryInsightListResponse(BaseModel):
 class MemorySkillsClient:
     """Skill memory collection facade."""
 
+    def for_user(self, user_id: str) -> MemorySkillsClient:
+        """Return independent customer management; derive user_id on a trusted backend."""
+        http = self._get_http().for_user(user_id)
+        return MemorySkillsClient(lambda: http)
+
     def __init__(self, http: Callable[[], HttpJsonClient]) -> None:
         """Create a skill memory facade backed by a bound HTTP client accessor."""
         self._get_http = http
@@ -269,6 +277,11 @@ class MemorySkillsClient:
 
 class MemoryInsightsClient:
     """Insight memory collection facade."""
+
+    def for_user(self, user_id: str) -> MemoryInsightsClient:
+        """Return independent customer management; derive user_id on a trusted backend."""
+        http = self._get_http().for_user(user_id)
+        return MemoryInsightsClient(lambda: http)
 
     def __init__(self, http: Callable[[], HttpJsonClient]) -> None:
         """Create an insight memory facade backed by a bound HTTP client accessor."""
@@ -354,6 +367,7 @@ class MemoryEnrichmentReceipt(BaseModel):
 
     session_id: StrictStr
     invocation_id: StrictStr
+    owner_user_id: StrictStr | None = None
     status: Literal['completed', 'failed']
     skill_count: StrictInt = Field(ge=0)
     insight_count: StrictInt = Field(ge=0)
@@ -369,6 +383,11 @@ class _MemoryEnrichmentListResponse(BaseModel):
 
 class MemoryEnrichmentsClient:
     """Read durable outcomes after a run; no receipts does not imply completion."""
+
+    def for_user(self, user_id: str) -> MemoryEnrichmentsClient:
+        """Return independent customer management; derive user_id on a trusted backend."""
+        http = self._get_http().for_user(user_id)
+        return MemoryEnrichmentsClient(lambda: http)
 
     def __init__(self, http: Callable[[], HttpJsonClient]) -> None:
         """Bind the authenticated HTTP accessor."""
@@ -391,8 +410,14 @@ class MemoryEnrichmentsClient:
 class MemoryClient:
     """Root facade for memory routes."""
 
+    def for_user(self, user_id: str) -> MemoryClient:
+        """Return independent customer management; derive user_id on a trusted backend."""
+        http = self._get_http().for_user(user_id)
+        return MemoryClient(lambda: http)
+
     def __init__(self, http: Callable[[], HttpJsonClient]) -> None:
         """Create memory collection facades backed by a bound HTTP client accessor."""
+        self._get_http = http
         self.skills = MemorySkillsClient(http)
         self.insights = MemoryInsightsClient(http)
         self.enrichments = MemoryEnrichmentsClient(http)

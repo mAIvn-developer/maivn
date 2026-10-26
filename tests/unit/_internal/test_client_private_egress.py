@@ -11,8 +11,8 @@ from pydantic import AnyUrl
 
 from maivn import Client, ClientConfig
 from maivn._internal.client import (
-    _hydrated_client_events,  # pyright: ignore[reportPrivateUsage] - egress seam under test
-    _local_resolution_data,  # pyright: ignore[reportPrivateUsage] - egress seam under test
+    _hydrated_client_events,  # egress seam under test
+    _local_resolution_data,  # egress seam under test
 )
 from maivn._internal.compat.invocation import response_from_stream_events
 from maivn._internal.compat.privacy import PrivateData, RedactedMessage

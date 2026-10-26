@@ -54,7 +54,7 @@ if TYPE_CHECKING:
 
 AuthHook: TypeAlias = Callable[..., Awaitable[None]]
 BridgeFactory: TypeAlias = Callable[[str], EventBridge]
-StreamEventsHandler: TypeAlias = Callable[[str, str | None], Awaitable['Response']]
+StreamEventsHandler: TypeAlias = Callable[[str, str | None, str | None], Awaitable['Response']]
 RouteDecorator: TypeAlias = Callable[[StreamEventsHandler], StreamEventsHandler]
 
 
@@ -62,6 +62,8 @@ class FastAPIModule(Protocol):
     def APIRouter(self, *, prefix: str, tags: list[str]) -> object: ...
 
     def Depends(self, dependency: AuthHook) -> object: ...
+
+    def Header(self, *, default: None, alias: str) -> str | None: ...
 
 
 class EventRouter(Protocol):
@@ -238,17 +240,23 @@ def create_event_router(
     else:
         dependencies = []
 
+    # Evaluated here, not in an annotation: FastAPI cannot resolve a string
+    # annotation that names this function's local `fastapi` module.
+    last_event_id_header_param = fastapi.Header(default=None, alias='Last-Event-ID')
+
     @event_router.get(path, dependencies=dependencies)
     async def stream_events(
         session_id: str,
         last_event_id: str | None = None,
+        last_event_id_header: str | None = last_event_id_header_param,
     ) -> Response:
         """Stream session events via Server-Sent Events.
 
-        Supports the standard SSE ``Last-Event-ID`` reconnection protocol.
-        Pass ``?last_event_id=...`` (or send the ``Last-Event-ID`` header
-        — most browser EventSource clients do this automatically) to skip
-        events the client has already seen.
+        Supports the standard SSE ``Last-Event-ID`` reconnection protocol:
+        send the ``Last-Event-ID`` header (browser EventSource clients do this
+        automatically on reconnect) or pass ``?last_event_id=...`` to skip
+        events the client has already seen. The header wins when both are
+        present, because a reconnect repeats the original URL's query.
         """
         bridge = get_event_bridge(
             session_id,
@@ -259,7 +267,9 @@ def create_event_router(
         )
         return EventSourceResponse(
             bridge.generate_sse(
-                last_event_id=last_event_id,
+                last_event_id=(
+                    last_event_id_header if last_event_id_header is not None else last_event_id
+                ),
                 heartbeat_interval=heartbeat_interval,
             )
         )

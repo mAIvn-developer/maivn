@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypeVar, cast
 
 from pydantic import BaseModel
 
@@ -111,17 +111,24 @@ def normalize_string_list(value: object, field_name: str) -> list[str]:
     return [str(item) for item in items]
 
 
-def coerce_memory_config(value: object) -> MemoryConfig:
-    """Coerce v1 memory_config constructor input into the compat model."""
+_ConfigT = TypeVar('_ConfigT', bound=BaseModel)
+
+
+def _coerce_config(value: object, model: type[_ConfigT], field_name: str) -> _ConfigT:
+    """Coerce a v1 constructor config (model, mapping or None) into its compat model."""
     if value is None:
-        return MemoryConfig()
-    if isinstance(value, MemoryConfig):
+        return model()
+    if isinstance(value, model):
         return value
     if isinstance(value, Mapping):
-        payload = dict(cast('Mapping[str, object]', value))
-        return MemoryConfig.model_validate(payload)
-    message = 'memory_config must be a MemoryConfig, dictionary, or None'
+        return model.model_validate(dict(cast('Mapping[str, object]', value)))
+    message = f'{field_name} must be a {model.__name__}, dictionary, or None'
     raise TypeError(message)
+
+
+def coerce_memory_config(value: object) -> MemoryConfig:
+    """Coerce v1 memory_config constructor input into the compat model."""
+    return _coerce_config(value, MemoryConfig, 'memory_config')
 
 
 def coerce_optional_memory_config(value: object) -> MemoryConfig | None:
@@ -133,28 +140,12 @@ def coerce_optional_memory_config(value: object) -> MemoryConfig | None:
 
 def coerce_system_tools_config(value: object) -> SystemToolsConfig:
     """Coerce v1 system_tools_config constructor input into the compat model."""
-    if value is None:
-        return SystemToolsConfig()
-    if isinstance(value, SystemToolsConfig):
-        return value
-    if isinstance(value, Mapping):
-        payload = dict(cast('Mapping[str, object]', value))
-        return SystemToolsConfig.model_validate(payload)
-    message = 'system_tools_config must be a SystemToolsConfig, dictionary, or None'
-    raise TypeError(message)
+    return _coerce_config(value, SystemToolsConfig, 'system_tools_config')
 
 
 def coerce_orchestration_config(value: object) -> SessionOrchestrationConfig:
     """Coerce v1 orchestration_config constructor input into the compat model."""
-    if value is None:
-        return SessionOrchestrationConfig()
-    if isinstance(value, SessionOrchestrationConfig):
-        return value
-    if isinstance(value, Mapping):
-        payload = dict(cast('Mapping[str, object]', value))
-        return SessionOrchestrationConfig.model_validate(payload)
-    message = 'orchestration_config must be a SessionOrchestrationConfig, dictionary, or None'
-    raise TypeError(message)
+    return _coerce_config(value, SessionOrchestrationConfig, 'orchestration_config')
 
 
 def normalize_private_data(

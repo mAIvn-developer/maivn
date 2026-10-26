@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-10-23
+
+### Added
+- Explicit bounded hosted jobs with detached start, durable status, cancellation and expense ceilings.
+- Customer-scoped memory, resource and skill management through trusted backend customer assertions.
+- Decision image inputs, `DecisionApp`, and decision-only runs through `decision_run`.
+
+### Fixed
+- Hardened event privacy, streamed cleanup, tool authorization and request validation.
+- Require maivn-contracts 0.1.1 so clean installations include the contracts used by these APIs and their canonical schema data.
+
 ## [2.2.0] - 2026-10-09
 
 ### Added

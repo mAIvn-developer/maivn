@@ -12,17 +12,26 @@ preserved. The ``default`` callback covers the remaining types stdlib handled.
 from __future__ import annotations
 
 import dataclasses
+import ipaddress
 import logging
-from datetime import date, datetime
+from collections import UserString
+from collections.abc import Mapping, Sequence
+from collections.abc import Set as AbstractSet
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+from fractions import Fraction
 from logging import Logger as LoggerProtocol
+from pathlib import PurePath
+from types import SimpleNamespace
 from typing import ClassVar, Protocol, TypeGuard, cast, runtime_checkable
+from zoneinfo import ZoneInfo
 
 import orjson
+from pydantic import BaseModel
 
 from maivn._internal.compat.privacy import PrivateData
 
-from .redaction import private_data_descriptor, redact_private_data
+from .redaction import bounded_items, private_data_descriptor, private_data_descriptors_only
 
 logger: LoggerProtocol = cast(
     'LoggerProtocol',
@@ -33,6 +42,24 @@ logger: LoggerProtocol = cast(
 # prior representation (``isoformat``/``asdict``); everything else uses orjson's
 # native handling (UUID -> str, Enum -> value, NaN/Inf -> null).
 _ORJSON_OPTIONS = orjson.OPT_PASSTHROUGH_DATETIME | orjson.OPT_PASSTHROUGH_DATACLASS
+
+# Plain stdlib values that reach ``default`` and cannot hold a PrivateData go out as
+# their text, as before the type-name fallback. ``time`` arrives via the datetime
+# passthrough; UUID and Enum never reach ``default`` (orjson encodes them).
+_TEXT_VALUE_TYPES = (
+    Decimal,
+    time,
+    timedelta,
+    PurePath,
+    ipaddress.IPv4Address,
+    ipaddress.IPv6Address,
+    ipaddress.IPv4Network,
+    ipaddress.IPv6Network,
+    ipaddress.IPv4Interface,
+    ipaddress.IPv6Interface,
+    Fraction,
+    ZoneInfo,
+)
 
 
 # MARK: JSON Helpers
@@ -61,15 +88,17 @@ def _bridge_default(o: object) -> object:
 
     Prefers structured representations over ``__str__`` so frontends keep typed
     data. Sets become sorted lists; bytes become a UTF-8 string (replace errors)
-    so binary payloads don't crash the stream. Falls back to ``str(o)`` last.
-    ``PrivateData`` - on its own or inside a model - becomes its descriptor and
-    never its raw value, even when a payload bypasses ``UIEvent``.
+    so binary payloads don't crash the stream; other mappings, namespaces and
+    sequences become dicts and lists. Anything else becomes its type name, never
+    ``str(o)``: an unknown object's text may carry a private value. ``PrivateData``
+    - on its own, inside a model, or produced while dumping one - becomes its
+    descriptor and never its raw value, even when a payload bypasses ``UIEvent``.
     """
     if isinstance(o, PrivateData):
         return private_data_descriptor(o)
     if isinstance(o, datetime | date):
         return o.isoformat()
-    if isinstance(o, Decimal):
+    if isinstance(o, _TEXT_VALUE_TYPES):
         return str(o)
     if isinstance(o, set | frozenset):
         values = cast('set[object] | frozenset[object]', o)
@@ -78,13 +107,15 @@ def _bridge_default(o: object) -> object:
         return bytes(o).decode('utf-8', errors='replace')
     if _is_dataclass_instance(o):
         return cast('object', dataclasses.asdict(o))
-    # Pydantic v2 / v1 - try without importing the dependency.
+    if isinstance(o, BaseModel):
+        # Serialization runs inside private_data_descriptors_only(), so every PrivateData
+        # this dump reaches becomes its descriptor.
+        try:
+            return cast('object', o.model_dump())
+        except Exception:  # noqa: BLE001 - never fall back to the model's text.
+            return type(o).__name__
+    # Other model-like objects - try without importing their library.
     if isinstance(o, _SupportsModelDump):
-        # ``model_dump()`` would flatten a nested PrivateData into a plain dict
-        # that still holds ``value``.
-        redacted = redact_private_data(o)
-        if redacted is not o:
-            return redacted
         try:
             return o.model_dump()
         except Exception:  # noqa: BLE001 - model dumps are best-effort fallbacks.
@@ -94,7 +125,34 @@ def _bridge_default(o: object) -> object:
             return o.dict()
         except Exception:  # noqa: BLE001 - legacy dict() dumps are best-effort fallbacks.
             pass
-    return str(o)
+    structured = _structured(o)
+    return type(o).__name__ if structured is None else structured
+
+
+def _structured(o: object) -> object | None:
+    """Return a container's items as a dict or list, or None when it has none to give."""
+    try:
+        if isinstance(o, UserString):
+            return o.data
+        if isinstance(o, Mapping):
+            mapping = cast('Mapping[object, object]', o)
+            return dict(bounded_items(mapping, mapping.items()))
+        if isinstance(o, SimpleNamespace):
+            return dict(vars(o))
+        if isinstance(o, Sequence | AbstractSet) and not isinstance(o, range | memoryview):
+            items = cast('Sequence[object]', o)
+            return bounded_items(items, items)
+    except Exception:  # noqa: BLE001 - an unreadable or endless container is emitted by type name.
+        return None
+    return None
+
+
+def _encode(payload: dict[str, object]) -> str:
+    """Encode with the bridge's ``default``; any pydantic dump inside shows descriptors."""
+    with private_data_descriptors_only():
+        return orjson.dumps(payload, default=_bridge_default, option=_ORJSON_OPTIONS).decode(
+            'utf-8'
+        )
 
 
 def safe_json_dumps(payload: dict[str, object]) -> str:
@@ -107,14 +165,17 @@ def safe_json_dumps(payload: dict[str, object]) -> str:
     cursors and dispatchers stay correct.
     """
     try:
-        return orjson.dumps(payload, default=_bridge_default, option=_ORJSON_OPTIONS).decode(
-            'utf-8'
-        )
+        return _encode(payload)
     except Exception:
         logger.exception('Failed to serialize SSE payload')
         return orjson.dumps(
             {'event': 'error', 'message': 'Failed to serialize event payload'}
         ).decode('utf-8')
+
+
+def wire_text(value: str) -> str:
+    """Return ``value`` with any lone surrogate escaped, so it always encodes as UTF-8."""
+    return value.encode('utf-8', 'backslashreplace').decode('utf-8')
 
 
 def build_safe_event_payload(
@@ -136,10 +197,13 @@ def build_safe_event_payload(
       payload misbehaved without leaking its contents to the wire.
     """
     try:
-        return orjson.dumps(payload, default=_bridge_default, option=_ORJSON_OPTIONS).decode(
-            'utf-8'
-        )
+        return _encode(payload)
     except Exception as exc:
+        event_id, event_type, timestamp = (
+            wire_text(event_id),
+            wire_text(event_type),
+            wire_text(timestamp),
+        )
         logger.exception(f'Failed to serialize SSE payload for event {event_id} ({event_type})')
         fallback = {
             'id': event_id,
@@ -169,4 +233,5 @@ __all__ = [
     'build_safe_event_payload',
     'logger',
     'safe_json_dumps',
+    'wire_text',
 ]

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 
 from maivn._internal.errors import ResourceRegistrationError
-from maivn._internal.resources import ResourceUploadOptions
+from maivn._internal.resources import ResourceScopeRequest, ResourceUploadOptions
 
 if TYPE_CHECKING:
     from maivn._internal.client import Client
@@ -89,7 +89,10 @@ async def _aregister_scope_resources(
                 declaration.content,
                 media_type=declaration.media_type,
                 name=declaration.name,
+                # A scope's declared resources are project knowledge every customer
+                # of the agent reads, uploaded without a customer subject: shared.
                 options=ResourceUploadOptions(
+                    scope=ResourceScopeRequest(shared=True),
                     description=declaration.description,
                     tags=declaration.tags,
                 ),

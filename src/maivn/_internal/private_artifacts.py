@@ -44,6 +44,7 @@ from maivn_contracts.artifacts import (
 from pydantic import BaseModel, ConfigDict, StrictStr
 
 from maivn._internal.api.async_stream import run_blocking
+from maivn._internal.tls import tls_context
 from maivn._internal.transport.leases import lease_transport
 
 if TYPE_CHECKING:
@@ -945,6 +946,7 @@ class PrivateArtifactsClient:
                     transport=lease_transport(self._vault_transport),
                     follow_redirects=False,
                     trust_env=False,
+                    verify=tls_context(trust_env=False),
                 ) as client,
                 client.stream(
                     ticket.method,

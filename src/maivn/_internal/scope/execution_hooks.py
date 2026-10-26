@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from maivn._internal.hooks import HookBinding, safe_hook_error
+from maivn._internal.hooks import HookBinding, safe_hook_error, scope_hook_binding
 from maivn._internal.models import StreamEvent
 from maivn._internal.tool_runtime import HookFiring
 
@@ -64,7 +64,7 @@ def _scope_bindings(
     for scope in scopes:
         if getattr(scope, 'hook_execution_mode', 'tool') != 'scope':
             continue
-        binding = _scope_binding(scope, attribute)
+        binding = scope_hook_binding(scope, attribute)
         if binding is not None:
             bindings.append(binding)
     return tuple(bindings)
@@ -443,14 +443,14 @@ def _member_execution_hooks(swarm: object, member: object) -> ScopeExecutionHook
     before: list[HookBinding] = []
     after: list[HookBinding] = []
     if getattr(swarm, 'hook_execution_mode', 'tool') == 'agent':
-        if binding := _scope_binding(swarm, 'before_execute'):
+        if binding := scope_hook_binding(swarm, 'before_execute'):
             before.append(binding)
-        if binding := _scope_binding(swarm, 'after_execute'):
+        if binding := scope_hook_binding(swarm, 'after_execute'):
             after.append(binding)
     if getattr(member, 'hook_execution_mode', 'tool') == 'scope':
-        if binding := _scope_binding(member, 'before_execute'):
+        if binding := scope_hook_binding(member, 'before_execute'):
             before.append(binding)
-        if binding := _scope_binding(member, 'after_execute'):
+        if binding := scope_hook_binding(member, 'after_execute'):
             after.insert(0, binding)
     return ScopeExecutionHooks(before=tuple(before), after=tuple(after))
 
@@ -469,20 +469,6 @@ def has_member_execution_hooks(swarm: object) -> bool:
             or callable(getattr(member, 'after_execute', None))
         )
         for member in getattr(swarm, 'agents', ())
-    )
-
-
-def _scope_binding(scope: object, attribute: str) -> HookBinding | None:
-    hook = getattr(scope, attribute, None)
-    if not callable(hook):
-        return None
-    is_swarm = isinstance(getattr(scope, 'agents', None), list)
-    name = getattr(scope, 'name', None)
-    return HookBinding(
-        hook=hook,
-        source='swarm' if is_swarm else 'scope',
-        target_type='swarm' if is_swarm else 'agent',
-        target_name=name if isinstance(name, str) and name else None,
     )
 
 

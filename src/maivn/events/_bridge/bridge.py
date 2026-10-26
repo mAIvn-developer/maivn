@@ -647,7 +647,7 @@ class EventBridge:
         try:
             connected_wait: Awaitable[bool] = self._subscriber_connected.wait()
             _ = await asyncio.wait_for(connected_wait, timeout=timeout)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             return False
         return True
 

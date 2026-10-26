@@ -7,7 +7,7 @@ import asyncio
 import inspect
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 from typing import TYPE_CHECKING, Literal, TypeAlias, TypeVar, cast, get_type_hints
 
 from maivn._internal.api.async_stream import owning_tool_loop, run_blocking
@@ -264,6 +264,31 @@ def depends_on_decision(  # noqa: PLR0913 - explicit opt-in dependency policy.
     return decorate
 
 
+def _resolvable_hints(target: Callable[..., object]) -> dict[str, object]:
+    """Return the target's type hints, resolving each one alone if some cannot resolve.
+
+    Declaration tolerates an annotation that exists only for type checkers; validation must
+    too, or every managed call of such a target would raise ``NameError``. Under postponed
+    annotations every hint is a string, so each is resolved on its own and only the ones
+    that fail are left out.
+    """
+    try:
+        return get_type_hints(target, include_extras=True)
+    except (NameError, TypeError):
+        pass
+    globalns = cast(
+        'dict[str, object] | None', getattr(inspect.unwrap(target), '__globals__', None)
+    )
+    hints: dict[str, object] = {}
+    for name, annotation in inspect.get_annotations(target).items():
+        probe = SimpleNamespace(__annotations__={name: annotation})
+        try:
+            hints.update(get_type_hints(probe, globalns=globalns, include_extras=True))
+        except (NameError, TypeError):
+            continue
+    return hints
+
+
 def _bind(target: Callable[..., object], arguments: Mapping[str, object]) -> dict[str, object]:
     from maivn._internal.decisions.flow_execution import immutable_results
 
@@ -414,7 +439,7 @@ class DecisionFunction:
 
     def _validated(self, arguments: Mapping[str, object]) -> Mapping[str, object]:
         bound = _bind(self.target, arguments)
-        hints = get_type_hints(self.target, include_extras=True)
+        hints = _resolvable_hints(self.target)
         return {
             name: validate_private_models(hints[name], value, {}) if name in hints else value
             for name, value in bound.items()

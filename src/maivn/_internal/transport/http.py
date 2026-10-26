@@ -10,11 +10,14 @@ import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, cast
+from urllib.parse import quote
 
 import httpx
+from maivn_contracts.runtime.customer_scope import memory_owner_user_id
 
 from maivn._internal.errors import MaivnHTTPError
 from maivn._internal.plan_limits import PLAN_LIMIT_ERROR_CODE, PlanLimitExceededError
+from maivn._internal.tls import tls_context
 from maivn._internal.tracing import SdkTracing
 from maivn._internal.transport.leases import lease_transport
 
@@ -89,6 +92,23 @@ class HttpJsonClient:
         self._transport = transport
         self._tracing = tracing if tracing is not None else SdkTracing.from_environment()
         self._shared_client: httpx.AsyncClient | None = None
+        self._memory_subject: str | None = None
+
+    def for_user(self, user_id: str) -> HttpJsonClient:
+        """Bind a developer-asserted customer subject to an independent client."""
+        subject = memory_owner_user_id(user_id)
+        if subject is None:
+            message = 'customer memory management requires an explicit user_id'
+            raise ValueError(message)
+        client = HttpJsonClient(
+            base_url=self._base_url,
+            api_key=self._api_key,
+            timeout_seconds=self._timeout_seconds,
+            transport=self._transport,
+            tracing=self._tracing,
+        )
+        client._memory_subject = subject
+        return client
 
     async def __aenter__(self) -> Self:
         """Keep one connection pool open for a bounded multi-request operation."""
@@ -248,11 +268,13 @@ class HttpJsonClient:
                 timeout=self._timeout_seconds,
                 transport=lease_transport(self._transport),
                 event_hooks=self._tracing.event_hooks,
+                verify=tls_context(),
             )
         return httpx.AsyncClient(
             base_url=self._base_url,
             timeout=self._timeout_seconds,
             transport=lease_transport(self._transport),
+            verify=tls_context(),
         )
 
     @asynccontextmanager
@@ -268,6 +290,11 @@ class HttpJsonClient:
         return {
             'Authorization': f'Bearer {self._api_key}',
             'Content-Type': 'application/json',
+            **(
+                {'X-Maivn-User-Id': quote(self._memory_subject, safe='')}
+                if self._memory_subject is not None
+                else {}
+            ),
         }
 
 

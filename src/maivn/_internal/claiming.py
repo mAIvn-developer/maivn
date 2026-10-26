@@ -34,7 +34,8 @@ from maivn_contracts.scenarios.templates import render_event_template
 
 from maivn._internal.compat.logging import get_logger
 from maivn._internal.errors import MaivnHTTPError, MaivnSDKError
-from maivn._internal.plan_limits import is_plan_limit_error
+from maivn._internal.retry_policy import is_terminal as _is_terminal
+from maivn._internal.retry_policy import is_transient as _is_transient
 from maivn._internal.tracing import sdk_operation
 
 if TYPE_CHECKING:
@@ -54,15 +55,6 @@ KEEPALIVE_INTERVAL_SECONDS: Final = 40.0
 
 ReportStatus: TypeAlias = Literal['working', 'completed', 'failed', 'abandoned']
 
-# Statuses below 500 that still mean "try again shortly" rather than "you are
-# wrong". Mirrors serving.py, because a claim loop and a heartbeat loop face
-# exactly the same network.
-_RETRYABLE_STATUSES: Final[frozenset[int]] = frozenset(
-    {HTTPStatus.REQUEST_TIMEOUT, HTTPStatus.TOO_MANY_REQUESTS},
-)
-_TERMINAL_STATUSES: Final[frozenset[int]] = frozenset(
-    {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN},
-)
 # The claim went to somebody else, or ran out. Not an error to retry: there is
 # nothing left to report on.
 _CLAIM_LOST = HTTPStatus.CONFLICT
@@ -492,24 +484,6 @@ def _required_int(body: JsonObject, field_name: str) -> int:
         message = f'agent work claim omitted {field_name}'
         raise MaivnSDKError(message)
     return value
-
-
-def _is_transient(exc: BaseException) -> bool:
-    if is_plan_limit_error(exc):
-        # A plan limit is not congestion. The same 429 will come back on every
-        # attempt, so retrying only delays the message the developer can act on
-        # by the whole backoff budget.
-        return False
-    if isinstance(exc, MaivnHTTPError):
-        return (
-            exc.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR
-            or exc.status_code in _RETRYABLE_STATUSES
-        )
-    return isinstance(exc, httpx.TransportError)
-
-
-def _is_terminal(exc: MaivnHTTPError) -> bool:
-    return exc.status_code in _TERMINAL_STATUSES
 
 
 def _detail(exc: BaseException) -> str:

@@ -1,5 +1,7 @@
 """Privacy-gated categorical decisions through the mAIvn platform, and opt-in invocation plans."""
 
+from maivn_contracts.decisions import DecisionImage
+
 from maivn._internal.decisions.arguments import (
     DecisionArgument,
     DecisionArgumentPreparation,
@@ -40,11 +42,14 @@ from maivn._internal.decisions.models import (
     DecisionUsage,
 )
 from maivn._internal.decisions.runtime import DecisionClient
+from maivn._internal.decisions.session import DecisionApp, DecisionAppResult, decision_run
 from maivn._internal.decisions.usage import summarize_decision_usage
 from maivn._internal.token_usage import TokenCategoryUsage, TokenUsageByCategory, TokenUsageCategory
 
 __all__ = [
     'DecisionAnswer',
+    'DecisionApp',
+    'DecisionAppResult',
     'DecisionArgument',
     'DecisionArgumentPreparation',
     'DecisionArgumentPreparer',
@@ -56,6 +61,7 @@ __all__ = [
     'DecisionConfig',
     'DecisionContext',
     'DecisionFunction',
+    'DecisionImage',
     'DecisionInvocationBuilder',
     'DecisionInvocationResult',
     'DecisionMatchCandidate',
@@ -76,6 +82,7 @@ __all__ = [
     'TokenUsageCategory',
     'candidate_match_questions',
     'decision_flow',
+    'decision_run',
     'depends_on_decision',
     'summarize_decision_usage',
 ]

@@ -328,6 +328,7 @@ def test_agent_invoke_accepts_verbose_and_force_final_tool_kwargs() -> None:
         'user_id': 'sdk-user',
         'thread_id': 'thr-fixed',
         'agent_id': 'flag-agent',
+        'model_directive': 'auto',
     }
 
 
@@ -2510,7 +2511,7 @@ def test_agent_add_skill_registers_and_pins_first_class_skill() -> None:
                 'name': 'Renewal escalation',
                 'description': 'Escalate renewal blockers.',
                 'steps': [{'index': 1, 'action': 'Review blockers'}],
-                'scope': {'agent_id': 'renewal-agent', 'sharing_scope': 'agent'},
+                'scope': {'shared': True, 'agent_id': 'renewal-agent', 'sharing_scope': 'agent'},
             },
         ),
     ]
@@ -2652,7 +2653,7 @@ def test_agent_add_skill_binds_the_skill_to_the_authoring_agent() -> None:
 
     scope = create_bodies[0].get('scope')
     run_config = cast('dict[str, object]', invoke_bodies[0]['run_config'])
-    assert scope == {'agent_id': 'renewal-agent', 'sharing_scope': 'agent'}
+    assert scope == {'shared': True, 'agent_id': 'renewal-agent', 'sharing_scope': 'agent'}
     assert cast('dict[str, object]', scope)['agent_id'] == run_config['agent_id']
 
 
@@ -2713,7 +2714,7 @@ def test_swarm_add_skill_set_binds_the_tree_to_the_authoring_swarm() -> None:
         ),
     )
 
-    expected = {'swarm_id': 'renewal-team', 'sharing_scope': 'swarm'}
+    expected = {'shared': True, 'swarm_id': 'renewal-team', 'sharing_scope': 'swarm'}
     assert scopes['skill_set'] == expected
     assert scopes['skill'] == expected
 
@@ -2778,6 +2779,7 @@ def test_attach_and_use_skills_ride_on_the_invoke_body_not_run_config() -> None:
         'user_id': 'usr-sdk',
         'thread_id': 'thr-skills',
         'agent_id': 'skill-agent',
+        'model_directive': 'auto',
     }
 
 

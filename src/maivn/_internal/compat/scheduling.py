@@ -930,6 +930,7 @@ _jobs: dict[str, ScheduledJob] = {}
 
 def list_jobs() -> list[ScheduledJob]:
     """Return every live compatibility scheduled job."""
+    _forget_done_jobs()
     return list(_jobs.values())
 
 
@@ -941,7 +942,15 @@ def stop_all_jobs(*, drain: bool = True, timeout: float | None = None) -> None:
 
 def register_job(job: ScheduledJob) -> None:
     """Register a compatibility scheduled job."""
+    _forget_done_jobs()
     _jobs[job.id] = job
+
+
+def _forget_done_jobs() -> None:
+    """Drop stopped and finished jobs, so the registry holds live jobs only."""
+    for job_id, job in list(_jobs.items()):
+        if job.is_done:
+            _ = _jobs.pop(job_id, None)
 
 
 async def _await_callback(awaitable: Awaitable[object]) -> None:

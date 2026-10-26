@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import contextlib
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from inspect import Parameter, Signature, getdoc, signature
+from inspect import getattr_static, getdoc
 from typing import (
     Literal,
     ParamSpec,
@@ -15,14 +15,20 @@ from typing import (
     TypeAlias,
     TypeVar,
     cast,
-    get_args,
-    get_type_hints,
     overload,
 )
 
-from maivn_contracts.artifacts import GeneratedFile, GeneratedFiles
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel
 
+from maivn._internal.compat._tool_schemas import (
+    input_schema_for as _input_schema_for,
+)
+from maivn._internal.compat._tool_schemas import (
+    output_schema_for as _output_schema_for,
+)
+from maivn._internal.compat._tool_schemas import (
+    preserve_public_tool_dependency_guidance,
+)
 from maivn._internal.compat.decorators import (
     EXECUTION_CONTROLS_ATTR,
     INTERRUPT_DEPENDENCIES_ATTR,
@@ -37,7 +43,6 @@ from maivn._internal.compat.decorators import (
     InputHandler,
     InputType,
     MethodToolifyOptions,
-    ToolDependency,
     ToolReference,
     ToolsetOptions,
     depends_on_agent,
@@ -48,13 +53,7 @@ from maivn._internal.compat.decorators import (
     depends_on_tool,
 )
 from maivn._internal.compat.permissions import DESTRUCTIVE_FLAG_NAMES
-from maivn._internal.decisions.dependencies import (
-    DECISION_DEPENDENCIES_ATTR,
-    validate_decision_dependencies,
-)
 from maivn._internal.models import JsonObject, ToolMetadata
-from maivn._internal.private_model_inputs import PrivateInputJsonSchema
-from maivn._internal.schema_references import prune_unused_definitions
 
 _SNAKE_CASE_ACRONYM = re.compile(r'([A-Z]{2,})([A-Z][a-z])')
 _SNAKE_CASE_WORD_BOUNDARY = re.compile(r'([a-z0-9])([A-Z])')
@@ -472,139 +471,6 @@ def compile_tool_metadata(tool: ToolMetadata) -> ToolMetadata:
     )
 
 
-def compile_tool_metadata_graph(tools: Sequence[ToolMetadata]) -> list[ToolMetadata]:
-    """Expand nested Pydantic models into executable dependency tools.
-
-    Keep every nested model as a separate runtime unit, compile dependencies
-    before their parents, and reuse explicitly registered metadata when a nested
-    class was also toolified.
-    """
-    explicit_by_target = {id(tool.target): tool for tool in tools}
-    explicit_by_name = {tool.name: tool for tool in tools}
-    compiled: list[ToolMetadata] = []
-    visited: set[int] = set()
-    visiting: set[int] = set()
-    direct_reference_counts = _direct_model_reference_counts(tools)
-
-    def visit(tool: ToolMetadata) -> None:
-        target_key = id(tool.target)
-        if target_key in visited or target_key in visiting:
-            return
-        visiting.add(target_key)
-        if _is_model_tool(tool.target):
-            model = cast('type[BaseModel]', tool.target)
-            for arg_name, nested_model, inject_directly in _nested_model_fields(model):
-                dependency_tool = explicit_by_target.get(id(nested_model))
-                if dependency_tool is None:
-                    dependency_tool = tool_metadata_for_callable(
-                        nested_model,
-                        ToolRegistrationOptions(tags=tool.tags),
-                    )
-                    explicit_by_target[id(nested_model)] = dependency_tool
-                    explicit_by_name[dependency_tool.name] = dependency_tool
-                    assign_tool_id(nested_model, dependency_tool.name)
-                # PARALLEL-BENCHMARK-NOTE(2026-08-16): Complex Types lost union
-                # alternatives and injected one model into list/map fields. Register every
-                # referenced model, but only a direct model-valued field is one dependency.
-                if inject_directly and direct_reference_counts.get(id(nested_model)) == 1:
-                    _append_model_dependency(model, arg_name, dependency_tool.name)
-                visit(dependency_tool)
-        for producer in _registered_tool_dependencies(tool, explicit_by_name):
-            visit(producer)
-        visiting.remove(target_key)
-        visited.add(target_key)
-        compiled.append(compile_tool_metadata(tool))
-
-    for registered_tool in tools:
-        visit(registered_tool)
-    return compiled
-
-
-def _registered_tool_dependencies(
-    tool: ToolMetadata,
-    tools_by_name: Mapping[str, ToolMetadata],
-) -> list[ToolMetadata]:
-    """Resolve the declared producers that participate in this compiled graph."""
-    raw = getattr(tool.target, TOOL_DEPENDENCIES_ATTR, None)
-    if not isinstance(raw, list):
-        return []
-    producers: list[ToolMetadata] = []
-    for dependency in cast('list[object]', raw):
-        if not isinstance(dependency, ToolDependency):
-            continue
-        producer = tools_by_name.get(dependency.tool_id) or tools_by_name.get(dependency.tool_name)
-        if producer is not None:
-            producers.append(producer)
-    return producers
-
-
-def _direct_model_reference_counts(tools: Sequence[ToolMetadata]) -> dict[int, int]:
-    """Count direct model-valued fields across the reachable schema graph.
-
-    The current runtime owns one dependency result per tool name. A model type used by
-    several direct fields therefore cannot be inferred as a dependency: those fields
-    represent distinct values even though they share one Pydantic class.
-    """
-    counts: dict[int, int] = {}
-    visited: set[int] = set()
-    pending = [tool.target for tool in tools if _is_model_tool(tool.target)]
-    while pending:
-        model = cast('type[BaseModel]', pending.pop())
-        model_key = id(model)
-        if model_key in visited:
-            continue
-        visited.add(model_key)
-        for _arg_name, nested_model, inject_directly in _nested_model_fields(model):
-            if inject_directly:
-                nested_key = id(nested_model)
-                counts[nested_key] = counts.get(nested_key, 0) + 1
-            pending.append(nested_model)
-    return counts
-
-
-def _is_model_tool(target: object) -> bool:
-    return isinstance(target, type) and issubclass(target, BaseModel)
-
-
-def _nested_model_fields(model: type[BaseModel]) -> list[tuple[str, type[BaseModel], bool]]:
-    nested: list[tuple[str, type[BaseModel], bool]] = []
-    for arg_name, field_info in model.model_fields.items():
-        candidates = _models_in_annotation(field_info.annotation)
-        direct_model = (
-            cast('type[BaseModel]', field_info.annotation)
-            if _is_model_tool(field_info.annotation)
-            else None
-        )
-        nested.extend((arg_name, candidate, candidate is direct_model) for candidate in candidates)
-    return nested
-
-
-def _models_in_annotation(annotation: object) -> list[type[BaseModel]]:
-    if _is_model_tool(annotation):
-        return [cast('type[BaseModel]', annotation)]
-    found: list[type[BaseModel]] = []
-    for argument in get_args(annotation):
-        for model in _models_in_annotation(argument):
-            if model not in found:
-                found.append(model)
-    return found
-
-
-def _append_model_dependency(target: type[BaseModel], arg_name: str, dependency_name: str) -> None:
-    raw = getattr(target, TOOL_DEPENDENCIES_ATTR, None)
-    if raw is None:
-        dependencies: list[object] = []
-        setattr(target, TOOL_DEPENDENCIES_ATTR, dependencies)
-    elif isinstance(raw, list):
-        dependencies = cast('list[object]', raw)
-    else:
-        message = f'{TOOL_DEPENDENCIES_ATTR} metadata must be a list'
-        raise TypeError(message)
-    if any(isinstance(item, ToolDependency) and item.arg_name == arg_name for item in dependencies):
-        return
-    dependencies.append(ToolDependency(arg_name, dependency_name, dependency_name))
-
-
 def _scope_tools(scope: object) -> list[ToolMetadata]:
     tools = getattr(scope, 'tools', None)
     if tools is None:
@@ -664,7 +530,8 @@ def _discover_toolset_methods(
         class_attr = getattr(cls, attr_name, None)
         if isinstance(class_attr, type):
             continue
-        if isinstance(class_attr, (property, classmethod, staticmethod)):
+        # ``getattr`` unwraps classmethods and staticmethods; the static lookup sees them.
+        if isinstance(getattr_static(cls, attr_name, None), (property, classmethod, staticmethod)):
             continue
         if not callable(class_attr):
             continue
@@ -852,196 +719,6 @@ def _derive_default_prefix(cls: type[object]) -> str:
     return _SNAKE_CASE_WORD_BOUNDARY.sub(r'\1_\2', intermediate).lower()
 
 
-def _input_schema_for(func: ToolTarget) -> JsonObject:
-    validate_decision_dependencies(func)
-    if isinstance(func, type) and issubclass(func, BaseModel):
-        schema = func.model_json_schema(schema_generator=PrivateInputJsonSchema)
-        dependency_args = _dependency_arg_names(func)
-        model_properties = schema.get('properties')
-        if isinstance(model_properties, dict):
-            typed_properties = cast('Mapping[str, object]', model_properties)
-            schema['properties'] = {
-                name: value
-                for name, value in typed_properties.items()
-                if name not in dependency_args
-            }
-        model_required = schema.get('required')
-        if isinstance(model_required, list):
-            schema['required'] = [
-                name
-                for name in cast('list[object]', model_required)
-                if isinstance(name, str) and name not in dependency_args
-            ]
-        preserve_public_tool_dependency_guidance(func, schema)
-        return prune_unused_definitions(schema)
-    try:
-        func_signature = signature(cast('Callable[..., object]', func))
-    except (TypeError, ValueError):
-        return {'type': 'object', 'properties': {}}
-
-    callable_func = cast('Callable[..., object]', func)
-    dependency_args = _dependency_arg_names(callable_func)
-    resolved_hints = _resolved_type_hints(callable_func)
-    properties: dict[str, object] = {}
-    definition_adapters: dict[str, TypeAdapter[object]] = {}
-    required: list[str] = []
-    for name, parameter in func_signature.parameters.items():
-        if (
-            name == 'self'
-            or name in dependency_args
-            or parameter.kind in (Parameter.VAR_KEYWORD, Parameter.VAR_POSITIONAL)
-        ):
-            continue
-        properties[name] = _schema_for_parameter(
-            parameter,
-            resolved_hints.get(name),
-            definition_adapters=definition_adapters,
-        )
-        if parameter.default is Signature.empty:
-            required.append(name)
-
-    schema: JsonObject = {
-        'type': 'object',
-        'properties': properties,
-        'additionalProperties': False,
-    }
-    if required:
-        schema['required'] = required
-    if definition_adapters:
-        # Generate these parameters together: Pydantic resolves recursive links
-        # and distinguishes different models that happen to share a name.
-        # Individual parameter schemas use root refs, so nesting their $defs
-        # beneath properties would leave those references dangling.
-        parameter_schemas, definitions = TypeAdapter.json_schemas(
-            [(name, 'validation', adapter) for name, adapter in definition_adapters.items()],
-            schema_generator=PrivateInputJsonSchema,
-        )
-        properties.update({name: value for (name, _mode), value in parameter_schemas.items()})
-        schema.update(definitions)
-    preserve_public_tool_dependency_guidance(callable_func, schema)
-    return schema
-
-
-def _output_schema_for(target: ToolTarget) -> object | None:
-    raw = cast('object | None', getattr(target, OUTPUT_SCHEMA_ATTR, None))
-    if raw is None:
-        try:
-            annotation = get_type_hints(target).get('return')
-        except (TypeError, NameError):
-            annotation = None
-        if annotation in (GeneratedFile, GeneratedFiles):
-            raw = annotation
-    if isinstance(raw, type) and issubclass(raw, BaseModel):
-        return raw.model_json_schema()
-    return cast('object | None', raw)
-
-
-def _schema_for_parameter(
-    parameter: Parameter,
-    resolved_annotation: object | None,
-    *,
-    definition_adapters: dict[str, TypeAdapter[object]],
-) -> JsonObject:
-    annotation = resolved_annotation or parameter.annotation
-    if annotation is not Signature.empty:
-        try:
-            adapter: TypeAdapter[object] = TypeAdapter(annotation)
-            schema = adapter.json_schema()
-        except (TypeError, ValueError):
-            pass
-        else:
-            if '$defs' in schema:
-                definition_adapters[parameter.name] = adapter
-            return schema
-    schema_by_annotation: dict[object, JsonObject] = {
-        bool: {'type': 'boolean'},
-        int: {'type': 'integer'},
-        float: {'type': 'number'},
-        str: {'type': 'string'},
-        list: {'type': 'array'},
-        tuple: {'type': 'array'},
-        dict: {'type': 'object'},
-    }
-    return schema_by_annotation.get(annotation, {'description': parameter.name})
-
-
-def _resolved_type_hints(func: Callable[..., object]) -> dict[str, object]:
-    try:
-        return cast('dict[str, object]', get_type_hints(func, include_extras=True))
-    except Exception:  # noqa: BLE001 - third-party annotations may not resolve locally.
-        return {}
-
-
-def _dependency_arg_names(func: object) -> frozenset[str]:
-    # Every dependency kind fills its argument from outside the model, so none of them may
-    # appear in the model-facing schema. Interrupt args were missing from this list, so the
-    # model still saw an argument only a human could supply - and looped trying to invent it.
-    dependencies: list[object] = []
-    for attr_name in (
-        PRIVATE_DATA_DEPENDENCIES_ATTR,
-        TOOL_DEPENDENCIES_ATTR,
-        INTERRUPT_DEPENDENCIES_ATTR,
-        DECISION_DEPENDENCIES_ATTR,
-    ):
-        raw = getattr(func, attr_name, ())
-        if isinstance(raw, list):
-            dependencies.extend(cast('list[object]', raw))
-    return frozenset(
-        arg_name
-        for dependency in dependencies
-        if isinstance((arg_name := getattr(dependency, 'arg_name', None)), str)
-    )
-
-
-def preserve_public_tool_dependency_guidance(
-    target: ToolTarget,
-    schema: JsonObject,
-) -> None:
-    """Retain public prerequisites and field guidance after bound inputs are hidden.
-
-    Dependency values are runtime-bound, so their properties cannot remain provider
-    inputs. Their explicit descriptions may still tell a model how to use the public
-    result. Private-data dependencies never contribute guidance here.
-    """
-    private_args = {
-        arg_name
-        for dependency in _metadata_values(target, PRIVATE_DATA_DEPENDENCIES_ATTR)
-        if isinstance(arg_name := getattr(dependency, 'arg_name', None), str)
-    }
-    guidance: list[str] = []
-    dependencies = _metadata_values(target, TOOL_DEPENDENCIES_ATTR)
-    model_fields = (
-        target.model_fields if isinstance(target, type) and issubclass(target, BaseModel) else {}
-    )
-    for dependency in dependencies:
-        if not isinstance(dependency, ToolDependency) or dependency.arg_name in private_args:
-            continue
-        guidance.append(
-            f'- {dependency.arg_name}: supplied by {dependency.tool_name}; '
-            'this tool can execute only after that producer succeeds. '
-            'The runtime supplies its result; do not copy it into arguments.'
-        )
-        field_info = model_fields.get(dependency.arg_name)
-        description = None if field_info is None else field_info.description
-        if isinstance(description, str) and description.strip():
-            guidance.append(f'- {dependency.arg_name}: {description.strip()}')
-    if not guidance:
-        return
-    marker = 'Public dependency guidance:'
-    existing = schema.get('description')
-    # The schema is freshly generated on each compilation. Authored prose that
-    # happens to contain our heading must not suppress dependency descriptions.
-    prefix = existing.strip() if isinstance(existing, str) else ''
-    parts = (prefix, marker, '\n'.join(dict.fromkeys(guidance)))
-    schema['description'] = '\n\n'.join(part for part in parts if part)
-
-
-def _metadata_values(target: object, attr_name: str) -> list[object]:
-    """Return owned decorator metadata without treating arbitrary values as records."""
-    raw = getattr(target, attr_name, ())
-    return list(cast('list[object]', raw)) if isinstance(raw, list) else []
-
-
 def _copy_builder_metadata(builder: ScopeToolifyBuilder, target: ToolTarget) -> None:
     """Move outer compatibility decorators from a toolify builder onto its target."""
     for attr_name in (
@@ -1082,7 +759,7 @@ __all__ = [
     'ToolRegistrationOptions',
     'ToolingScopeMixin',
     'compile_tool_metadata',
-    'compile_tool_metadata_graph',
+    'preserve_public_tool_dependency_guidance',
     'tool_metadata_for_callable',
     'toolify_builder_for_scope',
     'toolify_options',
