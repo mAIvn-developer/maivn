@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-10-28
+
+### Added
+- `Client.preview_redaction(...)` shows exactly what a run would send to the model provider before you run it, including covered picture regions; it waits up to 300 seconds by default.
+- `approved_messages()` and `RunOptions.redaction_preview_id` run on an approved redaction, so the provider receives the copy you reviewed.
+- A client-level default customer id for trusted backends.
+
+### Changed
+- Every httpx client reuses the shared TLS context.
+- Requires maivn-contracts 0.1.2 for the redaction preview models.
+
 ## [2.3.0] - 2026-10-23
 
 ### Added
