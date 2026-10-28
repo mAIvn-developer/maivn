@@ -79,6 +79,7 @@ class _SdkEnvSettings(BaseSettings):
     api_key_file: str | None = Field(default=None, validation_alias='MAIVN_API_KEY_FILE')
     project_id: str | None = Field(default=None, validation_alias=PROJECT_ID_ENV_VAR)
     base_url: AnyUrl | None = Field(default=None, validation_alias='MAIVN_BASE_URL')
+    default_user_id: str | None = Field(default=None, validation_alias='MAIVN_DEFAULT_USER_ID')
 
 
 class ClientConfig(BaseModel):
@@ -91,6 +92,14 @@ class ClientConfig(BaseModel):
         default=None,
         min_length=1,
         description='Project a serving process announces into; never inferred from the key.',
+    )
+    default_user_id: StrictStr | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            'Customer id used by runs that do not set RunOptions.user_id. For trusted '
+            'backends that act for one customer; an explicit per-call user_id wins.'
+        ),
     )
     # AnyUrl(str) parses the default at class-definition time so the declared
     # attribute type (AnyUrl) matches the runtime value; a bare str literal
@@ -138,6 +147,7 @@ class ClientConfig(BaseModel):
         tool_execution_timeout: float | None = None,
         dependency_wait_timeout: float | None = None,
         total_execution_timeout: float | None = None,
+        default_user_id: str | None = None,
     ) -> ClientConfig:
         """Resolve explicit values, process environment, selected dotenv, then key file.
 
@@ -168,6 +178,7 @@ class ClientConfig(BaseModel):
             'api_key': resolved_api_key,
             'project_id': _first_nonblank(project_id, env.project_id),
             'base_url': resolved_base_url,
+            'default_user_id': _first_nonblank(default_user_id, env.default_user_id),
         }
         payload.update(
             {

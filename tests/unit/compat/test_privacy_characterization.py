@@ -362,6 +362,7 @@ def test_redacted_message_contract_carries_redaction_config() -> None:
                 'maria@example.com',
             ],
             'private_data_schema': None,
+            'cover_regions': None,
         },
         'metadata': {'channel': 'email'},
         'ts': '2026-01-02T03:04:05Z',
@@ -381,6 +382,7 @@ def test_redacted_message_contract_without_redaction_inputs() -> None:
             'pii_whitelist': None,
             'known_pii_values': None,
             'private_data_schema': None,
+            'cover_regions': None,
         },
         'metadata': None,
         'ts': 't',
@@ -398,20 +400,18 @@ def test_empty_known_pii_values_mean_no_known_values() -> None:
 
 
 def test_redaction_preview_request_and_response_defaults() -> None:
-    """Preview bodies default to empty lists; the response keeps server extras."""
-    request = RedactionPreviewRequest()
-    assert request.model_dump() == {'messages': [], 'pii_whitelist': None}
+    """Preview models use the strict v2 wire contract."""
+    request = RedactionPreviewRequest(prompt='hello')
+    assert request.prompt == 'hello'
+    assert request.attachments == []
     with pytest.raises(ValidationError) as excinfo:
-        _ = RedactionPreviewRequest.model_validate({'messages': [], 'dry_run': True})
+        _ = RedactionPreviewRequest.model_validate({'prompt': 'hello', 'dry_run': True})
     assert _only_error(excinfo) == (('dry_run',), 'Extra inputs are not permitted')
-    response = RedactionPreviewResponse.model_validate(
-        {'redactions': [{'span': [0, 5], 'entity_type': 'person'}], 'engine': 'v2'},
-    )
-    assert response.model_dump() == {
-        'messages': [],
-        'redactions': [{'span': [0, 5], 'entity_type': 'person'}],
-        'engine': 'v2',
-    }
+    response = RedactionPreviewResponse(inputs=[])
+    assert response.inputs == []
+    assert response.items == []
+    with pytest.raises(ValidationError):
+        _ = RedactionPreviewResponse.model_validate({'inputs': [], 'engine': 'v2'})
 
 
 def test_explicit_none_kinds_count_as_absent() -> None:

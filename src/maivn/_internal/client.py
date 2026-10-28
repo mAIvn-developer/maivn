@@ -47,6 +47,15 @@ from maivn._internal.client_stream import (
     telemetry_client_events as _telemetry_client_events,
 )
 from maivn._internal.compat.invocation import response_from_stream_events
+from maivn._internal.compat.privacy import (
+    CoverRegion,
+    PIIWhitelist,
+    PrivateData,
+    RedactedMessage,
+    RedactionPreviewRequest,
+    RedactionPreviewResponse,
+    validate_approved_messages,
+)
 from maivn._internal.config import ClientConfig
 from maivn._internal.error_diagnostics import attach_error_diagnostics, diagnostic_facts
 from maivn._internal.errors import MaivnHTTPError
@@ -100,7 +109,12 @@ from maivn._internal.wire import (
     skill_selection_payload,
     swarm_roster_payload,
 )
-from maivn.messages import SdkMessagesInput, to_contract_messages
+from maivn.messages import (
+    AttachmentInput,
+    SdkMessagesInput,
+    coerce_attachment_input,
+    to_contract_messages,
+)
 
 if TYPE_CHECKING:
     from collections.abc import (
@@ -123,6 +137,74 @@ _STREAM_CANCEL_TIMEOUT_SECONDS = 2.0
 class Client:
     """HTTP client for the v2 mAIvn API surface."""
 
+    def preview_redaction(  # noqa: PLR0913 - mirrors preview contract.
+        self,
+        prompt: str | RedactedMessage | list[RedactedMessage],
+        *,
+        attachments: list[AttachmentInput] | None = None,
+        resources: list[str] | None = None,
+        pii_whitelist: PIIWhitelist | None = None,
+        known_pii_values: Sequence[str | PrivateData] | None = None,
+        cover_regions: list[CoverRegion] | None = None,
+        timeout_seconds: float = 300.0,
+    ) -> RedactionPreviewResponse:
+        """Preview the shielded copy without starting a run."""
+        return run_blocking(
+            lambda: self.apreview_redaction(
+                prompt,
+                attachments=attachments,
+                resources=resources,
+                pii_whitelist=pii_whitelist,
+                known_pii_values=known_pii_values,
+                cover_regions=cover_regions,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+
+    async def apreview_redaction(  # noqa: PLR0913 - mirrors preview contract.
+        self,
+        prompt: str | RedactedMessage | list[RedactedMessage],
+        *,
+        attachments: list[AttachmentInput] | None = None,
+        resources: list[str] | None = None,
+        pii_whitelist: PIIWhitelist | None = None,
+        known_pii_values: Sequence[str | PrivateData] | None = None,
+        cover_regions: list[CoverRegion] | None = None,
+        timeout_seconds: float = 300.0,
+    ) -> RedactionPreviewResponse:
+        """Preview the shielded copy asynchronously."""
+        messages = to_contract_messages(prompt)
+        wire_prompt = (
+            prompt
+            if isinstance(prompt, str)
+            else (messages if isinstance(prompt, list) else messages[0])
+        )
+        extra_attachments = [coerce_attachment_input(a) for a in attachments or []]
+        request = RedactionPreviewRequest.model_validate(
+            {
+                'prompt': wire_prompt,
+                'attachments': extra_attachments,
+                'resources': resources or [],
+                'cover_regions': cover_regions,
+                'pii_whitelist': pii_whitelist.model_dump(mode='json') if pii_whitelist else None,
+                'known_pii_values': [
+                    {**value.model_dump(mode='json', exclude_none=True), 'value': str(value.value)}
+                    if isinstance(value, PrivateData)
+                    else value
+                    for value in known_pii_values
+                ]
+                if known_pii_values
+                else None,
+            }
+        )
+        return RedactionPreviewResponse.model_validate(
+            await self._http(timeout_seconds=timeout_seconds).post(
+                '/v1/redaction-previews',
+                request.model_dump(mode='json', exclude_none=True),
+            ),
+            context={'messages': messages, 'attachments': extra_attachments},
+        )
+
     def __init__(  # noqa: PLR0913 - v1-compatible constructor accepts public options.
         self,
         api_key: str | None = None,
@@ -141,6 +223,7 @@ class Client:
         tool_execution_timeout: float | None = None,
         dependency_wait_timeout: float | None = None,
         total_execution_timeout: float | None = None,
+        default_user_id: str | None = None,
         private_data_store: PrivateDataStore | AutoVault | None = AUTO_VAULT,
         local_vault: LocalVaultConfig | None = None,
         restore_private_values: bool = True,
@@ -162,6 +245,11 @@ class Client:
         Set ``restore_private_values=False`` to receive placeholder-only final
         text and structured results. The API still resolves SDK tool-call
         arguments needed for local execution. The default keeps restored output.
+
+        ``default_user_id`` (env ``MAIVN_DEFAULT_USER_ID``) is the customer id for runs
+        that do not set ``RunOptions.user_id``. Use it only on a trusted backend that
+        acts for one customer; an explicit per-call ``user_id`` always wins. It does
+        not apply to ``.for_user()`` management facades, which stay explicit.
         """
         if timeout is not None and timeout_seconds is not None and timeout != timeout_seconds:
             message = 'timeout and timeout_seconds must match when both are provided'
@@ -181,6 +269,7 @@ class Client:
                 tool_execution_timeout=tool_execution_timeout,
                 dependency_wait_timeout=dependency_wait_timeout,
                 total_execution_timeout=total_execution_timeout,
+                default_user_id=default_user_id,
             )
         else:
             updates = {
@@ -191,6 +280,7 @@ class Client:
                     ('tool_execution_timeout', tool_execution_timeout),
                     ('dependency_wait_timeout', dependency_wait_timeout),
                     ('total_execution_timeout', total_execution_timeout),
+                    ('default_user_id', default_user_id),
                 )
                 if value is not None
             }
@@ -302,7 +392,7 @@ class Client:
                 logger.debug('Stream close cancellation raced with invocation completion')
             else:
                 logger.warning('Stream close cancellation failed: http_status=%d', exc.status_code)
-        except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001 - cleanup preserves failure.
+        except (httpx.HTTPError, asyncio.TimeoutError, asyncio.CancelledError, ValueError) as exc:
             logger.warning('Stream close cancellation failed: failure_type=%s', type(exc).__name__)
 
     def thread(
@@ -478,10 +568,15 @@ class Client:
         An interrupt awaiting input remains nonterminal and is cancelled on opt-in close.
         """
         resolved_options = self._options(options)
-        private_data = await self._thread_private_data(
-            resolved_options.thread_id,
-            private_data,
+        messages = to_contract_messages(messages)
+        validate_approved_messages(
+            messages, preview_id=resolved_options.redaction_preview_id, private_data=private_data
         )
+        if resolved_options.redaction_preview_id is None:
+            private_data = await self._thread_private_data(
+                resolved_options.thread_id,
+                private_data,
+            )
         messages, inspection_context = capture_invoke_inspection(
             messages,
             private_data=private_data,
@@ -1065,6 +1160,10 @@ class Client:
         force_final_tool: bool = False,
         swarm_members: Sequence[object] = (),
     ) -> InvokeAccepted:
+        messages = to_contract_messages(messages)
+        validate_approved_messages(
+            messages, preview_id=options.redaction_preview_id, private_data=private_data
+        )
         invocation_payload = invocation_options(
             tools,
             private_data=private_data,
@@ -1178,6 +1277,8 @@ class Client:
         }
         if updates:
             resolved = resolved.model_copy(update=updates)
+        if self.config.default_user_id is not None and 'user_id' not in resolved.model_fields_set:
+            resolved = resolved.model_copy(update={'user_id': self.config.default_user_id})
         if resolved.thread_id is not None:
             return resolved
         return resolved.model_copy(update={'thread_id': f'thr-{uuid4().hex}'})

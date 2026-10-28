@@ -25,6 +25,7 @@ from maivn.__version__ import __version__
 from maivn.dev_tunnel import CLOUDFLARED_VERSION
 
 if TYPE_CHECKING:
+    import ssl
     from collections.abc import Callable, Iterator
 
 EXIT_ERROR = 1
@@ -562,11 +563,12 @@ def _serve_download(monkeypatch: pytest.MonkeyPatch, payload: bytes) -> list[str
 
     original = httpx.Client
 
-    def client(*, timeout: float, follow_redirects: bool) -> httpx.Client:
+    def client(*, timeout: float, follow_redirects: bool, verify: ssl.SSLContext) -> httpx.Client:
         return original(
             transport=httpx.MockTransport(handler),
             timeout=timeout,
             follow_redirects=follow_redirects,
+            verify=verify,
         )
 
     monkeypatch.setattr(httpx, 'Client', client)

@@ -6748,6 +6748,58 @@
   },
   {
    "body": {
+    "attachments": [],
+    "cover_regions": [
+     {
+      "attachment_id": "string",
+      "bbox": [
+       "number"
+      ],
+      "label": "string",
+      "page": "integer",
+      "pii_type": "string"
+     }
+    ],
+    "known_pii_values": [
+     {
+      "label": "string",
+      "name": "string",
+      "value": "string"
+     }
+    ],
+    "pii_whitelist": {
+     "entries": [
+      {
+       "justification": "string",
+       "value": "string"
+      }
+     ],
+     "phi_mode": "boolean"
+    },
+    "prompt": "string",
+    "resources": []
+   },
+   "driver": "run_preview",
+   "enumerated": [
+    "$"
+   ],
+   "method": "POST",
+   "path": "/v1/redaction-previews",
+   "query": [],
+   "reads": [
+    "approved_request",
+    "declared_matched",
+    "declared_unmatched",
+    "inputs",
+    "items",
+    "preview_id",
+    "stats"
+   ],
+   "response": "json",
+   "status": 200
+  },
+  {
+   "body": {
     "binding_type": "string",
     "target_id": "string"
    },

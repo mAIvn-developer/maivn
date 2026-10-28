@@ -10,18 +10,22 @@ their own risk under the mAIvn Platform Disclaimer.
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 import re
-from collections.abc import Generator, Sequence
-from contextlib import contextmanager
+from collections.abc import Generator, Mapping, Sequence
+from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from datetime import datetime, timezone
-from typing import ClassVar, cast
+from typing import Any, ClassVar, cast
 from uuid import uuid4
 
 from maivn_contracts.artifacts import ArtifactRef
 from maivn_contracts.messages import (
     Attachment,
     ContentBlock,
+    CoverRegion,
     KnownPrivateData,
     Message,
     MetadataValue,
@@ -30,10 +34,17 @@ from maivn_contracts.messages import (
 from maivn_contracts.messages import (
     PIIWhitelist as ContractPIIWhitelist,
 )
+from maivn_contracts.messages.redaction_preview import (
+    RedactionPreviewRequest,
+)
+from maivn_contracts.messages.redaction_preview import (
+    RedactionPreviewResponse as ContractPreviewResponse,
+)
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     SerializerFunctionWrapHandler,
     field_serializer,
     field_validator,
@@ -290,6 +301,7 @@ class RedactedMessage(BaseModel):
     content: str | list[ContentBlock] = Field(repr=False)
     known_pii_values: list[str | PrivateData] | None = Field(default=None, repr=False)
     pii_whitelist: PIIWhitelist | None = None
+    cover_regions: list[CoverRegion] | None = Field(default=None, repr=False)
     attachments: list[Attachment] | None = None
     artifact_refs: tuple[ArtifactRef, ...] | None = None
     metadata: dict[str, MetadataValue] | None = None
@@ -311,7 +323,7 @@ class RedactedMessage(BaseModel):
         # Local import: maivn.messages imports RedactedMessage from this
         # module, so the shared coercion helper cannot be imported at module
         # scope without a cycle.
-        from maivn.messages import coerce_attachment_input  # noqa: PLC0415
+        from maivn.messages import coerce_attachment_input  # noqa: PLC0415, RUF100
 
         if not isinstance(value, Sequence) or isinstance(value, str | bytes):
             message = 'attachments must be a list of Attachment objects or dictionaries'
@@ -347,6 +359,7 @@ class RedactedMessage(BaseModel):
             attachments=self.attachments,
             artifact_refs=self.artifact_refs,
             redaction=RedactionConfig(
+                cover_regions=self.cover_regions,
                 known_pii_values=known_pii_values,
                 pii_whitelist=pii_whitelist,
             ),
@@ -355,26 +368,134 @@ class RedactedMessage(BaseModel):
         )
 
 
-class RedactionPreviewRequest(BaseModel):
-    """Request body for previewing redaction without executing a run."""
+class _ApprovedMessage(Message):
+    """A shielded wire message with a local, non-serializable approval binding."""
 
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra='forbid', frozen=True)
+    _preview_id: str = PrivateAttr(default='')
+    _approved_digest: str = PrivateAttr(default='')
 
-    messages: list[RedactedMessage] = Field(default_factory=list)
-    pii_whitelist: PIIWhitelist | None = None
+    def with_approval(self, *, preview_id: str, digest: str) -> _ApprovedMessage:
+        """Attach a private approval binding to a detached wire message."""
+        self._preview_id = preview_id
+        self._approved_digest = digest
+        return self
+
+    def matches(self, *, preview_id: str, digest: str) -> bool:
+        """Check the ticket and the entire ordered message batch."""
+        return self._preview_id == preview_id and self._approved_digest == digest
 
 
-class RedactionPreviewResponse(BaseModel):
-    """Response body for a redaction preview."""
+def _approved_digest(messages: Sequence[Message]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            [m.model_dump(mode='json', exclude_none=True) for m in messages],
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(',', ':'),
+            allow_nan=False,
+        ).encode('utf-8')
+    ).hexdigest()
 
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra='allow', frozen=True)
 
-    messages: list[RedactedMessage] = Field(default_factory=list)
-    redactions: list[dict[str, object]] = Field(default_factory=list)
+def validate_approved_messages(
+    messages: Sequence[Message],
+    *,
+    preview_id: str | None,
+    private_data: Mapping[object, object] | None,
+) -> None:
+    """Refuse changed copies or additions before any transport or privacy pass."""
+    if preview_id is None and not any(isinstance(m, _ApprovedMessage) for m in messages):
+        return
+    digest = _approved_digest(messages)
+    if (
+        preview_id is None
+        or not messages
+        or private_data
+        or any(
+            not isinstance(m, _ApprovedMessage)
+            or not m.matches(preview_id=preview_id, digest=digest)
+            for m in messages
+        )
+    ):
+        message = 'redaction_preview_mismatch'
+        raise ValueError(message)
+
+
+class RedactionPreviewResponse(ContractPreviewResponse):
+    """Value-free preview with local access to spans in caller-owned text."""
+
+    _original_texts: dict[int, str] = PrivateAttr(default_factory=dict)
+    _approved_digest: str | None = PrivateAttr(default=None)
+    _approved_preview_id: str | None = PrivateAttr(default=None)
+
+    def model_post_init(self, context: Any, /) -> None:
+        """Bind caller text from validation context without serializing it."""
+        if self.preview_id is not None and self.approved_request is not None:
+            self._approved_digest = _approved_digest(self.approved_request)
+            self._approved_preview_id = self.preview_id
+        if not isinstance(context, dict) or 'messages' not in context:
+            return
+        messages = cast('list[Message]', context['messages'])
+        extra = cast('list[Attachment]', context['attachments'])
+        for index, entry in enumerate(self.inputs):
+            if entry.message_index is None or entry.message_index >= len(messages):
+                continue
+            message = messages[entry.message_index]
+            if entry.kind == 'prompt':
+                self._original_texts[index] = (
+                    message.content
+                    if isinstance(message.content, str)
+                    else '\n'.join(block.text for block in message.content if block.type == 'text')
+                )
+            elif entry.kind == 'attachment':
+                candidates = list(message.attachments or [])
+                if entry.message_index == 0:
+                    candidates.extend(extra)
+                attachment = next(
+                    (a for a in candidates if a.attachment_id == entry.attachment_id), None
+                )
+                if attachment and attachment.inline_base64 and entry.redacted_text is not None:
+                    with suppress(ValueError, UnicodeDecodeError):
+                        self._original_texts[index] = base64.b64decode(
+                            attachment.inline_base64, validate=True
+                        ).decode('utf-8')
+
+    def approved_messages(self) -> list[Message]:
+        """Return independent SDK messages bound to this preview's exact approved copy."""
+        if self.preview_id is None or self.approved_request is None:
+            message = 'redaction_preview_unavailable'
+            raise ValueError(message)
+        digest = _approved_digest(self.approved_request)
+        if self.preview_id != self._approved_preview_id or digest != self._approved_digest:
+            message = 'redaction_preview_mismatch'
+            raise ValueError(message)
+        return [
+            _ApprovedMessage.model_validate(m.model_dump(mode='json')).with_approval(
+                preview_id=self.preview_id, digest=digest
+            )
+            for m in self.approved_request
+        ]
+
+    def local_values(self) -> dict[str, list[str]]:
+        """Extract span values locally; original text is never serialized."""
+        values: dict[str, list[str]] = {}
+        for item in self.items:
+            original = self._original_texts.get(item.input_index)
+            if original is not None:
+                for span in item.spans:
+                    if 0 <= span.start <= span.end <= len(original):
+                        values.setdefault(item.key, []).append(original[span.start : span.end])
+        return values
+
+    def covered_bytes(self, input_index: int) -> bytes | None:
+        """Decode a covered image or PDF rendering for an input."""
+        image = self.inputs[input_index].covered_image
+        return base64.b64decode(image.inline_base64, validate=True) if image else None
 
 
 __all__ = [
     'HIPAA_SAFE_HARBOR_CATEGORIES',
+    'CoverRegion',
     'PIIWhitelist',
     'PIIWhitelistEntry',
     'PrivateData',

@@ -14,6 +14,7 @@ from tempfile import TemporaryDirectory
 import httpx
 
 from maivn._internal.local_file_security import StateLock, is_link, private_directory
+from maivn._internal.tls import tls_context
 
 CLOUDFLARED_VERSION = '2026.8.3'
 # Official GitHub release asset SHA256 digests, pinned together with the version.
@@ -126,7 +127,7 @@ def _download(asset: str, expected: str, destination: Path) -> None:
     size = 0
     deadline = time.monotonic() + _MAX_SECONDS
     with (
-        httpx.Client(timeout=20, follow_redirects=True) as client,
+        httpx.Client(timeout=20, follow_redirects=True, verify=tls_context()) as client,
         client.stream('GET', url) as response,
     ):
         response.raise_for_status()

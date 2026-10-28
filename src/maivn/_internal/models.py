@@ -62,6 +62,7 @@ class RunOptions(BaseModel):
 
     thread_id: StrictStr | None = Field(default=None, min_length=1)
     session_id: StrictStr | None = Field(default=None, min_length=1)
+    redaction_preview_id: StrictStr | None = Field(default=None, min_length=1, repr=False)
     invocation_id: StrictStr | None = Field(default=None, min_length=1)
     user_id: StrictStr = Field(default='sdk-user', min_length=1)
     project_id: StrictStr | None = Field(default=None, min_length=1)

@@ -869,3 +869,43 @@ def test_tool_spec_wire_preserves_conversation_dependency_scope() -> None:
         {'tool_name': 'confirm', 'arg_name': 'confirmation'},
         {'tool_name': 'collect_name', 'arg_name': 'name', 'result_scope': 'conversation'},
     ]
+
+
+def _user_id_sent(client: Client, options: RunOptions, calls: list[JsonObject]) -> object:
+    client.invoke('hi', options=options)
+    return calls[-1]['run_config']['user_id']
+
+
+def test_client_default_user_id_applies_unless_the_call_sets_one() -> None:
+    """A client default fills an unset user_id; an explicit one, even 'sdk-user', wins."""
+    calls: list[JsonObject] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == '/v1/invoke':
+            body = _json_body(request)
+            assert body is not None
+            calls.append(body)
+            return httpx.Response(
+                HTTPStatus.ACCEPTED, json={'session_id': 'ses-uid', 'stream_position': 0}
+            )
+        return _invoke_sse_response('ses-uid', 'done')
+
+    client = Client(
+        config=ClientConfig(api_key='test-key', base_url=AnyUrl('http://testserver')),
+        default_user_id='cust-default',
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert _user_id_sent(client, RunOptions(thread_id='thr-a'), calls) == 'cust-default'
+    assert _user_id_sent(client, RunOptions(thread_id='thr-b', user_id='cust-7'), calls) == 'cust-7'
+    assert _user_id_sent(client, RunOptions(thread_id='thr-c', user_id='sdk-user'), calls) == (
+        'sdk-user'
+    )
+
+
+def test_client_without_default_user_id_keeps_the_sdk_user_default() -> None:
+    """No client default leaves the SDK's own user_id default untouched."""
+    client = Client(config=ClientConfig(api_key='test-key', base_url=AnyUrl('http://testserver')))
+
+    options = client._options(RunOptions())  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+    assert options.user_id == 'sdk-user'

@@ -130,3 +130,19 @@ def test_local_tools_default_to_the_one_origin(monkeypatch: pytest.MonkeyPatch) 
     assert local_tool_base_url() == LOCAL_BASE_URL == 'http://127.0.0.1:8000'
     monkeypatch.setenv('MAIVN_BASE_URL', 'https://api.example/')
     assert local_tool_base_url() == 'https://api.example'
+
+
+def test_default_user_id_comes_from_argument_then_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An argument beats MAIVN_DEFAULT_USER_ID; a blank value counts as unset."""
+    monkeypatch.setenv('MAIVN_API_KEY', 'env-key')
+    monkeypatch.delenv('MAIVN_DEFAULT_USER_ID', raising=False)
+    assert Client().config.default_user_id is None
+
+    monkeypatch.setenv('MAIVN_DEFAULT_USER_ID', 'cust-env')
+    assert Client().config.default_user_id == 'cust-env'
+    assert Client(default_user_id='cust-arg').config.default_user_id == 'cust-arg'
+
+    monkeypatch.setenv('MAIVN_DEFAULT_USER_ID', '  ')
+    assert Client().config.default_user_id is None

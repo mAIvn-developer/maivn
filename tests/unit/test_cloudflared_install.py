@@ -6,12 +6,16 @@ import hashlib
 import io
 import tarfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
 
 from maivn import cli
 from maivn._internal import cloudflared_install as installer
+
+if TYPE_CHECKING:
+    import ssl
 
 
 @pytest.fixture
@@ -30,8 +34,10 @@ def download(monkeypatch: pytest.MonkeyPatch, payload: bytes, *, valid: bool = T
     transport = httpx.MockTransport(lambda _: httpx.Response(200, content=payload))
     original = httpx.Client
 
-    def client(*, timeout: float, follow_redirects: bool) -> httpx.Client:
-        return original(transport=transport, timeout=timeout, follow_redirects=follow_redirects)
+    def client(*, timeout: float, follow_redirects: bool, verify: ssl.SSLContext) -> httpx.Client:
+        return original(
+            transport=transport, timeout=timeout, follow_redirects=follow_redirects, verify=verify
+        )
 
     monkeypatch.setattr(installer.httpx, 'Client', client)
 

@@ -105,6 +105,7 @@ def run_config_payload(options: RunOptions) -> JsonObject:
         'thread_id': options.thread_id or _new_id('thr'),
     }
     _set_optional(payload, 'session_id', options.session_id)
+    _set_optional(payload, 'redaction_preview_id', options.redaction_preview_id)
     _set_optional(payload, 'invocation_id', options.invocation_id)
     _set_optional(payload, 'project_id', options.project_id)
     _set_optional(payload, 'agent_id', options.agent_id)

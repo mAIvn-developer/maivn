@@ -555,6 +555,12 @@ session. The platform authenticates the project key; it does **not** independent
 authenticate that end user. Do not expose a project key and trust a browser-supplied
 ID as customer authorization. Key rotation does not change customer ownership.
 
+A trusted backend that acts for a single customer can set that customer once with
+`Client(default_user_id=...)` or `MAIVN_DEFAULT_USER_ID`. It fills `user_id` only for
+runs whose `RunOptions` did not set one; an explicit per-call `user_id` always wins.
+It does not change the `.for_user(user_id)` facades below, which always need an
+explicit ID.
+
 Memory, skill and resource clients default to project developer management. Narrow
 all operations with independent facades such as
 `client.memory.for_user(user_id).insights.list()`,
@@ -589,3 +595,6 @@ uploads and promoted insights are also hidden from runtime recall until recreate
 with an explicit classification; the rollout change includes all these record types.
 Thread list summaries remain available for legacy threads and expose the read-only
 `requires_new_session` flag; history and continuation still refuse unsafe legacy state.
+
+Use `Client.preview_redaction()` (or `apreview_redaction()`) to review the shielded
+prompt and attachments before a run. See the [private-data guide](../../docs/guides/private-data.md#preview-redaction).

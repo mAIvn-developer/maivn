@@ -15,6 +15,8 @@ from typing import ClassVar, Literal, Protocol, TypeAlias, cast
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
+from maivn._internal.tls import tls_context
+
 JsonObject: TypeAlias = dict[str, object]
 
 _ESSENTIAL_ENV_KEYS = frozenset(
@@ -264,7 +266,9 @@ class _StdioMCPRuntime(_MCPRuntimeBase):
 class _HttpMCPRuntime(_MCPRuntimeBase):
     def __init__(self, server: MCPServer) -> None:
         super().__init__(server)
-        self._client = httpx.Client(timeout=server.request_timeout_seconds or 30.0)
+        self._client = httpx.Client(
+            timeout=server.request_timeout_seconds or 30.0, verify=tls_context()
+        )
         self._session_id: str | None = None
 
     def _request(self, method: str, params: JsonObject) -> JsonObject:

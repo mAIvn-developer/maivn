@@ -37,6 +37,7 @@ from maivn.dev_tunnel import (
 )
 
 if TYPE_CHECKING:
+    import ssl
     from collections.abc import Callable, Generator, Iterator
 
 RECEIVER = '/v1/connections/conn-proof/events'
@@ -439,11 +440,12 @@ def _download(
     monkeypatch.setitem(cloudflared_install.ASSETS, key, (asset, digest))
     original = httpx.Client
 
-    def client(*, timeout: float, follow_redirects: bool) -> httpx.Client:
+    def client(*, timeout: float, follow_redirects: bool, verify: ssl.SSLContext) -> httpx.Client:
         return original(
             transport=httpx.MockTransport(handler),
             timeout=timeout,
             follow_redirects=follow_redirects,
+            verify=verify,
         )
 
     monkeypatch.setattr(httpx, 'Client', client)

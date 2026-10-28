@@ -135,6 +135,7 @@ from maivn._internal.compat.permissions import (
 )
 from maivn._internal.compat.privacy import (
     HIPAA_SAFE_HARBOR_CATEGORIES,
+    CoverRegion,
     PIIWhitelist,
     PIIWhitelistEntry,
     PrivateData,
@@ -400,6 +401,7 @@ __all__ = [  # noqa: RUF022 - preserve the established public export grouping.
     'ProviderCapability',
     'ProviderMetadata',
     'HIPAA_SAFE_HARBOR_CATEGORIES',
+    'CoverRegion',
     'PIIWhitelist',
     'PIIWhitelistEntry',
     'PrivateData',
