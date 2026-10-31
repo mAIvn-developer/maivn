@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, cast
 from urllib.parse import quote
 
@@ -319,6 +320,8 @@ def _raise_for_status(response: httpx.Response) -> None:
     code = _string_field(body, 'code')
     context = body.get('context') if body is not None else None
     fields = _fields(body)
+    if response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY and _rejects_await_for(fields):
+        reason = _AWAIT_FOR_UNSUPPORTED
     retry_after = body.get('retry_after') if body is not None else None
     error_type = PlanLimitExceededError if code == PLAN_LIMIT_ERROR_CODE else MaivnHTTPError
     # Typed here, at the one place every non-2xx response passes through, so no
@@ -331,6 +334,23 @@ def _raise_for_status(response: httpx.Response) -> None:
         detail=cast('JsonObject', context) if isinstance(context, dict) else None,
         fields=fields,
         retry_after=retry_after if isinstance(retry_after, int) else None,
+    )
+
+
+# An older server forbids unknown request fields, so an SDK that sends await-for
+# declarations to it gets a bare field error. Name the cause instead.
+_AWAIT_FOR_UNSUPPORTED = (
+    'This mAIvn server is too old for depends_on_await_for: it does not accept '
+    "'await_for_controls'. Upgrade to a platform release with await-for support, "
+    'or remove depends_on_await_for from your tools.'
+)
+
+
+def _rejects_await_for(fields: list[dict[str, str]]) -> bool:
+    return any(
+        field['field'].split('.', 1)[0] == 'await_for_controls'
+        and field['message'].startswith('Extra inputs are not permitted')
+        for field in fields
     )
 
 

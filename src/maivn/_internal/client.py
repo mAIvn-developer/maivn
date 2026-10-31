@@ -643,6 +643,7 @@ class Client:
                         client=self,
                         tools=all_tools,
                         options=resolved_options,
+                        tool_runtime=tool_runtime,
                     ),
                 ),
                 private_data=resolution_data if self._restore_private_values else None,
@@ -1021,6 +1022,7 @@ class Client:
                     client=self,
                     tools=all_tools,
                     options=resolved_options,
+                    tool_runtime=tool_runtime,
                 ),
             ),
             private_data=resolution_data if self._restore_private_values else None,
@@ -1168,6 +1170,7 @@ class Client:
             tools,
             private_data=private_data,
             force_final_tool=force_final_tool,
+            swarm_members=swarm_members,
         )
         payload: dict[str, object] = {
             'messages': message_payloads(messages),
@@ -1329,6 +1332,7 @@ def _thread_invocation_payload(
         tools,
         private_data=private_data,
         force_final_tool=force_final_tool,
+        swarm_members=swarm_members,
     )
     payload = {
         **skill_selection_payload(options),

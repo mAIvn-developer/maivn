@@ -90,3 +90,34 @@ def test_a_body_that_is_not_the_envelope_falls_back_to_the_status_phrase() -> No
     error = asyncio.run(scenario())
     assert error.reason == 'Bad Gateway'
     assert error.code is None
+
+
+def test_a_server_too_old_for_await_for_says_so() -> None:
+    """A 422 rejecting the await-for field names the cause instead of a bare field error."""
+    body = {
+        'detail': 'Request validation failed.',
+        'code': 'validation_failed',
+        'fields': [{'field': 'await_for_controls', 'message': 'Extra inputs are not permitted'}],
+    }
+
+    async def scenario() -> MaivnHTTPError:
+        client = HttpJsonClient(
+            base_url='http://api.test',
+            api_key='key',
+            timeout_seconds=5.0,
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(_UNPROCESSABLE, json=body),
+            ),
+        )
+        try:
+            await client.post('/v1/invoke', {'await_for_controls': []})
+        except MaivnHTTPError as error:
+            return error
+        raise AssertionError
+
+    error = asyncio.run(scenario())
+
+    assert error.status_code == _UNPROCESSABLE
+    assert error.code == 'validation_failed'
+    assert 'too old for depends_on_await_for' in error.reason
+    assert error.fields == body['fields']

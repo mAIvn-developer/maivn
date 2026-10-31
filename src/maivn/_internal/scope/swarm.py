@@ -874,7 +874,7 @@ class Swarm:
                 name=name,
                 description=description,
                 steps=steps,
-                scope=swarm_scope(self.name),
+                scope=swarm_scope(self._scope_id),
             ),
         )
         cast('list[Skill]', self.skills).append(stored)
@@ -886,7 +886,7 @@ class Swarm:
         """Register a markdown or hardcoded first-class skill-set tree."""
         parsed = skill_set_from_input(skill_set)
         registered = self._client.skills.register_skill_set_tree(
-            skill_set_with_scope(parsed, swarm_scope(self.name)),
+            skill_set_with_scope(parsed, swarm_scope(self._scope_id)),
         )
         self.skill_sets.append(registered)
         return registered
@@ -901,10 +901,15 @@ class Swarm:
         self._auto_skills = build_auto_skills(query=query, limit=limit)
         return self
 
+    @property
+    def _scope_id(self) -> str:
+        """The identity runs, bound resources and skills share."""
+        return self.agent_id if self.agent_id is not None else self.name
+
     def _execution_defaults(self) -> ScopeDefaults:
         """Capture this scope's current defaults for every execution entry point."""
         return ScopeDefaults(
-            name=self.name,
+            scope_id=self._scope_id,
             binding_type='swarm',
             model=self.model,
             attached_skill_ids=self.attached_skill_ids,
@@ -931,7 +936,7 @@ class Swarm:
         run_blocking(
             lambda: aregister_scope_resources_once(
                 self,
-                scope_name=self.name,
+                scope_name=self._scope_id,
                 scope_binding_type='swarm',
             ),
         )
@@ -942,7 +947,7 @@ class Swarm:
             await agent._aensure_resources_registered()  # pyright: ignore[reportPrivateUsage] # noqa: SLF001 - owned swarm membership.
         await aregister_scope_resources_once(
             self,
-            scope_name=self.name,
+            scope_name=self._scope_id,
             scope_binding_type='swarm',
         )
 

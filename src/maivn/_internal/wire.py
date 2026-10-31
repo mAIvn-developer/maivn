@@ -5,8 +5,8 @@ from __future__ import annotations
 import copy
 import warnings
 from collections.abc import Callable, Mapping, Sequence
-from inspect import Parameter, signature
-from typing import TYPE_CHECKING, cast, get_type_hints
+from inspect import Parameter, signature, unwrap
+from typing import TYPE_CHECKING, Literal, NoReturn, TypeAlias, cast, get_type_hints
 from uuid import uuid4
 
 from maivn_contracts.runtime.customer_scope import memory_owner_user_id
@@ -16,16 +16,19 @@ from maivn._internal.compat._tool_schemas import SCHEMA_FALLBACK_ERRORS
 from maivn._internal.compat.decorators import (
     ARGUMENT_PRODUCER_REQUIREMENTS_ATTR,
     COMPOSE_ARGUMENT_POLICIES_ATTR,
+    EXECUTION_CONTROLS_ATTR,
     INTERRUPT_DEPENDENCIES_ATTR,
     TOOL_DEPENDENCIES_ATTR,
     AgentDependency,
     ArgumentProducerRequirement,
     ComposeArgumentPolicy,
+    ExecutionControl,
     InterruptDependency,
     ToolDependency,
 )
 from maivn._internal.compat.options import SystemToolsConfig
 from maivn._internal.config import DEFAULT_TOOL_EXECUTION_TIMEOUT
+from maivn._internal.errors import ConfigurationError
 from maivn._internal.tool_authority import registration_safety_labels
 from maivn.messages import to_contract_messages
 
@@ -161,16 +164,15 @@ def invocation_options(
     *,
     private_data: Mapping[object, object] | None,
     force_final_tool: bool,
+    swarm_members: Sequence[object] = (),
 ) -> JsonObject:
     """Build invocation-local tool and private-data wire fields."""
     if not tools and not private_data and not force_final_tool:
-        return {}
+        return execution_control_payload(tools, swarm_members)
     payload: JsonObject = {}
     if tools:
         payload['tools'] = [_function_tool_spec(tool) for tool in tools]
-        reevaluate_controls = _reevaluate_controls(tools)
-        if reevaluate_controls:
-            payload['reevaluate_controls'] = reevaluate_controls
+        payload.update(execution_control_payload(tools, swarm_members))
         final_tool_ids = [tool.name for tool in tools if tool.final_tool]
         if final_tool_ids:
             payload['final_tool_ids'] = final_tool_ids
@@ -354,6 +356,19 @@ def _register_tool(collected: dict[str, ToolMetadata], tool: ToolMetadata) -> No
     if existing is not None and existing.target is not tool.target:
         message = f'Conflicting local tool registration for {tool.name!r}: different targets'
         raise ValueError(message)
+    if existing is not None:
+        previous = registration_safety_labels(existing.metadata)
+        current = registration_safety_labels(tool.metadata)
+        if (previous.approval_policy is not None or current.approval_policy is not None) and (
+            previous != current
+            or existing.metadata.get('approval_handler')
+            is not tool.metadata.get('approval_handler')
+        ):
+            message = (
+                'Conflicting local tool approval policy; '
+                'register each owner with a distinct tool name.'
+            )
+            raise ValueError(message)
     collected.setdefault(tool.name, tool)
 
 
@@ -599,41 +614,190 @@ def _fallback_interrupt_schema(dependency: InterruptDependency) -> JsonObject:
     return {'type': schema_type}
 
 
-def _reevaluate_controls(tools: Sequence[ToolMetadata]) -> list[JsonObject]:
-    """Flatten tool-local reevaluate metadata into the additive invoke wire field."""
-    controls: list[JsonObject] = []
+_ControlKind: TypeAlias = Literal['await_for', 'reevaluate']
+_CONTROL_KINDS: tuple[_ControlKind, ...] = ('reevaluate', 'await_for')
+
+
+def execution_control_payload(
+    tools: Sequence[ToolMetadata],
+    swarm_members: Sequence[object] = (),
+) -> JsonObject:
+    """Build the await-for and reevaluate wire fields for every agent in the run.
+
+    Each control names its tools as they were registered, resolved within the agent that
+    declares it: the run's own tools, each delegate agent, and each swarm member. The
+    server enforces a control inside the run that executes that agent's tools, so a
+    reference no tool of the same agent satisfies is refused here rather than sent.
+    """
+    scopes = _control_scopes(tools, swarm_members)
+    payload: JsonObject = {}
+    for kind in _CONTROL_KINDS:
+        controls = [
+            control
+            for scope in scopes
+            for tool in scope
+            for control in _resolved_controls(tool, kind, scope, scopes)
+        ]
+        if controls:
+            payload[f'{kind}_controls'] = controls
+    return payload
+
+
+def _control_scopes(
+    tools: Sequence[ToolMetadata],
+    swarm_members: Sequence[object],
+) -> list[Sequence[ToolMetadata]]:
+    """Return each agent's own tools: the run's, then delegates' and members', once each."""
+    scopes: list[Sequence[ToolMetadata]] = [tools]
+    seen: set[int] = set()
+
+    def visit(agent: object) -> None:
+        if agent is None or id(agent) in seen:
+            return
+        seen.add(id(agent))
+        compiled = _compiled_agent_tools(agent)
+        scopes.append(compiled)
+        for tool in compiled:
+            for dependency in _agent_dependencies(tool):
+                visit(dependency.agent_ref)
+
     for tool in tools:
-        execution_controls = tool.metadata.get('execution_controls')
-        if not isinstance(execution_controls, Mapping):
-            continue
-        controls_mapping = cast('Mapping[str, object]', execution_controls)
-        reevaluate = controls_mapping.get('reevaluate')
-        if not isinstance(reevaluate, list):
-            continue
-        for raw_control in cast('list[object]', reevaluate):
-            if not isinstance(raw_control, Mapping):
-                continue
-            control_mapping = cast('Mapping[str, object]', raw_control)
-            tool_id = control_mapping.get('tool_id')
-            tool_name = control_mapping.get('tool_name')
-            timing = control_mapping.get('timing')
-            instance_control = control_mapping.get('instance_control')
-            if not all(
-                isinstance(value, str) for value in (tool_id, tool_name, timing, instance_control)
-            ):
-                continue
-            controls.append(
-                {
-                    'kind': 'reevaluate',
-                    'dependent_tool_id': tool.name,
-                    'dependent_tool_name': tool.name,
-                    'tool_id': tool_id,
-                    'tool_name': tool_name,
-                    'timing': timing,
-                    'instance_control': instance_control,
-                }
-            )
+        for dependency in _agent_dependencies(tool):
+            visit(dependency.agent_ref)
+    for member in swarm_members:
+        visit(member)
+    return scopes
+
+
+def _resolved_controls(
+    tool: ToolMetadata,
+    kind: _ControlKind,
+    scope: Sequence[ToolMetadata],
+    scopes: Sequence[Sequence[ToolMetadata]],
+) -> list[JsonObject]:
+    controls: list[JsonObject] = []
+    for tool_id, tool_name, timing, instance_control, ref in _declared_controls(tool, kind):
+        referenced = _referenced_tool(scope, tool_id, tool_name, ref)
+        if referenced is None:
+            _raise_unresolved_control(tool, kind, tool_name, ref, scopes)
+        controls.append(
+            {
+                'kind': kind,
+                'dependent_tool_id': tool.name,
+                'dependent_tool_name': tool.name,
+                'tool_id': referenced.name,
+                'tool_name': referenced.name,
+                'timing': timing,
+                'instance_control': instance_control,
+            }
+        )
     return controls
+
+
+def _declared_controls(
+    tool: ToolMetadata,
+    kind: _ControlKind,
+) -> list[tuple[str, str, str, str, object | None]]:
+    """Read well-formed declarations, pairing each with its decorator reference."""
+    execution_controls = tool.metadata.get('execution_controls')
+    if not isinstance(execution_controls, Mapping):
+        return []
+    declared = cast('Mapping[str, object]', execution_controls).get(kind)
+    if not isinstance(declared, list):
+        return []
+    raw_refs = getattr(tool.target, EXECUTION_CONTROLS_ATTR, None)
+    decorated = [
+        control
+        for control in cast('list[object]', raw_refs if isinstance(raw_refs, list) else [])
+        if isinstance(control, ExecutionControl) and control.kind == kind
+    ]
+    controls: list[tuple[str, str, str, str, object | None]] = []
+    for raw_control in cast('list[object]', declared):
+        if not isinstance(raw_control, Mapping):
+            continue
+        control_mapping = cast('Mapping[str, object]', raw_control)
+        tool_id = control_mapping.get('tool_id')
+        tool_name = control_mapping.get('tool_name')
+        timing = control_mapping.get('timing')
+        instance_control = control_mapping.get('instance_control')
+        if not (
+            isinstance(tool_id, str)
+            and isinstance(tool_name, str)
+            and isinstance(timing, str)
+            and isinstance(instance_control, str)
+        ):
+            continue
+        source = next(
+            (
+                control
+                for control in decorated
+                if (control.tool_id, control.tool_name, control.timing, control.instance_control)
+                == (tool_id, tool_name, timing, instance_control)
+            ),
+            None,
+        )
+        if source is not None:
+            decorated.remove(source)
+        ref = None if source is None else source.tool_ref
+        controls.append((tool_id, tool_name, timing, instance_control, ref))
+    return controls
+
+
+def _referenced_tool(
+    scope: Sequence[ToolMetadata],
+    tool_id: str,
+    tool_name: str,
+    ref: object | None,
+) -> ToolMetadata | None:
+    if ref is not None:
+        for candidate in scope:
+            if _same_target(candidate.target, ref):
+                return candidate
+    for candidate in scope:
+        if candidate.name in {tool_name, tool_id}:
+            return candidate
+    return None
+
+
+def _same_target(target: object, ref: object) -> bool:
+    """Whether a registered target is the referenced callable, model or method."""
+    if target is ref or getattr(target, '__func__', None) is ref:
+        return True
+    try:
+        return bool(target == ref) or unwrap(cast('Callable[..., object]', target)) is ref
+    except (TypeError, ValueError):
+        return False
+
+
+def _raise_unresolved_control(
+    tool: ToolMetadata,
+    kind: _ControlKind,
+    tool_name: str,
+    ref: object | None,
+    scopes: Sequence[Sequence[ToolMetadata]],
+) -> NoReturn:
+    decorator = f'depends_on_{kind}'
+    elsewhere = next(
+        (
+            found
+            for other in scopes
+            if (found := _referenced_tool(other, tool_name, tool_name, ref)) is not None
+        ),
+        None,
+    )
+    if elsewhere is not None:
+        message = (
+            f"{decorator} on tool '{tool.name}' references '{elsewhere.name}', which belongs "
+            'to a different agent. A control must reference a tool of the same agent, '
+            'because each agent runs its tools in its own run.'
+        )
+    else:
+        message = (
+            f"{decorator} on tool '{tool.name}' references '{tool_name}', which is not a "
+            'registered tool of the same agent. Register that tool, or reference it by '
+            'its registered name.'
+        )
+    raise ConfigurationError(message)
 
 
 def resume_params(options: RunOptions) -> Mapping[str, int] | None:

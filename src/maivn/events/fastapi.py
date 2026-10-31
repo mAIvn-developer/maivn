@@ -67,7 +67,9 @@ class FastAPIModule(Protocol):
 
 
 class EventRouter(Protocol):
-    def get(self, path: str, *, dependencies: list[object]) -> RouteDecorator: ...
+    def get(
+        self, path: str, *, dependencies: list[object], response_model: None
+    ) -> RouteDecorator: ...
 
 
 class EventSourceResponseFactory(Protocol):
@@ -244,7 +246,9 @@ def create_event_router(
     # annotation that names this function's local `fastapi` module.
     last_event_id_header_param = fastapi.Header(default=None, alias='Last-Event-ID')
 
-    @event_router.get(path, dependencies=dependencies)
+    # No response model: the `Response` return annotation is a typing-only name, and
+    # FastAPI resolving it at schema time would break the host app's /openapi.json.
+    @event_router.get(path, dependencies=dependencies, response_model=None)
     async def stream_events(
         session_id: str,
         last_event_id: str | None = None,

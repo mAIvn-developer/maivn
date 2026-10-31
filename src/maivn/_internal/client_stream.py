@@ -22,6 +22,7 @@ from maivn_contracts.runtime import (
     StructuredInterruptResponse,
 )
 from maivn_contracts.tools import ToolCall
+from pydantic import ValidationError
 
 from maivn._internal.api.async_stream import (
     close_async_iterator,
@@ -45,6 +46,7 @@ from maivn._internal.private_placeholders import (
     resolve_private_placeholders_with_restorations,
 )
 from maivn._internal.reporting.context import get_current_reporter
+from maivn._internal.tool_authority import registration_safety_labels
 from maivn._internal.tool_files import intake_generated_file_outcome
 from maivn._internal.tool_runtime import HookFiring, LocalToolRuntime, collect_interrupt_value
 from maivn._internal.tracing import sdk_operation
@@ -607,6 +609,7 @@ async def resolve_canonical_tool_interrupts(
     client: Client,
     tools: Sequence[ToolMetadata],
     options: RunOptions,
+    tool_runtime: LocalToolRuntime | None = None,
 ) -> AsyncIterator[StreamEvent]:
     """Resolve canonical tool-argument checkpoints while retaining the invoke stream."""
     try:
@@ -624,11 +627,43 @@ async def resolve_canonical_tool_interrupts(
                 for value in (tool_name, arg_name, thread_id, checkpoint_id)
             ):
                 continue
+            approval = arg_name == '__tool_approval__' and str(checkpoint_id).startswith(
+                'tool-approval-'
+            )
             dependency = _interrupt_dependency_for(
                 tools,
                 tool_name=cast('str', tool_name),
                 arg_name=cast('str', arg_name),
             )
+            approval_call: ToolCall | None = None
+            if approval:
+                tool = next((tool for tool in tools if tool.name == tool_name), None)
+                handler = tool.metadata.get('approval_handler') if tool is not None else None
+                if (
+                    tool is None
+                    or registration_safety_labels(tool.metadata).approval_policy != 'ask'
+                    or not callable(handler)
+                ):
+                    continue
+                try:
+                    approval_call = ToolCall.model_validate(interrupt.get('tool_call'))
+                except ValidationError:
+                    continue
+                if (
+                    approval_call.spec_ref.namespace != 'sdk'
+                    or approval_call.spec_ref.tool_id != tool.name
+                    or approval_call.spec_ref.version != 'v1'
+                    or approval_call.lineage.session_id != interrupt.get('session_id')
+                    or checkpoint_id
+                    != f'tool-approval-{approval_call.lineage.session_id}-{approval_call.call_id}'
+                ):
+                    continue
+                dependency = InterruptDependency(
+                    arg_name='__tool_approval__',
+                    input_handler=handler,
+                    prompt='Approve this privileged tool invocation?',
+                    input_type='boolean',
+                )
             if dependency is None:
                 continue
             raw_question = interrupt.get('question')
@@ -636,8 +671,12 @@ async def resolve_canonical_tool_interrupts(
             answer = await collect_interrupt_value(
                 dependency,
                 tool_name=cast('str', tool_name),
-                prompt_override=question,
+                prompt_override=(
+                    'Approve this privileged tool invocation?' if approval else question
+                ),
             )
+            if approval_call is not None and answer is True and tool_runtime is not None:
+                tool_runtime.record_tool_approval(approval_call)
             await client.asubmit_interrupt_response(
                 cast('str', thread_id),
                 cast('str', checkpoint_id),

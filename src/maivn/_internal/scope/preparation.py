@@ -58,7 +58,7 @@ def merge_orchestration_config(
 class ScopeDefaults:
     """Snapshot current scope settings for one invocation, stream, or thread request."""
 
-    name: str
+    scope_id: str
     binding_type: ScopeResourceBindingType
     model: str
     attached_skill_ids: list[str]
@@ -89,7 +89,7 @@ class ScopeDefaults:
             self.model,
             self.attached_skill_ids,
             self.auto_skills,
-            scope_name=self.name,
+            scope_name=self.scope_id,
             scope_binding_type=self.binding_type,
             thread_id=thread_id,
             model=model,

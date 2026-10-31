@@ -8,8 +8,10 @@ import queue
 import re
 import subprocess
 import threading
+import time
+from collections import deque
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar, Literal, Protocol, TypeAlias, cast
 
 import httpx
@@ -18,6 +20,10 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 from maivn._internal.tls import tls_context
 
 JsonObject: TypeAlias = dict[str, object]
+
+# Module-level so tests can drive the call budget with a fake clock.
+_monotonic = time.monotonic
+_sleep = time.sleep
 
 _ESSENTIAL_ENV_KEYS = frozenset(
     {
@@ -96,6 +102,38 @@ def hide_tool_args_from_model(schema: JsonObject, hidden: frozenset[str]) -> Jso
 
 class MCPRuntimeError(RuntimeError):
     """Raised when an MCP peer returns an error response."""
+
+
+@dataclass
+class _CallBudget:
+    """Sliding per-minute pacing and per-day cap for one server's tool calls."""
+
+    per_minute: int | None
+    per_day: int | None
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+    _minute: deque[float] = field(default_factory=deque)
+    _day: deque[float] = field(default_factory=deque)
+
+    def acquire(self, server_name: str) -> None:
+        # The lock is held while waiting, so concurrent callers queue in order.
+        with self._lock:
+            now = _monotonic()
+            _drop_before(self._day, now - 86_400)
+            if self.per_day is not None and len(self._day) >= self.per_day:
+                message = f'MCP server {server_name!r} reached max_calls_per_day ({self.per_day})'
+                raise MCPRuntimeError(message)
+            _drop_before(self._minute, now - 60)
+            if self.per_minute is not None and len(self._minute) >= self.per_minute:
+                _sleep(self._minute[0] + 60 - now)
+                now = _monotonic()
+                _drop_before(self._minute, now - 60)
+            self._minute.append(now)
+            self._day.append(now)
+
+
+def _drop_before(stamps: deque[float], cutoff: float) -> None:
+    while stamps and stamps[0] <= cutoff:
+        _ = stamps.popleft()
 
 
 class _MCPRuntime(Protocol):
@@ -456,12 +494,21 @@ class MCPServer(BaseModel):
     auto_setup: MCPAutoSetup | None = None
     soft_error_handling: MCPSoftErrorHandling | None = None
     _runtime: _MCPRuntime | None = PrivateAttr(default=None)
+    _call_budget: _CallBudget | None = PrivateAttr(default=None)
 
     @field_validator('name', 'tool_name_separator')
     @classmethod
     def _validate_non_empty(cls, value: str) -> str:
         if not value:
             message = 'MCPServer name and tool_name_separator must be non-empty'
+            raise ValueError(message)
+        return value
+
+    @field_validator('max_calls_per_minute', 'max_calls_per_day')
+    @classmethod
+    def _validate_call_limit(cls, value: int | None) -> int | None:
+        if value is not None and value < 1:
+            message = 'MCPServer call limits must allow at least 1 call'
             raise ValueError(message)
         return value
 
@@ -526,7 +573,11 @@ class MCPServer(BaseModel):
         return self._get_runtime().list_tools()
 
     def call_tool(self, tool_name: str, arguments: JsonObject) -> JsonObject:
-        """Execute one tool through the configured MCP transport."""
+        """Execute one tool through the configured MCP transport, within its call limits."""
+        if self.max_calls_per_minute is not None or self.max_calls_per_day is not None:
+            if self._call_budget is None:
+                self._call_budget = _CallBudget(self.max_calls_per_minute, self.max_calls_per_day)
+            self._call_budget.acquire(self.name)
         return self._get_runtime().call_tool(tool_name, arguments)
 
     def close(self) -> None:

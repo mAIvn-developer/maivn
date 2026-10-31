@@ -110,6 +110,9 @@ class ExecutionControl:
     tool_name: str
     timing: ExecutionTiming = 'after'
     instance_control: ExecutionInstanceControl = 'each'
+    # The referenced callable or model, kept so the wire can name the tool as it was
+    # registered (a custom toolify name differs from the function's own name).
+    tool_ref: object | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -461,6 +464,7 @@ def _execution_control_decorator(
             tool_name=tool_name,
             timing=timing,
             instance_control=instance_control,
+            tool_ref=None if isinstance(tool_ref, str) else tool_ref,
         )
         _append_metadata(func, EXECUTION_CONTROLS_ATTR, control)
         return func

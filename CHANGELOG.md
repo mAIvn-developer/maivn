@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-10-29
+
+### Added
+- Explicit per-tool `approval_policy='ask'` with a local `approval_handler`, plus `'deny'` and `'allow'` choices. Omitting the policy preserves privileged-tool refusal, and nested tools retain their owner's policy.
+- The `agent.toolify()` builder's `depends_on_tool(...)` accepts `result_scope`, matching the `depends_on_tool` decorator.
+
+### Changed
+- Requires maivn-contracts 0.1.3 for the tool approval policy.
+- An `Agent` or `Swarm` created with `agent_id=` now runs, binds its resources and authors its skills under that id, the same id `serve()` already announced. Before, all of these used `name`, so memory stored for the `agent_id` was never recalled. Scopes without `agent_id` are unchanged. If you set an `agent_id` that differs from `name`, memory and resources saved earlier under the name are not visible to the new runs.
+
+### Fixed
+- `depends_on_await_for` is now enforced. The SDK sends each declaration with the invocation, and the platform holds the waiting tool until the referenced tool has completed successfully in the same run. A waiting call requested in the same batch as the referenced tool runs after it; otherwise the call is refused with a retryable `tool_await_for_pending` error and never reaches your code. With `timing='before'` the referenced tool waits for the declaring tool. `instance_control` pairs the nth waiting call with the nth completion (`'each'`), needs one completion (`'first'`), needs the latest requested call to have succeeded (`'last'`), or needs every requested call finished with at least one success (`'all'`). A tool the platform schedules itself waits silently instead of being refused. Requires a platform release with await-for support; an older server rejects the request with a 422 whose message says it is too old for `depends_on_await_for`.
+- `depends_on_reevaluate` with `timing='after'` and `instance_control='first'` or `'last'` now sets a boundary: after the first referenced call, or after the last one in the turn.
+- `depends_on_await_for` and `depends_on_reevaluate` references by function, method or model now resolve to the tool's registered name, so a tool registered with a custom `name=` matches. A reference that matches no tool of the declaring agent raises `ConfigurationError` before anything is sent, and so does one that names another agent's tool: each agent's tools run in their own run, so a control must reference a tool of the same agent.
+- Controls declared on a delegate agent's tools or a swarm member's tools are now sent and enforced in the child run that executes those tools.
+- `MCPServer(max_calls_per_minute=..., max_calls_per_day=...)` now limits tool calls. Over the minute limit a call waits for a free slot; over the daily limit it raises `MCPRuntimeError` without contacting the server. Both values must be at least 1.
+- `mount_events(app)` no longer breaks the host app's OpenAPI schema; `/docs` and `/openapi.json` work with the events route mounted.
+
 ## [2.4.0] - 2026-10-28
 
 ### Added

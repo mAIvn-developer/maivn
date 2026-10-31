@@ -121,12 +121,18 @@ class ScopeToolifyBuilder:
         arg_name: str,
         *,
         revision_policy: Literal['on_validation_error'] | None = None,
+        result_scope: Literal['invocation', 'conversation'] = 'invocation',
     ) -> ScopeToolifyBuilder:
-        """Declare a dependency on another tool output."""
+        """Declare a dependency on another tool output; see ``maivn.depends_on_tool``."""
         self._decorators.append(
             cast(
                 'ToolDecorator',
-                depends_on_tool(tool_ref, arg_name, revision_policy=revision_policy),
+                depends_on_tool(
+                    tool_ref,
+                    arg_name,
+                    revision_policy=revision_policy,
+                    result_scope=result_scope,
+                ),
             )
         )
         return self

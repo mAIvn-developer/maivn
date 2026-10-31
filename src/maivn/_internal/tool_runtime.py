@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -149,6 +150,7 @@ class LocalToolRuntime:
         self._tools = {tool.name: tool for tool in tools}
         self._private_data = {str(key): value for key, value in (private_data or {}).items()}
         self._canonical_interrupts = canonical_interrupts
+        self._tool_approvals: set[str] = set()
         self._thread_id = thread_id
         self._inspection_context = inspection_context
         # Keys some other tool's dependency edge reads. An agent may call one tool many
@@ -228,6 +230,17 @@ class LocalToolRuntime:
             return tool.model_copy(update={'output_schema': output_model.model_json_schema()})
         return tool
 
+    @staticmethod
+    def _approval_key(tool_call: ToolCall) -> str:
+        return json.dumps(
+            [tool_call.call_id, tool_call.spec_ref.model_dump(), tool_call.lineage.model_dump()],
+            sort_keys=True,
+        )
+
+    def record_tool_approval(self, tool_call: ToolCall) -> None:
+        """Record this stream's local human consent before submitting its response."""
+        self._tool_approvals.add(self._approval_key(tool_call))
+
     def is_deferred_call(self, tool_call: ToolCall) -> bool:
         """Identify an interrupt placeholder whose arguments the server must bind."""
         tool = self.metadata_for_call(tool_call)
@@ -271,7 +284,13 @@ class LocalToolRuntime:
             if on_completed is not None:
                 on_completed(tool_call, outcome)
             return outcome
-        denied = registration_safety_labels(tool.metadata).requires_approval
+        labels = registration_safety_labels(tool.metadata)
+        approval_key = self._approval_key(tool_call)
+        locally_approved = labels.approval_policy == 'ask' and approval_key in self._tool_approvals
+        self._tool_approvals.discard(approval_key)
+        denied = (
+            labels.requires_approval and labels.approval_policy != 'allow' and not locally_approved
+        )
         if denied:
             outcome = _error_outcome(
                 tool_call.call_id,

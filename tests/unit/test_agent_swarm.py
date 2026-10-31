@@ -1735,6 +1735,28 @@ def test_agent_toolify_returns_fluent_dependency_builder() -> None:
     assert private_dependencies[0].data_key == 'customer_name'
 
 
+def test_agent_toolify_builder_depends_on_tool_accepts_result_scope() -> None:
+    """The fluent builder offers the decorator's conversation result scope."""
+    agent = Agent(name='fluent-scope-agent', api_key='test-key', base_url='http://testserver')
+
+    def load_profile() -> dict[str, str]:
+        return {'tier': 'gold'}
+
+    @agent.toolify().depends_on_tool(load_profile, 'profile', result_scope='conversation')
+    def greet(profile: dict[str, str]) -> str:
+        return profile['tier']
+
+    tool_dependencies = cast('list[ToolDependency]', getattr(greet, TOOL_DEPENDENCIES_ATTR))
+
+    assert tool_dependencies[0].result_scope == 'conversation'
+    with pytest.raises(ValueError, match='unsupported dependency result scope'):
+        _ = agent.toolify().depends_on_tool(
+            load_profile,
+            'profile',
+            result_scope='thread',  # pyright: ignore[reportArgumentType] - runtime guard.
+        )
+
+
 def test_swarm_toolify_uses_same_fluent_builder_as_agent() -> None:
     """Swarm.toolify registers swarm-local tools and dependency metadata."""
     swarm = Swarm(name='fluent-swarm')
@@ -2655,6 +2677,50 @@ def test_agent_add_skill_binds_the_skill_to_the_authoring_agent() -> None:
     run_config = cast('dict[str, object]', invoke_bodies[0]['run_config'])
     assert scope == {'shared': True, 'agent_id': 'renewal-agent', 'sharing_scope': 'agent'}
     assert cast('dict[str, object]', scope)['agent_id'] == run_config['agent_id']
+
+
+def test_an_explicit_agent_id_is_the_identity_runs_and_skills_share() -> None:
+    """A developer-set agent_id, not the display name, scopes runs and authored skills.
+
+    Serving already announces the agent under its agent_id, and memory a developer
+    stores for that agent_id must be visible to the agent's own runs.
+    """
+    create_bodies: list[dict[str, object]] = []
+    invoke_bodies: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = _json_body(request)
+        if request.url.path == '/v1/skills':
+            assert body is not None
+            create_bodies.append(body)
+            return httpx.Response(HTTPStatus.OK, json=_skill_response('skill-agent'))
+        if request.url.path == '/v1/invoke':
+            assert body is not None
+            invoke_bodies.append(body)
+            return httpx.Response(
+                HTTPStatus.ACCEPTED,
+                json={'session_id': 'ses-agent-id', 'stream_position': 0},
+            )
+        return _invoke_sse_response('ses-agent-id', 'done')
+
+    client = Client(
+        config=ClientConfig(api_key='test-key', base_url=AnyUrl('http://testserver')),
+        transport=httpx.MockTransport(handler),
+    )
+    agent = Agent(name='Renewal agent', agent_id='agent-renewal-7', client=client)
+    swarm = Swarm(name='Renewal team', agent_id='swarm-renewal-7', agents=[agent], client=client)
+
+    _ = agent.add_skill(name='Renewal escalation', description='Escalate.', steps=['Review'])
+    _ = agent.invoke('escalate the renewal')
+    _ = swarm.invoke('escalate the renewal')
+
+    assert cast('dict[str, object]', create_bodies[0]['scope'])['agent_id'] == 'agent-renewal-7'
+    assert cast('dict[str, object]', invoke_bodies[0]['run_config'])['agent_id'] == (
+        'agent-renewal-7'
+    )
+    assert cast('dict[str, object]', invoke_bodies[1]['run_config'])['swarm_id'] == (
+        'swarm-renewal-7'
+    )
 
 
 def test_swarm_add_skill_set_binds_the_tree_to_the_authoring_swarm() -> None:

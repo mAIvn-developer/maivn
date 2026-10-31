@@ -15,9 +15,12 @@ from maivn import (
     Agent,
     Client,
     ClientConfig,
+    ConfigurationError,
     RunOptions,
+    Swarm,
     compose_argument_policy,
     depends_on_agent,
+    depends_on_await_for,
     depends_on_interrupt,
     depends_on_reevaluate,
     depends_on_tool,
@@ -272,6 +275,175 @@ def test_malformed_reevaluate_metadata_is_skipped_and_valid_controls_are_kept() 
     assert bodies[0]['tools'][0] == _spec(
         'anchor', {'type': 'object', 'properties': {}, 'additionalProperties': False}
     )
+
+
+def test_await_for_controls_reach_the_invoke_body() -> None:
+    """Decorator and builder await-for declarations are sent for the server to enforce."""
+    bodies: list[JsonObject] = []
+    agent = Agent(name='sequencer', client=_recording_client(bodies))
+
+    @agent.toolify(description='Fetch latest records')
+    def fetch_records() -> dict[str, str]:
+        return {'records': 'r'}
+
+    @agent.toolify(description='Write the audit entry after the fetch')
+    @depends_on_await_for(fetch_records, timing='after', instance_control='all')
+    def write_audit_log() -> dict[str, bool]:
+        return {'logged': True}
+
+    @agent.toolify(description='Prepare the draft').depends_on_await_for(
+        'publish_draft', timing='before'
+    )
+    def prepare_draft() -> str:
+        return 'draft'
+
+    @agent.toolify(description='Publish the draft')
+    def publish_draft() -> str:
+        return 'published'
+
+    _ = agent.invoke('go')
+
+    assert callable(write_audit_log)
+    assert callable(prepare_draft)
+    assert callable(publish_draft)
+    assert 'reevaluate_controls' not in bodies[0]
+    assert bodies[0]['await_for_controls'] == [
+        {
+            'kind': 'await_for',
+            'dependent_tool_id': 'write_audit_log',
+            'dependent_tool_name': 'write_audit_log',
+            'tool_id': 'fetch_records',
+            'tool_name': 'fetch_records',
+            'timing': 'after',
+            'instance_control': 'all',
+        },
+        {
+            'kind': 'await_for',
+            'dependent_tool_id': 'prepare_draft',
+            'dependent_tool_name': 'prepare_draft',
+            'tool_id': 'publish_draft',
+            'tool_name': 'publish_draft',
+            'timing': 'before',
+            'instance_control': 'each',
+        },
+    ]
+
+
+def _control(dependent: str, referenced: str, kind: str = 'await_for', **extra: str) -> JsonObject:
+    return {
+        'kind': kind,
+        'dependent_tool_id': dependent,
+        'dependent_tool_name': dependent,
+        'tool_id': referenced,
+        'tool_name': referenced,
+        'timing': extra.get('timing', 'after'),
+        'instance_control': extra.get('instance_control', 'each'),
+    }
+
+
+def test_function_references_resolve_to_custom_registered_names() -> None:
+    """A reference by function object names the tool as it was registered."""
+    bodies: list[JsonObject] = []
+    agent = Agent(name='renamer', client=_recording_client(bodies))
+
+    @agent.toolify(name='fetch_latest', description='Fetch latest records')
+    def fetch_records() -> str:
+        return 'records'
+
+    def load_index() -> str:
+        return 'index'
+
+    _ = agent.add_tool(load_index, name='index_loader')
+
+    @agent.toolify(name='audit_entry', description='Write the audit entry')
+    @depends_on_await_for(fetch_records)
+    @depends_on_reevaluate(load_index, timing='after', instance_control='all')
+    def write_audit_log() -> str:
+        return 'logged'
+
+    _ = agent.invoke('go')
+
+    assert callable(write_audit_log)
+    assert bodies[0]['await_for_controls'] == [_control('audit_entry', 'fetch_latest')]
+    assert bodies[0]['reevaluate_controls'] == [
+        _control('audit_entry', 'index_loader', 'reevaluate', instance_control='all')
+    ]
+
+
+def test_an_unregistered_reference_fails_before_any_request() -> None:
+    """An await-for nobody could satisfy is refused locally, not sent to the server."""
+    bodies: list[JsonObject] = []
+    agent = Agent(name='typo', client=_recording_client(bodies))
+
+    def fetch_records() -> str:
+        return 'records'
+
+    @agent.toolify(description='Write the audit entry')
+    @depends_on_await_for(fetch_records)
+    def write_audit_log() -> str:
+        return 'logged'
+
+    with pytest.raises(ConfigurationError, match=r"'fetch_records'.*not a registered tool"):
+        _ = agent.invoke('go')
+    assert callable(write_audit_log)
+    assert bodies == []
+
+
+def test_delegate_controls_travel_and_cross_agent_references_fail() -> None:
+    """A delegate's own controls are sent; a control spanning two agents is refused."""
+    bodies: list[JsonObject] = []
+    agent = Agent(name='lead', client=_recording_client(bodies))
+    researcher = Agent(name='researcher', api_key='test-key', base_url='http://testserver')
+
+    @researcher.toolify(name='gather_sources', description='Gather sources')
+    def gather() -> str:
+        return 'sources'
+
+    @researcher.toolify(description='Summarize the gathered sources')
+    @depends_on_await_for(gather)
+    def summarize_sources() -> str:
+        return 'summary'
+
+    def report(notes: str) -> str:
+        return notes
+
+    _ = agent.add_tool(depends_on_agent(researcher, 'notes')(report), name='report')
+    _ = agent.invoke('go')
+
+    assert callable(summarize_sources)
+    assert bodies[0]['await_for_controls'] == [_control('summarize_sources', 'gather_sources')]
+
+    @researcher.toolify(description='Cite the report')
+    @depends_on_await_for('report')
+    def cite_report() -> str:
+        return 'cited'
+
+    with pytest.raises(ConfigurationError, match=r"'report'.*different agent"):
+        _ = agent.invoke('go')
+    assert callable(cite_report)
+
+
+def test_swarm_member_controls_reach_the_invoke_body() -> None:
+    """Members' declarations are sent alongside the roster that runs them."""
+    bodies: list[JsonObject] = []
+    client = _recording_client(bodies)
+    member = Agent(name='analyst', client=client)
+
+    @member.toolify(description='Load the dataset')
+    def load_dataset() -> str:
+        return 'rows'
+
+    @member.toolify(description='Chart the dataset')
+    @depends_on_await_for(load_dataset, instance_control='first')
+    def chart_dataset() -> str:
+        return 'chart'
+
+    _ = Swarm(name='team', agents=[member], client=client).invoke('go')
+
+    assert callable(chart_dataset)
+    assert bodies[0]['await_for_controls'] == [
+        _control('chart_dataset', 'load_dataset', instance_control='first')
+    ]
 
 
 def test_run_config_generates_a_thread_id_and_omits_unset_fields() -> None:

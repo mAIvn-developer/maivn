@@ -1083,7 +1083,7 @@ class Agent:
                 name=name,
                 description=description,
                 steps=steps,
-                scope=agent_scope(self.name),
+                scope=agent_scope(self._scope_id),
             ),
         )
         cast('list[Skill]', self.skills).append(stored)
@@ -1095,7 +1095,7 @@ class Agent:
         """Register a markdown or hardcoded first-class skill-set tree."""
         parsed = skill_set_from_input(skill_set)
         registered = self._client.skills.register_skill_set_tree(
-            skill_set_with_scope(parsed, agent_scope(self.name)),
+            skill_set_with_scope(parsed, agent_scope(self._scope_id)),
         )
         self.skill_sets.append(registered)
         return registered
@@ -1161,9 +1161,7 @@ class Agent:
             project_id=resolve_project_id(project_id, announcing.config),
             manifest=build_serving_manifest(
                 self,
-                agent_id=agent_id
-                if agent_id is not None
-                else (self.agent_id if self.agent_id is not None else self.name),
+                agent_id=agent_id if agent_id is not None else self._scope_id,
                 version=self.version if version is None else version,
                 transport=transport,
                 endpoint_url=endpoint_url,
@@ -1232,10 +1230,15 @@ class Agent:
             claim_listener=claim_listener,
         ).run()
 
+    @property
+    def _scope_id(self) -> str:
+        """The identity runs, bound resources, skills and serving share."""
+        return self.agent_id if self.agent_id is not None else self.name
+
     def _execution_defaults(self) -> ScopeDefaults:
         """Capture this scope's current defaults for every execution entry point."""
         return ScopeDefaults(
-            name=self.name,
+            scope_id=self._scope_id,
             binding_type='agent',
             model=self.model,
             attached_skill_ids=self.attached_skill_ids,
@@ -1262,7 +1265,7 @@ class Agent:
         run_blocking(
             lambda: aregister_scope_resources_once(
                 self,
-                scope_name=self.name,
+                scope_name=self._scope_id,
                 scope_binding_type='agent',
             ),
         )
@@ -1271,7 +1274,7 @@ class Agent:
         """Register declared resources before the first asynchronous invocation."""
         await aregister_scope_resources_once(
             self,
-            scope_name=self.name,
+            scope_name=self._scope_id,
             scope_binding_type='agent',
         )
 
