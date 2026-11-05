@@ -10,6 +10,8 @@ from weakref import WeakKeyDictionary
 
 import httpx
 
+from maivn._internal.tls import tls_context
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -78,6 +80,10 @@ class _PoolState:
                 idle.set_result(None)
 
 
+def _default_transport() -> httpx.AsyncHTTPTransport:
+    return httpx.AsyncHTTPTransport(verify=tls_context())
+
+
 class LoopLocalTransport(httpx.AsyncBaseTransport):
     """SDK-owned pooling: one connection pool per event loop.
 
@@ -90,7 +96,7 @@ class LoopLocalTransport(httpx.AsyncBaseTransport):
     """
 
     def __init__(
-        self, factory: Callable[[], httpx.AsyncBaseTransport] = httpx.AsyncHTTPTransport
+        self, factory: Callable[[], httpx.AsyncBaseTransport] = _default_transport
     ) -> None:
         self._factory = factory
         self._pools: WeakKeyDictionary[asyncio.AbstractEventLoop, httpx.AsyncBaseTransport] = (
