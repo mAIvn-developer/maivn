@@ -71,9 +71,10 @@ SERVE_HELP = (
 )
 
 STUDIO_MISSING = (
-    '[ERROR] Cannot launch MAIVN Studio: maivn_studio is not installed\n'
-    '[INFO] Make sure the Studio companion is installed:\n'
-    '       uv pip install maivn-studio\n'
+    '[ERROR] Cannot launch MAIVN Studio: maivn_studio is not installed for:\n'
+    f'       {sys.executable}\n'
+    '[INFO] Install into this interpreter:\n'
+    f"       uv pip install --python '{sys.executable}' maivn-studio\n"
 )
 
 _SINGLE_AGENT = """
@@ -119,6 +120,7 @@ def no_studio(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[list[str]
         return subprocess.CompletedProcess(args=command, returncode=0)
 
     monkeypatch.setattr(subprocess, 'run', record)
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sys, 'path', [str(tmp_path / 'studio-root'), *sys.path])
     return launches
 
@@ -421,8 +423,8 @@ def test_studio_install_offer_declined_prints_how_to_install_later(
     prompts = _interactive(monkeypatch, lambda _prompt: answer)
 
     assert _run(monkeypatch, 'studio') == EXIT_ERROR
-    assert prompts == ['[INFO] MAIVN Studio is not installed. Install it now? [y/N]: ']
-    assert capsys.readouterr().err == '[INFO] To install it later: uv pip install maivn-studio\n'
+    assert prompts == [f'[INFO] Install maivn-studio into {sys.executable} using pip? [y/N]: ']
+    assert capsys.readouterr().err == STUDIO_MISSING
     assert no_studio == []
 
 
@@ -441,9 +443,7 @@ def test_studio_install_offer_interrupted_counts_as_no(
     _ = _interactive(monkeypatch, interrupted)
 
     assert _run(monkeypatch, 'studio') == EXIT_ERROR
-    assert capsys.readouterr().err == (
-        '\n[INFO] To install it later: uv pip install maivn-studio\n'
-    )
+    assert capsys.readouterr().err == (STUDIO_MISSING + '\n')
     assert no_studio == []
 
 
@@ -462,7 +462,9 @@ def test_studio_install_accepted_installs_then_launches_with_arguments(
         [sys.executable, '-m', 'pip', 'install', 'maivn-studio'],
         [sys.executable, '-m', 'maivn_studio.main', '--port', '9000'],
     ]
-    assert capsys.readouterr().err == '[INFO] Installing maivn-studio...\n'
+    assert capsys.readouterr().err == (
+        STUDIO_MISSING + f'[INFO] Installing maivn-studio into {sys.executable}...\n'
+    )
 
 
 def test_studio_failed_install_says_how_to_install_manually(
@@ -482,14 +484,15 @@ def test_studio_failed_install_says_how_to_install_manually(
         return subprocess.CompletedProcess(args=command, returncode=1)
 
     monkeypatch.setattr(subprocess, 'run', failing)
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sys, 'path', [str(tmp_path / 'studio-root'), *sys.path])
     _ = _interactive(monkeypatch, lambda _prompt: 'y')
 
     assert _run(monkeypatch, 'studio') == EXIT_ERROR
     assert capsys.readouterr().err == (
-        '[INFO] Installing maivn-studio...\n'
-        '[ERROR] Automatic install failed. Install it manually:\n'
-        '       uv pip install maivn-studio\n'
+        STUDIO_MISSING
+        + f'[INFO] Installing maivn-studio into {sys.executable}...\n'
+        + '[ERROR] Automatic install failed. Use the command above.\n'
     )
     assert launches == [[sys.executable, '-m', 'pip', 'install', 'maivn-studio']]
 
@@ -515,6 +518,7 @@ def test_ctrl_c_during_studio_exits_130(
 ) -> None:
     """Interrupting a running Studio exits with the conventional SIGINT status, silently."""
     _install_fake_studio(tmp_path)
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sys, 'path', [str(tmp_path / 'studio-root'), *sys.path])
 
     def interrupted(

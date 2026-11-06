@@ -210,6 +210,7 @@ async def _forward_agent_assignment(
             cast('object', assignment.result) if assignment is not None else None,
         ),
         use_as_final_output=payload.get('use_as_final_output') is True,
+        is_subagent=payload.get('is_subagent') is True,
     )
 
 

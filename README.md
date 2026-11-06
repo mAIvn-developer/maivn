@@ -598,3 +598,39 @@ Thread list summaries remain available for legacy threads and expose the read-on
 
 Use `Client.preview_redaction()` (or `apreview_redaction()`) to review the shielded
 prompt and attachments before a run. See the [private-data guide](../../docs/guides/private-data.md#preview-redaction).
+
+
+## Review redactions within a thread
+
+Use a stable `thread_id` to review inputs and reuse their approved copy.
+For customer-owned threads, pass the same `user_id` as the run; the client default
+customer ID applies when omitted. Review and approval preserve that subject. This requires
+a platform release supporting review operations and a configured private vault.
+
+```python
+preview = client.preview_redaction(prompt, attachments=attachments, thread_id="case-42")
+# Use keys from preview.items. Partial values remain separate unless explicitly merged.
+reviewed = client.review_redaction(preview, merge_keys=[[first_key, second_key]])
+undone = client.review_redaction(reviewed, merge_keys=[])
+approved = client.approve_redaction(undone)
+```
+
+`released_keys=[key]` explicitly releases a text value; `released_keys=[]` undoes
+releases. Faces, license plates and caller cover boxes remain covered. Omitting either
+edit keeps its previous setting. Merges and undo change labels without uncovering pixels.
+The asynchronous methods are `apreview_redaction`, `areview_redaction` and
+`aapprove_redaction`.
+
+Pass `approved.approved_messages()` and `RunOptions(thread_id="case-42",
+redaction_preview_id=approved.preview_id)` to the existing invoke/stream API.
+Reading with a review ID also approves that copy. Within the configured retention
+period (currently 30 days), repeated reads of the same original or approved inputs in
+that thread reuse custody after the short preview ticket expires. Changed inputs need
+a fresh preview. A preview without `thread_id` keeps the legacy ephemeral ticket flow.
+
+Equal values use Unicode NFC and case folding, ignoring spacing and punctuation;
+accents and symbols remain significant. Matching declared keys take precedence.
+Each grouped span or region carries its `input_index`; `member_keys` identifies the
+original groups for merge undo. `local_values()` reads only caller-owned text and is
+never sent back by the service. Drafts stay in encrypted client-held capsules; only
+explicit approvals or reads with their IDs create private custody records.

@@ -310,3 +310,88 @@ def test_preview_timeout_default_and_override() -> None:
     client.preview_redaction('hello')
     asyncio.run(client.apreview_redaction('hello', timeout_seconds=90))
     assert timeouts == [300.0, 90.0]
+
+
+def test_thread_review_merge_release_undo_and_approval_keep_local_text() -> None:
+    """Key-only requests preserve cross-input local lookup and approval binding."""
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        calls.append((request.url.path, payload))
+        assert payload['user_id'] == 'customer-1'
+        approved = request.url.path.endswith('/approve')
+        if len(calls) > 1:
+            assert 'prompt' not in payload
+            assert 'Alice' not in request.content.decode()
+        return httpx.Response(
+            200,
+            json={
+                'preview_id': 'rpa2_test' if approved else 'rpv2_test',
+                'thread_id': 'one',
+                'user_id': 'customer-1',
+                'approved': approved,
+                'approved_request': [
+                    {
+                        'message_id': 'm',
+                        'role': 'user',
+                        'content': '{_{name}_}',
+                        'ts': '2026-11-05T00:00:00Z',
+                    }
+                ],
+                'inputs': [
+                    {
+                        'kind': 'prompt',
+                        'message_index': i,
+                        'status': 'redacted',
+                        'redacted_text': '{_{name}_}',
+                    }
+                    for i in range(2)
+                ],
+                'items': [
+                    {
+                        'key': 'name',
+                        'placeholder': '{_{name}_}',
+                        'pii_type': 'person',
+                        'source': 'detected',
+                        'input_index': 0,
+                        'member_keys': ['name'],
+                        'spans': [
+                            {
+                                'input_index': i,
+                                'start': 0,
+                                'end': 5,
+                                'redacted_start': 0,
+                                'redacted_end': 10,
+                            }
+                            for i in range(2)
+                        ],
+                    }
+                ],
+            },
+        )
+
+    client = Client(
+        api_key='test', base_url='https://example.test', transport=httpx.MockTransport(handler)
+    )
+    initial = client.preview_redaction(
+        [RedactedMessage(content='Alice'), RedactedMessage(content='ALICE')],
+        thread_id='one',
+        user_id='customer-1',
+    )
+    assert initial.local_values() == {'name': ['Alice', 'ALICE']}
+    revised = client.review_redaction(initial, merge_keys=[['name', 'partial']], released_keys=[])
+    assert revised.local_values() == initial.local_values()
+    undone = asyncio.run(client.areview_redaction(revised, merge_keys=[]))
+    approved = client.approve_redaction(undone)
+    assert approved.approved
+    assert approved.approved_messages()
+    assert approved.local_values() == initial.local_values()
+    assert 'Alice' not in approved.model_dump_json()
+    assert calls[1][1]['merge_keys'] == [['name', 'partial']]
+    assert calls[2][1]['merge_keys'] == []
+    assert 'released_keys' not in calls[2][1]
+    assert calls[-1] == (
+        '/v1/redaction-previews/approve',
+        {'preview_id': 'rpv2_test', 'thread_id': 'one', 'user_id': 'customer-1'},
+    )

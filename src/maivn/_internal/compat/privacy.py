@@ -433,6 +433,13 @@ class RedactionPreviewResponse(ContractPreviewResponse):
         if self.preview_id is not None and self.approved_request is not None:
             self._approved_digest = _approved_digest(self.approved_request)
             self._approved_preview_id = self.preview_id
+        previous = (
+            cast('dict[str, object]', context).get('preview') if isinstance(context, dict) else None
+        )
+        if isinstance(previous, RedactionPreviewResponse):
+            # Same model class: copy caller-only context without adding any wire fields.
+            self._original_texts = dict(previous._original_texts)  # noqa: SLF001
+            return
         if not isinstance(context, dict) or 'messages' not in context:
             return
         messages = cast('list[Message]', context['messages'])
@@ -480,11 +487,12 @@ class RedactionPreviewResponse(ContractPreviewResponse):
         """Extract span values locally; original text is never serialized."""
         values: dict[str, list[str]] = {}
         for item in self.items:
-            original = self._original_texts.get(item.input_index)
-            if original is not None:
-                for span in item.spans:
-                    if 0 <= span.start <= span.end <= len(original):
-                        values.setdefault(item.key, []).append(original[span.start : span.end])
+            for span in item.spans:
+                original = self._original_texts.get(
+                    item.input_index if span.input_index is None else span.input_index
+                )
+                if original is not None and 0 <= span.start <= span.end <= len(original):
+                    values.setdefault(item.key, []).append(original[span.start : span.end])
         return values
 
     def covered_bytes(self, input_index: int) -> bytes | None:

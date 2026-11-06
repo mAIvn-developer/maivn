@@ -6777,7 +6777,8 @@
      "phi_mode": "boolean"
     },
     "prompt": "string",
-    "resources": []
+    "resources": [],
+    "user_id": "string"
    },
    "driver": "run_preview",
    "enumerated": [
@@ -6787,13 +6788,16 @@
    "path": "/v1/redaction-previews",
    "query": [],
    "reads": [
+    "approved",
     "approved_request",
     "declared_matched",
     "declared_unmatched",
     "inputs",
     "items",
     "preview_id",
-    "stats"
+    "stats",
+    "thread_id",
+    "user_id"
    ],
    "response": "json",
    "status": 200
@@ -12868,6 +12872,42 @@
   },
   {
    "body": {
+    "merge_keys": [
+     [
+      "string"
+     ]
+    ],
+    "preview_id": "string",
+    "released_keys": [
+     "string"
+    ],
+    "thread_id": "string",
+    "user_id": "string"
+   },
+   "driver": "run_review",
+   "enumerated": [
+    "$"
+   ],
+   "method": "POST",
+   "path": "/v1/redaction-previews/review",
+   "query": [],
+   "reads": [
+    "approved",
+    "approved_request",
+    "declared_matched",
+    "declared_unmatched",
+    "inputs",
+    "items",
+    "preview_id",
+    "stats",
+    "thread_id",
+    "user_id"
+   ],
+   "response": "json",
+   "status": 200
+  },
+  {
+   "body": {
     "messages": [
      {
       "content": "string",
@@ -13255,6 +13295,34 @@
    ],
    "response": "json",
    "status": 202
+  },
+  {
+   "body": {
+    "preview_id": "string",
+    "thread_id": "string",
+    "user_id": "string"
+   },
+   "driver": "run_review",
+   "enumerated": [
+    "$"
+   ],
+   "method": "POST",
+   "path": "/v1/redaction-previews/approve",
+   "query": [],
+   "reads": [
+    "approved",
+    "approved_request",
+    "declared_matched",
+    "declared_unmatched",
+    "inputs",
+    "items",
+    "preview_id",
+    "stats",
+    "thread_id",
+    "user_id"
+   ],
+   "response": "json",
+   "status": 200
   },
   {
    "body": {

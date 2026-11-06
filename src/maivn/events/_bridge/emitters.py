@@ -221,6 +221,7 @@ async def emit_agent_assignment(
     error: str | None = None,
     result: object | None = None,
     use_as_final_output: bool = False,
+    is_subagent: bool = False,
 ) -> None:
     await emit(
         'agent_assignment',
@@ -235,6 +236,7 @@ async def emit_agent_assignment(
                 error=error,
                 result=cast('JsonValue', result),
                 use_as_final_output=use_as_final_output,
+                is_subagent=is_subagent,
             ),
         ),
     )

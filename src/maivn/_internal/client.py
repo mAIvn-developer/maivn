@@ -11,6 +11,10 @@ from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 import httpx
+from maivn_contracts.messages.redaction_preview import (
+    RedactionPreviewApprovalRequest,
+    RedactionPreviewEditRequest,
+)
 
 from maivn._internal.api.async_stream import (
     close_async_iterator,
@@ -141,6 +145,8 @@ class Client:
         self,
         prompt: str | RedactedMessage | list[RedactedMessage],
         *,
+        thread_id: str | None = None,
+        user_id: str | None = None,
         attachments: list[AttachmentInput] | None = None,
         resources: list[str] | None = None,
         pii_whitelist: PIIWhitelist | None = None,
@@ -152,6 +158,8 @@ class Client:
         return run_blocking(
             lambda: self.apreview_redaction(
                 prompt,
+                thread_id=thread_id,
+                user_id=user_id,
                 attachments=attachments,
                 resources=resources,
                 pii_whitelist=pii_whitelist,
@@ -165,6 +173,8 @@ class Client:
         self,
         prompt: str | RedactedMessage | list[RedactedMessage],
         *,
+        thread_id: str | None = None,
+        user_id: str | None = None,
         attachments: list[AttachmentInput] | None = None,
         resources: list[str] | None = None,
         pii_whitelist: PIIWhitelist | None = None,
@@ -183,6 +193,10 @@ class Client:
         request = RedactionPreviewRequest.model_validate(
             {
                 'prompt': wire_prompt,
+                'thread_id': thread_id,
+                'user_id': user_id
+                if user_id is not None
+                else self.config.default_user_id or 'sdk-user',
                 'attachments': extra_attachments,
                 'resources': resources or [],
                 'cover_regions': cover_regions,
@@ -203,6 +217,83 @@ class Client:
                 request.model_dump(mode='json', exclude_none=True),
             ),
             context={'messages': messages, 'attachments': extra_attachments},
+        )
+
+    def review_redaction(
+        self,
+        preview: RedactionPreviewResponse,
+        *,
+        merge_keys: list[list[str]] | None = None,
+        released_keys: list[str] | None = None,
+        timeout_seconds: float = 300.0,
+    ) -> RedactionPreviewResponse:
+        """Replace key-only review edits; [] undoes and None preserves earlier edits."""
+        return run_blocking(
+            lambda: self.areview_redaction(
+                preview,
+                merge_keys=merge_keys,
+                released_keys=released_keys,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+
+    async def areview_redaction(
+        self,
+        preview: RedactionPreviewResponse,
+        *,
+        merge_keys: list[list[str]] | None = None,
+        released_keys: list[str] | None = None,
+        timeout_seconds: float = 300.0,
+    ) -> RedactionPreviewResponse:
+        """Review the same encrypted baseline without resending input files or values."""
+        request = RedactionPreviewEditRequest.model_validate(
+            {
+                'preview_id': preview.preview_id,
+                'thread_id': preview.thread_id,
+                'user_id': preview.user_id,
+                'merge_keys': merge_keys,
+                'released_keys': released_keys,
+            }
+        )
+        return RedactionPreviewResponse.model_validate(
+            await self._http(timeout_seconds=timeout_seconds).post(
+                '/v1/redaction-previews/review',
+                request.model_dump(mode='json', exclude_none=True),
+            ),
+            context={'preview': preview},
+        )
+
+    def approve_redaction(
+        self,
+        preview: RedactionPreviewResponse,
+        *,
+        timeout_seconds: float = 300.0,
+    ) -> RedactionPreviewResponse:
+        """Retain this reviewed copy in the configured vault for its exact thread inputs."""
+        return run_blocking(
+            lambda: self.aapprove_redaction(preview, timeout_seconds=timeout_seconds)
+        )
+
+    async def aapprove_redaction(
+        self,
+        preview: RedactionPreviewResponse,
+        *,
+        timeout_seconds: float = 300.0,
+    ) -> RedactionPreviewResponse:
+        """Approve a reviewed copy asynchronously, without starting a model run."""
+        request = RedactionPreviewApprovalRequest.model_validate(
+            {
+                'preview_id': preview.preview_id,
+                'thread_id': preview.thread_id,
+                'user_id': preview.user_id,
+            }
+        )
+        return RedactionPreviewResponse.model_validate(
+            await self._http(timeout_seconds=timeout_seconds).post(
+                '/v1/redaction-previews/approve',
+                request.model_dump(mode='json'),
+            ),
+            context={'preview': preview},
         )
 
     def __init__(  # noqa: PLR0913 - v1-compatible constructor accepts public options.

@@ -5,10 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.5.1] - 2026-11-04
+## [Unreleased]
+
+## [2.6.0] - 2026-11-06
+
+### Added
+- Thread-bound redaction previews group equal normalized values across text and pictures. `review_redaction()` / `areview_redaction()` apply key-only merges, undo and releases; `approve_redaction()` / `aapprove_redaction()` retain the reviewed copy in configured private custody. Approved copies survive ticket expiry for the same thread and exact inputs.
+
+### Changed
+- Requires maivn-contracts 0.1.4 for thread-bound redaction review and approval.
 
 ### Fixed
+- `maivn studio` names the Python interpreter missing Studio, points to an existing project environment with activation and `uv run` commands, and targets installation guidance to that interpreter or its uv tool environment. Interactive installation names its target before asking.
 - Reuse the cached verifying TLS context in default connection pools instead of loading the certificate bundle again for each pool.
+- `normalize_stream_event` and `normalize_stream` now attribute a delegated child run (a swarm member or delegated agent) to a named sub-agent. The child's `assignment_received` and `assignment_completed` become an `agent_assignment` whose id is the child session id, named from the child's `agent_id` (`case_law_analyst` reads as "Case law analyst"; names with spaces stay as written), and a child that ends with `status: "failure"` closes as `failed`. The child's streamed `assistant_chunk` text is keyed to that same id. Before, a child's text was projected like the run's own answer, so a UI built on `maivn.events` showed sub-agent text as the answer, and parallel swarm members overwrote each other. `NormalizedStreamState` gains `subagent_identities` to remember each child's name between its start and end; pass the same state for the whole stream.
 
 ## [2.5.0] - 2026-10-29
 

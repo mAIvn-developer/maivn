@@ -85,6 +85,8 @@ def forward_agent_assignment(
     }
     if _supports_assignment_final_output(reporter, state=state):
         kwargs['use_as_final_output'] = payload.get('use_as_final_output') is True
+    if payload.get('is_subagent') is True and _supports_assignment_keyword(reporter, 'is_subagent'):
+        kwargs['is_subagent'] = True
     cast('EnrichmentCallback', report_agent_assignment)(**kwargs)
 
 
@@ -99,20 +101,22 @@ def _supports_assignment_final_output(
     if cached is not None:
         return cached
 
+    supported = _supports_assignment_keyword(reporter, 'use_as_final_output')
+    state.assignment_final_output_support_by_reporter_type[reporter_type] = supported
+    return supported
+
+
+def _supports_assignment_keyword(reporter: object, keyword: str) -> bool:
     callback = getattr(reporter, 'report_agent_assignment', None)
     if not callable(callback):
-        state.assignment_final_output_support_by_reporter_type[reporter_type] = False
         return False
     try:
         params = inspect.signature(callback).parameters
     except (TypeError, ValueError):
-        supported = False
-    else:
-        supported = 'use_as_final_output' in params or any(
-            parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in params.values()
-        )
-    state.assignment_final_output_support_by_reporter_type[reporter_type] = supported
-    return supported
+        return False
+    return keyword in params or any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in params.values()
+    )
 
 
 # MARK: Enrichment Forwarding

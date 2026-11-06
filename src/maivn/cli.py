@@ -401,33 +401,30 @@ def _ensure_studio_installed() -> bool:
     False when the caller should abort. In a non-interactive shell, prints the
     install hint and returns False rather than blocking on a prompt.
     """
-    if not _is_interactive():
-        _print_studio_missing_hint()
+    can_install = _print_studio_missing_hint()
+    if not can_install or not _is_interactive():
         return False
 
     try:
-        answer = input(f'{INFO_PREFIX} MAIVN Studio is not installed. Install it now? [y/N]: ')
+        answer = input(
+            f'{INFO_PREFIX} Install {STUDIO_PACKAGE} into {sys.executable} using pip? [y/N]: '
+        )
     except (EOFError, KeyboardInterrupt):
         print(file=sys.stderr)
         answer = ''
 
     if answer.strip().lower() not in {'y', 'yes'}:
-        print(
-            f'{INFO_PREFIX} To install it later: uv pip install {STUDIO_PACKAGE}',
-            file=sys.stderr,
-        )
         return False
 
-    print(f'{INFO_PREFIX} Installing {STUDIO_PACKAGE}...', file=sys.stderr)
+    print(f'{INFO_PREFIX} Installing {STUDIO_PACKAGE} into {sys.executable}...', file=sys.stderr)
     install: subprocess.CompletedProcess[bytes] = subprocess.run(
         [sys.executable, '-m', 'pip', 'install', STUDIO_PACKAGE], check=False
     )
     if install.returncode != 0:
         print(
-            f'{ERROR_PREFIX} Automatic install failed. Install it manually:',
+            f'{ERROR_PREFIX} Automatic install failed. Use the command above.',
             file=sys.stderr,
         )
-        print(f'       uv pip install {STUDIO_PACKAGE}', file=sys.stderr)
         return False
     return True
 
@@ -453,14 +450,85 @@ def _launch_studio(extra_args: list[str]) -> None:
     sys.exit(result.returncode)
 
 
-def _print_studio_missing_hint() -> None:
-    """Print the companion-install hint when Studio is unavailable."""
+def _shell_path(path: str | Path) -> str:
+    """Quote a diagnostic command argument for PowerShell or a POSIX shell."""
+    escaped = str(path).replace("'", "''" if sys.platform == 'win32' else "'\"'\"'")
+    return f"'{escaped}'"
+
+
+def _project_studio_environment() -> Path | None:
+    """Find an importable Studio in a nearby project venv without importing it."""
+    current = Path.cwd()
+    executable = Path(sys.executable).absolute()
+    for directory in (current, *current.parents):
+        environment = directory / '.venv'
+        interpreter = (
+            environment / 'Scripts' / 'python.exe'
+            if sys.platform == 'win32'
+            else environment / 'bin' / 'python'
+        )
+        if interpreter.absolute() == executable or not interpreter.is_file():
+            continue
+        try:
+            probe = subprocess.run(
+                [
+                    str(interpreter),
+                    '-I',
+                    '-c',
+                    'from importlib.util import find_spec; '
+                    'raise SystemExit(find_spec("maivn_studio") is None)',
+                ],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if probe.returncode == 0:
+            return environment
+    return None
+
+
+def _print_studio_missing_hint() -> bool:
+    """Describe the selected interpreter and return whether pip may be offered."""
     print(
-        f'{ERROR_PREFIX} Cannot launch MAIVN Studio: {STUDIO_MODULE} is not installed',
+        f'{ERROR_PREFIX} Cannot launch MAIVN Studio: {STUDIO_MODULE} is not installed for:',
         file=sys.stderr,
     )
-    print(f'{INFO_PREFIX} Make sure the Studio companion is installed:', file=sys.stderr)
-    print(f'       uv pip install {STUDIO_PACKAGE}', file=sys.stderr)
+    print(f'       {sys.executable}', file=sys.stderr)
+    environment = _project_studio_environment()
+    if environment is not None:
+        print(
+            f'{INFO_PREFIX} Studio is already installed in the project environment:',
+            file=sys.stderr,
+        )
+        print(f'       {environment}', file=sys.stderr)
+        print(f'{INFO_PREFIX} Run from {environment.parent}:', file=sys.stderr)
+        print('       uv run maivn studio', file=sys.stderr)
+        print(f'{INFO_PREFIX} Or activate it, then run maivn studio:', file=sys.stderr)
+        activate = (
+            f'& {_shell_path(environment / "Scripts" / "Activate.ps1")}'
+            if sys.platform == 'win32'
+            else f'source {_shell_path(environment / "bin" / "activate")}'
+        )
+        print(f'       {activate}', file=sys.stderr)
+        return False
+    if (Path(sys.prefix) / 'uv-receipt.toml').is_file():
+        print(
+            f'{INFO_PREFIX} This maivn command is installed in a uv tool environment:',
+            file=sys.stderr,
+        )
+        print(f'       {sys.prefix}', file=sys.stderr)
+        print(f'{INFO_PREFIX} Add Studio to that tool with:', file=sys.stderr)
+        print('       uv tool install maivn --with maivn-studio', file=sys.stderr)
+        return False
+    print(f'{INFO_PREFIX} Install into this interpreter:', file=sys.stderr)
+    print(
+        f'       uv pip install --python {_shell_path(sys.executable)} {STUDIO_PACKAGE}',
+        file=sys.stderr,
+    )
+    return True
 
 
 def _show_version() -> None:

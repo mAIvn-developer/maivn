@@ -467,6 +467,7 @@ class EventBridge:
         result: object | None = None,
         *,
         use_as_final_output: bool = False,
+        is_subagent: bool = False,
     ) -> None:
         """Emit an agent assignment event (for swarms)."""
         canonical_assignment_id = self._assignment_scope_resolver.resolve_agent_assignment_id(
@@ -484,6 +485,7 @@ class EventBridge:
             error=error,
             result=result,
             use_as_final_output=use_as_final_output,
+            is_subagent=is_subagent,
         )
 
     async def emit_enrichment(

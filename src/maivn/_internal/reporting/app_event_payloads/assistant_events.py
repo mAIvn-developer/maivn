@@ -214,6 +214,7 @@ def build_agent_assignment_payload(
     error: str | None = None,
     result: JsonValue = None,
     use_as_final_output: bool = False,
+    is_subagent: bool = False,
     participant_key: str | None = None,
     participant_name: str | None = None,
     participant_role: str | None = None,
@@ -259,6 +260,9 @@ def build_agent_assignment_payload(
         'assignment': assignment,
         'lifecycle': lifecycle,
     }
+    if is_subagent:
+        assignment['is_subagent'] = True
+        payload['is_subagent'] = True
     return attach_common_fields(
         payload,
         event_name='agent_assignment',

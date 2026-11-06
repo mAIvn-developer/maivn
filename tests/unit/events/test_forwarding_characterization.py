@@ -1047,3 +1047,51 @@ def test_system_tool_durations_must_be_non_negative_integers() -> None:
         ('tool_complete', ('s2',), {'elapsed_ms': None, 'result': None}),
         ('tool_error', ('system_tool', 'Unknown error'), {'event_id': 's3', 'elapsed_ms': 8}),
     ]
+
+
+@pytest.mark.parametrize('target', ['modern', 'legacy', 'bridge'])
+def test_explicit_child_assignment_marker_survives_supported_forwarding(target: str) -> None:
+    """Child identity survives replay while old reporter signatures stay callable."""
+    payload = build_agent_assignment_payload(
+        agent_name='Child', status='in_progress', assignment_id='child'
+    )
+    payload['is_subagent'] = True
+    event = AppEvent.model_validate(payload)
+    recorder = _Recorder()
+
+    class LegacyReporter:
+        def report_agent_assignment(  # noqa: PLR0913 - exact legacy callback contract.
+            self,
+            *,
+            agent_name: str,
+            status: str,
+            assignment_id: str,
+            swarm_name: str | None,
+            error: str | None,
+            result: object,
+        ) -> None:
+            recorder.calls.append(
+                (
+                    'legacy',
+                    (),
+                    {
+                        'agent_name': agent_name,
+                        'status': status,
+                        'assignment_id': assignment_id,
+                        'swarm_name': swarm_name,
+                        'error': error,
+                        'result': result,
+                    },
+                )
+            )
+
+    if target == 'bridge':
+        bridge = EventBridge('s-child-forward')
+        asyncio.run(forward_normalized_event(event, bridge=bridge))
+        data = cast('Mapping[str, object]', bridge.get_history()[-1]['data'])
+        assert data['is_subagent'] is True
+    else:
+        reporter = recorder if target == 'modern' else LegacyReporter()
+        asyncio.run(forward_normalized_event(event, reporter=reporter))
+        kwargs = recorder.calls[-1][2]
+        assert kwargs.get('is_subagent') is (True if target == 'modern' else None)

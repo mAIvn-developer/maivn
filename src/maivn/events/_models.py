@@ -227,6 +227,10 @@ class NormalizedStreamState:
     # Per-assistant tracking is too brittle: when a fresh thread emits chunks
     # under a new ``assistant_id``, a per-ID pending set never matches.
     next_assistant_chunk_replaces: bool = False
+    # Child session id -> (sub-agent display name, swarm name), learned from the
+    # child's ``assignment_received`` so its ``assignment_completed`` (which
+    # carries no run config) closes the same named sub-agent.
+    subagent_identities: dict[str, tuple[str, str | None]] = field(default_factory=dict)
 
 
 __all__ = [

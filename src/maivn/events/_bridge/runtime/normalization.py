@@ -280,6 +280,8 @@ class BridgePayloadNormalizer:
                         or 'in_progress',
                         assignment_id=canonical_assignment_id,
                         swarm_name=swarm_name,
+                        is_subagent=data.get('is_subagent') is True
+                        or assignment_payload.get('is_subagent') is True,
                         task=normalize_text(data.get('task'))
                         or normalize_text(assignment_payload.get('task')),
                         error=normalize_text(data.get('error'))

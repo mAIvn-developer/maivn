@@ -10,6 +10,7 @@ from maivn.events._models import AppEvent, JsonObject, NormalizedStreamState, Ra
 from .context import NormalizationOptions
 from .handlers import EVENT_HANDLERS
 from .helpers import clean_text, coerce_mapping, validate_payload
+from .subagents import attribute_to_subagent, child_session_id
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -38,6 +39,13 @@ def normalize_stream_event(
     returned unchanged. Older / raw shapes are dispatched through
     :data:`EVENT_HANDLERS` and emit any number of normalized AppEvents
     (often one, sometimes zero, occasionally a small batch).
+
+    Events from a delegated child run (a swarm member or delegated agent,
+    stamped with ``parent_session_id``) are attributed to a named sub-agent:
+    the child's ``assignment_received`` / ``assignment_completed`` become an
+    ``agent_assignment`` whose id is the child session id, and the child's
+    ``assistant_chunk`` text is keyed to that id rather than to the run's
+    answer.
 
     Args:
         event: Raw SSE event from the server stream.
@@ -85,10 +93,14 @@ def normalize_stream_event(
         tool_metadata_map,
     )
     handler = EVENT_HANDLERS.get(name)
-    if handler is None:
-        return []
-
-    normalized_payloads: list[JsonObject] = handler(payload, active_state, options)
+    normalized_payloads: list[JsonObject] = (
+        handler(payload, active_state, options) if handler is not None else []
+    )
+    child = child_session_id(event, payload)
+    if child is not None:
+        normalized_payloads = attribute_to_subagent(
+            name, payload, child, normalized_payloads, active_state
+        )
     return [validate_payload(item) for item in normalized_payloads]
 
 
