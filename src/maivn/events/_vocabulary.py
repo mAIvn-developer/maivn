@@ -80,6 +80,9 @@ SYSTEM_TOOL_COMPLETE_EVENT_NAME: Final[str] = 'system_tool_complete'
 SYSTEM_TOOL_ERROR_EVENT_NAME: Final[str] = 'system_tool_error'
 """Emitted when a system tool encounters an error."""
 
+TASK_LIST_UPDATED_EVENT_NAME: Final[str] = 'task_list_updated'
+"""Emitted when a root run commits a full task list snapshot."""
+
 # MARK: - Hook Events
 
 HOOK_FIRED_EVENT_NAME: Final[str] = 'hook_fired'
@@ -294,6 +297,7 @@ __all__ = [
     'SYSTEM_TOOL_CHUNK_EVENT_NAME',
     'SYSTEM_TOOL_COMPLETE_EVENT_NAME',
     'SYSTEM_TOOL_ERROR_EVENT_NAME',
+    'TASK_LIST_UPDATED_EVENT_NAME',
     # Hook Events
     'HOOK_FIRED_EVENT_NAME',
     # Enrichment Events

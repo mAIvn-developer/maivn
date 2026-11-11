@@ -297,7 +297,7 @@ wheels = [
 
 [[package]]
 name = "maivn"
-version = "2.6.0"
+version = "2.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "croniter" },
@@ -367,7 +367,7 @@ dev = [
 
 [[package]]
 name = "maivn-contracts"
-version = "0.1.4"
+version = "0.1.5"
 source = { editable = "../maivn-contracts" }
 dependencies = [
     { name = "jsonschema" },

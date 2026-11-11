@@ -62,6 +62,10 @@ async def forward_to_bridge(
         await forwarder(event, payload=payload, bridge=bridge, state=state)
         return
 
+    if event.task_list is not None and event_name == 'task_list_updated':
+        await bridge.emit(event_name, {'task_list': event.task_list.model_dump(mode='json')})
+        return
+
     await bridge.emit(event_name, payload)
 
 

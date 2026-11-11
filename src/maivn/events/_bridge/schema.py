@@ -48,6 +48,7 @@ _REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     'system_tool_start': ('tool_id', 'tool_type'),
     'system_tool_chunk': ('tool_id', 'text'),
     'system_tool_complete': ('tool_id', 'result'),
+    'task_list_updated': ('task_list',),
     'assistant_chunk': ('assistant_id', 'text'),
     'status_message': ('assistant_id', 'message'),
     'status_message_chunk': ('assistant_id', 'status_id', 'text'),

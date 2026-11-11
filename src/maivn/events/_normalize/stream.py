@@ -4,8 +4,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
+from pydantic import ValidationError
+
+from maivn._internal.models import StreamEvent
 from maivn._internal.reporting.app_event_payloads import APP_EVENT_CONTRACT_VERSION
-from maivn.events._models import AppEvent, JsonObject, NormalizedStreamState, RawSSEEvent
+from maivn.events._models import (
+    AppEvent,
+    JsonObject,
+    NormalizedStreamState,
+    PositionedTaskList,
+    RawSSEEvent,
+)
+from maivn.events._vocabulary import TASK_LIST_UPDATED_EVENT_NAME
 
 from .context import NormalizationOptions
 from .handlers import EVENT_HANDLERS
@@ -21,7 +31,7 @@ if TYPE_CHECKING:
 
 
 def normalize_stream_event(
-    event: RawSSEEvent,
+    event: RawSSEEvent | StreamEvent,
     *,
     state: NormalizedStreamState | None = None,
     default_agent_name: str | None = None,
@@ -71,6 +81,8 @@ def normalize_stream_event(
     active_state = state or NormalizedStreamState()
     payload = coerce_mapping(getattr(event, 'payload', {}))
     name = clean_text(getattr(event, 'name', '')) or ''
+    if name == TASK_LIST_UPDATED_EVENT_NAME:
+        return _normalize_task_list(event)
 
     if payload.get('contract_version') == APP_EVENT_CONTRACT_VERSION and payload.get('event_name'):
         return [
@@ -102,6 +114,25 @@ def normalize_stream_event(
             name, payload, child, normalized_payloads, active_state
         )
     return [validate_payload(item) for item in normalized_payloads]
+
+
+def _normalize_task_list(event: RawSSEEvent | StreamEvent) -> list[AppEvent]:
+    if not isinstance(event, StreamEvent) or event.event_type != TASK_LIST_UPDATED_EVENT_NAME:
+        return []
+    try:
+        canonical = event.event
+        if canonical.type != TASK_LIST_UPDATED_EVENT_NAME:
+            return []
+        snapshot = PositionedTaskList.model_validate(
+            {
+                **canonical.payload,
+                'session_id': canonical.session_id,
+                'position': event.position,
+            }
+        )
+    except ValidationError:
+        return []
+    return [AppEvent(event_name=TASK_LIST_UPDATED_EVENT_NAME, task_list=snapshot)]
 
 
 def _enrich_contract_tool_private_data(
@@ -152,7 +183,7 @@ def _enrich_contract_tool_private_data(
 
 
 def normalize_stream(
-    events: Iterable[RawSSEEvent],
+    events: Iterable[RawSSEEvent | StreamEvent],
     *,
     default_agent_name: str | None = None,
     default_swarm_name: str | None = None,

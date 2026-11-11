@@ -35,6 +35,7 @@ _KNOWN_FRONTEND_SAFE_EVENT_TYPES: frozenset[str] = frozenset(
         'system_tool_complete',
         'system_tool_start',
         'system_tool_chunk',
+        'task_list_updated',
         'agent_assignment',
         'final',
         'enrichment',

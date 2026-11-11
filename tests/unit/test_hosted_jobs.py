@@ -67,9 +67,48 @@ def test_jobs_start_read_cancel_use_dedicated_durable_paths() -> None:
         ('post', '/v1/jobs/' + _SESSION + '/cancel'),
     ]
     payload = http.calls[0][2]
+    assert 'profile' not in payload
     assert payload['max_steps'] == 4
     assert payload['invoke']['run_config']['max_expense_usd'] == '1.00'
     assert payload['invoke'].get('tools', []) == []
+
+
+def test_extended_job_sends_the_opt_in_and_reads_its_idle_clock() -> None:
+    """The SDK keeps the bounded extended profile on its actual job wire path."""
+    requests: list[dict[str, Any]] = []
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={**_STATUS, 'profile': 'extended', 'idle_deadline_at': '2026-10-22T21:10:00Z'},
+        )
+
+    async def run() -> None:
+        client = Client(
+            config=ClientConfig.model_validate(
+                {'api_key': 'offline-only', 'base_url': 'http://offline.test'}
+            ),
+            transport=httpx.MockTransport(reply),
+            private_data_store=None,
+            auto_detect_timezone=False,
+        )
+        result = await client.jobs.astart(
+            ['Draft'],
+            job=HostedJobOptions(
+                idempotency_key='extended',
+                max_steps=4,
+                max_duration_seconds=7200,
+                profile='extended',
+            ),
+            options=RunOptions(max_expense_usd='1.00'),
+        )
+        assert result.profile == 'extended'
+        assert result.idle_deadline_at == '2026-10-22T21:10:00Z'
+
+    asyncio.run(run())
+    assert requests[0]['profile'] == 'extended'
+    assert requests[0]['max_duration_seconds'] == 7200
 
 
 def test_jobs_without_expense_cap_fail_locally_before_http() -> None:

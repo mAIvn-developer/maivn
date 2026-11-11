@@ -1260,8 +1260,10 @@
    "reads": [
     "deadline_at",
     "final_message",
+    "idle_deadline_at",
     "max_expense_usd",
     "max_steps",
+    "profile",
     "progress_position",
     "result",
     "session_id",
@@ -12458,8 +12460,10 @@
    "reads": [
     "deadline_at",
     "final_message",
+    "idle_deadline_at",
     "max_expense_usd",
     "max_steps",
+    "profile",
     "progress_position",
     "result",
     "session_id",
@@ -13633,8 +13637,10 @@
    "reads": [
     "deadline_at",
     "final_message",
+    "idle_deadline_at",
     "max_expense_usd",
     "max_steps",
+    "profile",
     "progress_position",
     "result",
     "session_id",

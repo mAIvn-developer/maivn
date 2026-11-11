@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-11-10
+
+### Added
+- Task-list update events and normalized task-list snapshots.
+
+### Changed
+- Requires maivn-contracts >=0.1.5,<0.2.
+
+### Fixed
+- Reuse the verifying TLS context in default connection pools.
+- Improve Studio installation guidance for project and uv environments.
+- Attribute delegated child events and streamed text to the correct sub-agent.
+
 ## [2.6.0] - 2026-11-06
 
 ### Added

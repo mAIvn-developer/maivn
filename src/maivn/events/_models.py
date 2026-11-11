@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from maivn_contracts.events.task_list import TaskListSnapshot
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictInt, StrictStr
 
 from maivn._internal.reporting.app_event_payloads import APP_EVENT_CONTRACT_VERSION
 from maivn._internal.sse_event import SSEEvent as RawSSEEvent
@@ -177,6 +178,13 @@ class HookDescriptor(BaseModel):
 # MARK: AppEvent
 
 
+class PositionedTaskList(TaskListSnapshot):
+    """A bounded snapshot with its canonical replay cursor and run identity."""
+
+    session_id: StrictStr = Field(min_length=1)
+    position: StrictInt = Field(gt=0)
+
+
 class AppEvent(BaseModel):
     """Canonical normalized event envelope emitted by the SDK event pipeline.
 
@@ -206,6 +214,9 @@ class AppEvent(BaseModel):
     session: SessionDescriptor | None = None
     chunk: ChunkDescriptor | None = None
     hook: HookDescriptor | None = None
+    task_list: PositionedTaskList | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 # MARK: Normalization State
