@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import getpass
 import io
 import json
@@ -259,9 +260,12 @@ def test_windows_private_state_permissions_are_observed_by_os(tmp_path: Path) ->
             / 'v1.0'
             / 'powershell.exe'
         )
-        result = subprocess.run(  # noqa: S603 - OS ACL read, escaped fixture path via stdin.
-            [str(executable), '-NoProfile', '-NonInteractive', '-Command', '-'],
-            input=script,
+        # The script travels as an encoded command, PowerShell's own form for a script that
+        # needs no quoting. Piping it to `-Command -` is not reliable: an antivirus loaded
+        # into powershell.exe was seen to drop piped input silently (no output, exit 0).
+        encoded = base64.b64encode(script.encode('utf-16-le')).decode('ascii')
+        result = subprocess.run(  # noqa: S603 - OS ACL read; fixed script, encoded fixture path.
+            [str(executable), '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
             text=True,
             capture_output=True,
             check=False,

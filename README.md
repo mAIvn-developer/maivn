@@ -516,7 +516,8 @@ replayed events keep placeholders rather than restoring private values.
 
 Cancellation prevents new work, but cannot undo an external effect already sent.
 Late receipts still settle costs. Server/replica loss ends the job as interrupted
-or execution-outcome-unknown and preserves unknown expense reservations. Jobs never
+or execution-outcome-unknown; model calls it cut off are not charged. A model call
+that fails because of a provider or platform fault is never charged. Jobs never
 resume or replay automatically after a crash. Deployments end running jobs unless
 an independently approved drain is used. Retention rules still apply to progress
 and output.

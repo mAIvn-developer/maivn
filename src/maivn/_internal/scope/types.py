@@ -19,7 +19,10 @@ SkillSpec: TypeAlias = Skill | Mapping[str, object]
 ResourceSpec: TypeAlias = dict[str, object]
 RuntimeModelChoice: TypeAlias = str | ModelChoice | ModelConfig
 HookExecutionMode: TypeAlias = Literal['tool', 'scope', 'agent']
-ReasoningEffort: TypeAlias = Literal['minimal', 'low', 'medium', 'high']
+# Reasoning levels, weakest first. 'xhigh' and 'max' ask for the deepest reasoning a model
+# offers; a model that lacks the requested level runs at the nearest level it does offer
+# (a weaker one when one exists). Higher levels use more tokens and take longer.
+ReasoningEffort: TypeAlias = Literal['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 ScopeResourceBindingType: TypeAlias = Literal['agent', 'swarm']
 
 

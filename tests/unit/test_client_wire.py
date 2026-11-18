@@ -6,7 +6,7 @@ import asyncio
 import json
 from collections.abc import Callable, Coroutine
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Literal, TypeAlias, cast
+from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
 import httpx
 import pytest
@@ -35,6 +35,7 @@ from maivn.messages import HumanMessage
 
 if TYPE_CHECKING:
     from maivn._internal.reporting.terminal_reporter.base.reporter import BaseReporter
+    from maivn._internal.scope.types import ReasoningEffort
 
 JsonObject: TypeAlias = dict[str, Any]
 # httpx.MockTransport's handler parameter type (httpx._transports.mock.SyncHandler /
@@ -566,11 +567,12 @@ def test_agent_invoke_omits_reasoning_when_none() -> None:
     assert 'reasoning' not in body
 
 
-def test_agent_invoke_includes_supplied_reasoning() -> None:
-    """Agent.invoke forwards an explicitly requested reasoning effort."""
-    body = _agent_invoke_payload(reasoning='high')
+@pytest.mark.parametrize('level', ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+def test_agent_invoke_includes_supplied_reasoning(level: ReasoningEffort) -> None:
+    """Agent.invoke forwards every typed reasoning level to the wire unchanged."""
+    body = _agent_invoke_payload(reasoning=level)
 
-    assert body['reasoning'] == 'high'
+    assert body['reasoning'] == level
 
 
 def test_agent_invoke_serializes_declared_reevaluate_control_with_tools() -> None:
@@ -711,7 +713,7 @@ def _json_body(request: httpx.Request) -> JsonObject | None:
     return cast('JsonObject', json.loads(request.content.decode('utf-8')))
 
 
-def _agent_invoke_payload(*, reasoning: Literal['high'] | None) -> JsonObject:
+def _agent_invoke_payload(*, reasoning: ReasoningEffort | None) -> JsonObject:
     calls: list[JsonObject] = []
 
     def handler(request: httpx.Request) -> httpx.Response:

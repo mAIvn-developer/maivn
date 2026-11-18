@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-11-17
+
+### Added
+- Reasoning levels `xhigh` and `max` for the deepest reasoning a model offers. A model that lacks the requested level runs at the nearest level it does offer (a weaker one when one exists). Higher levels use more tokens and take longer.
+
+### Changed
+- Requires maivn-contracts >=0.1.6,<0.2.
+
 ## [2.7.0] - 2026-11-10
 
 ### Added
