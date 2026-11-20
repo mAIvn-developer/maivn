@@ -703,6 +703,10 @@ async def vault_identity(api: FakeApi) -> None:
     ):
         # Each client opens its own store, so each asks for the caller's identity once.
         await api.client()._thread_private_data('thr_1', {'name': 'Ada'})
+        # A run's final frame hands back what the shield minted, for the same store.
+        await api.client()._remember_thread_private_data(
+            'thr_1', {'pii_email_1': 'ada@example.test'}
+        )
         await api.client().aforget_private_data('thr_1')
 
 

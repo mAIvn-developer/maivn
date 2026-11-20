@@ -17,39 +17,31 @@ The client opens an encrypted store automatically when private thread values
 need persistence. Explicit ``private_data_store=None`` keeps values within the
 call that supplied them.
 
-Two maps, one conversation
---------------------------
+One map, on your side
+---------------------
 
-Since the 2026-08-21 custody ruling a conversation has TWO placeholder maps, and
-knowing which is which is the whole of understanding what gets re-sent:
+Since the owner ruling of 2026-11-18 the platform keeps no conversation's
+private values once a run ends (it holds them only while a run is paused for a
+person's answer). This store is therefore the ONE place a thread's map rests
+between turns, and it holds two kinds of pair:
 
-* **this store, on your side**, holds the values YOU declared, per thread. It
-  exists so a long conversation does not have to re-supply the same
-  ``serial_number`` on every turn;
-* **server custody**, on ours, holds the complete map for the thread -- your
-  declarations AND the values the shield discovered mid-run, which are keyed by
-  names like ``pii_email_1`` that were allocated during a run you never saw the
-  inside of. This is what makes turn two of a conversation able to resolve
-  something turn one found.
+* the values YOU declared, so a long conversation does not have to re-supply
+  the same ``serial_number`` on every turn;
+* the values the shield discovered mid-run, keyed by names like
+  ``pii_email_1`` that the server allocated during a run you never saw the
+  inside of. The run's final frame hands them back
+  (:data:`CALLER_HELD_PRIVATE_DATA_KEY`); the client keeps them here and strips
+  them from the frame before anything else reads it. This is what makes turn two
+  of a conversation able to resolve something turn one found.
 
-Nothing the server allocates ever enters this store. The client is never handed
-the server's map, so it cannot learn ``pii_email_1`` even in principle -- which
-is exactly why server custody has to exist rather than being folded into this.
-
-Precedence, when both hold a key:
-
-* a name YOU chose (``serial_number``): what you pass on this call wins, both
-  here and on the server. Re-declaring your own field is you saying what it
-  means from this turn on;
-* a name the SERVER allocated (``pii_email_1``): custody wins. That key already
-  stands for one particular value in the stored transcript, and redefining it
-  from a later request would change who the earlier turns were about;
-* a value only one side holds is simply used.
+When both your call and this store hold a key, what you pass on this call wins.
 
 What is deliberately not automatic: once a thread's pairs are remembered, they
 are re-sent on every later call on that thread, including calls where you pass
 no ``private_data`` at all. That is the point of the store, and
-:meth:`PrivateDataStore.forget` is how you end it for a thread.
+:meth:`PrivateDataStore.forget` is how you end it for a thread. With
+``private_data_store=None`` nothing is kept, and a later turn shows a
+placeholder where an earlier turn's discovered value would have been.
 """
 
 from __future__ import annotations
@@ -62,6 +54,10 @@ from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+#: Payload key under which a run's final frame hands back the pairs the server's
+#: shield minted, for this store to keep. The server spells the same name.
+CALLER_HELD_PRIVATE_DATA_KEY = 'caller_held_private_data'
+
 # One customer process is one vault tenant; threads are records within it.
 # The vault's tenant separation exists for the server's multi-tenant case --
 # here the whole store belongs to one customer, so a constant is honest.
@@ -72,9 +68,8 @@ _TENANT = 'sdk'
 class PrivateDataStore(Protocol):
     """Where a conversation thread's placeholder map comes to rest.
 
-    Holds the values the CALLER declared, and only those. Server-allocated keys
-    live in server custody and never arrive here; see the module docstring for
-    the division and the precedence rule.
+    Holds the values the caller declared and the shield-minted pairs each run
+    hands back; see the module docstring.
     """
 
     async def remember(self, thread_id: str, mapping: Mapping[str, str]) -> None:
@@ -249,6 +244,7 @@ def _vault_module() -> object:
 
 
 __all__ = [
+    'CALLER_HELD_PRIVATE_DATA_KEY',
     'EncryptedFilePrivateDataStore',
     'InMemoryPrivateDataStore',
     'PrivateDataStore',

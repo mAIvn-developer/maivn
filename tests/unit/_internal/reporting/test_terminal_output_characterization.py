@@ -192,7 +192,7 @@ def test_model_routing_lines(capsys: pytest.CaptureFixture[str]) -> None:
 def test_model_routing_hop_lines_show_only_structural_facts(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Provider-hop lines use fixed labels and only bounded diagnostic facts."""
+    """Only failed and recovered hops have terminal lines with bounded facts."""
     facts: dict[str, object] = {
         'error_code': 'rate_limited',
         'call_id': 'call-1',
@@ -215,8 +215,6 @@ def test_model_routing_hop_lines_show_only_structural_facts(
             'error_code=rate_limited call_id=call-1 attempt_index=2',
         ),
         _line('Model', 'Recovered using m-2'),
-        _line('Model', 'Provider attempt timing for m-3', 'attempt_index=0'),
-        _line('Model', 'Provider usage reported for m-4'),
     ]
 
 

@@ -506,19 +506,18 @@ def _model_routing_line(payload: dict[str, object]) -> EventLine | None:
     if model is None:
         return None
     mode = _string(payload.get('mode'))
-    if mode in {'hop_failure', 'hop_recovered', 'hop_timing', 'hop_usage'}:
-        labels = {
-            'hop_failure': f'Provider attempt failed for {model}',
-            'hop_recovered': f'Recovered using {model}',
-            'hop_timing': f'Provider attempt timing for {model}',
-            'hop_usage': f'Provider usage reported for {model}',
-        }
+    # Per-attempt timing and usage remain available in the raw stream.
+    if mode in {'hop_timing', 'hop_usage'}:
+        return None
+    if mode in {'hop_failure', 'hop_recovered'}:
+        recovered = mode == 'hop_recovered'
+        text = f'Recovered using {model}' if recovered else f'Provider attempt failed for {model}'
         facts = diagnostic_facts(payload)
         detail = ' '.join(f'{key}={value}' for key, value in facts.items())
         return EventLine(
             verb='Model',
-            text=labels[mode],
-            tone='success' if mode == 'hop_recovered' else 'dim',
+            text=text,
+            tone='success' if recovered else 'dim',
             detail=detail,
         )
     text = f'{mode} -> {model}' if mode and mode != model else model

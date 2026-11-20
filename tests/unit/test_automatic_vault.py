@@ -135,6 +135,96 @@ def test_empty_new_user_and_explicit_opt_out_do_not_open_vault(native: type[Nati
     asyncio.run(run())
 
 
+@pytest.mark.parametrize('other_scope_requires_open', [False, True])
+def test_passive_read_ignores_empty_vault_scope(
+    native: type[NativeVault],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    other_scope_requires_open: bool,
+) -> None:
+    """Skip leftover setup at the root and at the authenticated scope."""
+    base_url = 'https://vault.example'
+    identity = {'user_id': _USER, 'org_id': _ORG, 'project_id': _PROJECT}
+    scope = automatic_vault._scope(base_url, identity)
+    native.scopes.add(scope)
+    probes: list[tuple[str | None, str | None]] = []
+    requests: list[str] = []
+
+    def requires_open(scope: str | None = None, *, path: str | None = None) -> bool:
+        probes.append((scope, path))
+        return scope is None and other_scope_requires_open
+
+    def identify(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        return httpx.Response(200, json=identity)
+
+    monkeypatch.setattr(native, 'default_requires_open', requires_open, raising=False)
+    client = Client(
+        api_key='test',
+        base_url=base_url,
+        transport=httpx.MockTransport(identify),
+        local_vault=LocalVaultConfig(directory=tmp_path),
+    )
+
+    assert asyncio.run(client._thread_private_data('thread', None)) is None
+    if other_scope_requires_open:
+        assert probes == [(None, str(tmp_path)), (scope, str(tmp_path))]
+        assert requests == ['/v1/vault/identity']
+    else:
+        assert probes == [(None, str(tmp_path))]
+        assert requests == []
+    assert native.opens == 0
+
+
+def test_explicit_private_values_skip_passive_probe(
+    native: type[NativeVault], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit write opens and persists even when no existing vault requires opening."""
+    probes: list[str | None] = []
+
+    def requires_open(scope: str | None = None, *, path: str | None = None) -> bool:
+        _ = path
+        probes.append(scope)
+        return False
+
+    monkeypatch.setattr(native, 'default_requires_open', requires_open, raising=False)
+    client = Client(api_key='test', transport=transport())
+    values: dict[object, object] = {'name': 'Ada'}
+
+    assert asyncio.run(client._thread_private_data('thread', values)) == values
+    assert asyncio.run(client._thread_private_data('thread', None)) == values
+    assert probes == []
+    assert native.opens == 1
+
+
+@pytest.mark.parametrize('has_classification_probe', [False, True])
+def test_passive_read_preserves_established_vault_open_failure(
+    native: type[NativeVault],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    has_classification_probe: bool,
+) -> None:
+    """An existing scope still fails closed, including with older native wheels."""
+    base_url = 'https://vault.example'
+    native.scopes.add(
+        automatic_vault._scope(base_url, {'user_id': _USER, 'org_id': _ORG, 'project_id': _PROJECT})
+    )
+    if has_classification_probe:
+        monkeypatch.setattr(native, 'default_requires_open', native.default_exists, raising=False)
+
+    def unavailable(*_args: object, **_kwargs: object) -> NativeVault:
+        message = 'sensitive-native-message'
+        raise RuntimeError(message)
+
+    monkeypatch.setattr(native, 'open_default', unavailable)
+    client = Client(api_key='test', base_url=base_url, transport=transport())
+
+    with pytest.raises(VaultSetupError, match='Existing vault data') as error:
+        asyncio.run(client._thread_private_data('thread', None))
+    assert 'sensitive-native-message' not in str(error.value)
+
+
 def test_invalid_identity_fails_before_native_open(native: type[NativeVault]) -> None:
     """An untrusted or incomplete identity cannot select storage."""
     bad = httpx.MockTransport(lambda _: httpx.Response(200, json={'project_id': _PROJECT}))

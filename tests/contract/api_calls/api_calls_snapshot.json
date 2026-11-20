@@ -2361,6 +2361,21 @@
    "status": 200
   },
   {
+   "body": null,
+   "driver": "vault_identity",
+   "enumerated": [],
+   "method": "GET",
+   "path": "/v1/vault/identity",
+   "query": [],
+   "reads": [
+    "org_id",
+    "project_id",
+    "user_id"
+   ],
+   "response": "json",
+   "status": 200
+  },
+  {
    "body": {
     "$content-type": "application/octet-stream"
    },

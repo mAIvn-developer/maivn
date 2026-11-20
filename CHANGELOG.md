@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.1] - 2026-11-19
+
+### Changed
+- Private values the platform's privacy shield finds during a run now come back to your process when the run ends. They are kept in that thread's local private-data store and sent back on later calls on the same thread; the platform keeps none of them after the run. `store.forget(thread_id)` deletes them. If the local store cannot keep them, the run's answer is unaffected and the next turn shows placeholders for those values.
+
+### Fixed
+- Verbose terminal output leaves provider attempt timing, token counts, and receipt IDs on the raw stream. The terminal still shows model selection, tool progress, errors, spend warnings, and the final response.
+- Reading a thread no longer tries to open a local private-data vault whose setup was interrupted and left empty, with private-data-vault builds that can report it.
+
 ## [2.8.0] - 2026-11-17
 
 ### Added

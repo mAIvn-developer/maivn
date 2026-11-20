@@ -79,6 +79,7 @@ from maivn._internal.models import (
 )
 from maivn._internal.private_artifacts import PrivateArtifactsClient
 from maivn._internal.private_data_store import (
+    CALLER_HELD_PRIVATE_DATA_KEY,
     PrivateDataStore,
     merged_private_data,
     persistable_pairs,
@@ -503,7 +504,7 @@ class Client:
         )
 
     def forget_private_data(self, thread_id: str) -> None:
-        """Delete this thread's caller-declared local values; remote custody is unchanged."""
+        """Delete this thread's locally kept private values; the platform keeps none."""
         run_blocking(lambda: self.aforget_private_data(thread_id))
 
     async def aforget_private_data(self, thread_id: str) -> None:
@@ -531,13 +532,11 @@ class Client:
         remembered for the thread and every previously remembered pair is
         resolved into the call, the caller's explicit values winning.
 
-        Only what the CALLER declared is ever remembered: ``persistable_pairs``
-        reads the map passed to this call, never a map the server sent back. So
-        the keys the shield allocates mid-run (``pii_email_1``) stay in server
-        custody, which is the division the store's module docstring sets out.
-        Once remembered, a thread's pairs ride along on every later call on that
-        thread including ones supplying nothing; ``store.forget(thread_id)``
-        ends it.
+        The keys the shield allocates mid-run (``pii_email_1``) reach the same
+        store from the run's final frame (``_keep_caller_held_private_data``), so
+        they ride back here too. Once remembered, a thread's pairs ride along on
+        every later call on that thread including ones supplying nothing;
+        ``store.forget(thread_id)`` ends it.
         """
         store = self._private_data_store
         if thread_id is not None and self._automatic_vault is not None:
@@ -1299,9 +1298,59 @@ class Client:
         projector = StreamEventProjector()
         try:
             async for event in iter_sse_events(response.aiter_lines()):
-                yield projector.project(event)
+                kept = await self._keep_caller_held_private_data(event, thread_id=options.thread_id)
+                yield projector.project(kept)
         finally:
             await close_stream_response(response)
+
+    async def _keep_caller_held_private_data(
+        self,
+        event: StreamEvent,
+        *,
+        thread_id: str | None,
+    ) -> StreamEvent:
+        """Keep the pairs a run's final frame hands back, then drop them from the frame.
+
+        The platform keeps no conversation's private values once a run ends (owner
+        ruling 2026-11-18), so the values its shield discovered come back here to
+        rest in this thread's local store, and the next call on the thread sends
+        them back. Stripped before projection, so no reader of the stream ever sees
+        them. A store that cannot keep them must not cost the caller this turn's
+        answer: only the next turn loses resolution, and it shows a placeholder.
+        """
+        raw_payload = event.data.get('payload')
+        if not isinstance(raw_payload, dict):
+            return event
+        payload = cast('JsonObject', raw_payload)
+        if CALLER_HELD_PRIVATE_DATA_KEY not in payload:
+            return event
+        visible: JsonObject = {
+            key: value for key, value in payload.items() if key != CALLER_HELD_PRIVATE_DATA_KEY
+        }
+        held: object = payload[CALLER_HELD_PRIVATE_DATA_KEY]
+        pairs = (
+            persistable_pairs(cast('Mapping[object, object]', held))
+            if isinstance(held, dict)
+            else {}
+        )
+        # An explicit thread only, as for declared values: a call that named none
+        # asked for nothing to persist.
+        if pairs and thread_id is not None:
+            try:
+                await self._remember_thread_private_data(thread_id, pairs)
+            except Exception:  # noqa: BLE001 - this turn's answer outranks the next turn's map.
+                logger.warning(
+                    'Private values from this run could not be kept for its thread; '
+                    'the next turn will show placeholders for them.'
+                )
+        return event.model_copy(update={'data': {**event.data, 'payload': visible}})
+
+    async def _remember_thread_private_data(self, thread_id: str, pairs: Mapping[str, str]) -> None:
+        """Keep pairs in this thread's local store, when the client has one."""
+        if self._automatic_vault is not None:
+            await self._automatic_vault.remember(thread_id, pairs)
+        elif self._private_data_store is not None:
+            await self._private_data_store.remember(thread_id, pairs)
 
     def _http(self, *, timeout_seconds: float | None = None) -> HttpJsonClient:
         """Return a fresh API client wrapper for one call or one run.

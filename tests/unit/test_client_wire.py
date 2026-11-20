@@ -131,6 +131,58 @@ def test_client_invoke_posts_once_and_builds_result_from_terminal_sse() -> None:
     assert len(calls) == _TOTAL_INVOKE_CALL_COUNT
 
 
+def test_client_invoke_keeps_the_final_frames_hand_over_in_the_threads_store() -> None:
+    """The real stream path: kept for the next turn, sent back, never shown.
+
+    Owner ruling 2026-11-18: the platform keeps no conversation's private values
+    after a run, so the shield's keys come back on the final frame and rest only
+    in this client's store.
+    """
+    bodies: list[JsonObject] = []
+    email = 'dana.lee@example.com'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == '/v1/invoke':
+            body = _json_body(request)
+            assert body is not None
+            bodies.append(body)
+            return httpx.Response(
+                HTTPStatus.ACCEPTED, json={'session_id': 'ses-sdk', 'stream_position': 0}
+            )
+        return httpx.Response(
+            HTTPStatus.OK,
+            headers={'content-type': 'text/event-stream'},
+            content=(
+                'id: 1\nevent: final\n'
+                'data: {"event_id":"evt-2","ordinal":"ord-2","type":"final",'
+                '"session_id":"ses-sdk","root_event_id":"evt-root",'
+                '"payload":{"message":{"message_id":"msg-final","role":"assistant",'
+                f'"content":"Sent to {email}","ts":"2026-07-04T12:00:00Z"}},'
+                f'"caller_held_private_data":{{"pii_email_1":"{email}"}}}},'
+                '"ts":"2026-07-04T12:00:00Z"}\n\n'
+            ),
+        )
+
+    store = InMemoryPrivateDataStore()
+    transport = httpx.MockTransport(handler)
+    client = Client(
+        config=ClientConfig(api_key='test-key', base_url=AnyUrl('http://testserver')),
+        transport=transport,
+        private_data_store=store,
+    )
+    options = RunOptions(thread_id='thr-sdk', user_id='usr-sdk')
+    message = [HumanMessage(message_id='msg-user', content='hello')]
+
+    events = list(client.stream(message, options=options))
+    _ = client.invoke(message, options=options)
+
+    assert asyncio.run(store.resolve('thr-sdk', ())) == {'pii_email_1': email}
+    assert all('caller_held_private_data' not in json.dumps(event.data) for event in events)
+    assert all('caller_held_private_data' not in json.dumps(event.payload) for event in events)
+    assert 'private_data' not in bodies[0] or not bodies[0]['private_data']
+    assert bodies[1]['private_data'] == {'pii_email_1': email}
+
+
 def test_client_invoke_preserves_selected_artifact_refs_from_terminal_sse() -> None:
     """Selected immutable artifacts survive the SDK's streamed invoke projection."""
 

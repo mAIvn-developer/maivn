@@ -1,31 +1,40 @@
-"""The deliberate contract between the client store and server-side custody.
+"""The deliberate contract for where a thread's private values rest between turns.
 
-There are now two per-thread placeholder maps, and E2E-048 was really the
-absence of a written rule about which is which. The store merged across every
+E2E-048 was really the absence of a written rule: the store merged across every
 call sharing a `thread_id` and said nothing about it, so a caller could not tell
 what would be re-sent on a later turn or which map a value came from.
 
-The contract as shipped:
+The contract since the owner ruling of 2026-11-18 (private values rest only in
+the customer's own vault, or in our database while a run waits for a person):
 
-* the CLIENT store holds the caller's OWN declared values, per thread. Nothing
-  the server allocates ever enters it - the client is never handed the server's
-  map, so it cannot learn `pii_email_1` even in principle;
-* SERVER custody holds the complete run map, declared and discovered alike, and
-  it is what makes a prior turn's discovered keys resolve;
-* where both hold a key, the CALLER wins. The client's map travels in the
-  request, and the server merges custody underneath it;
-* only string pairs rest, on both sides, so the two stores describe a thread the
-  same way;
+* the CLIENT store is the one place a thread's map rests. It holds the caller's
+  declared values AND the pairs the server's shield minted, which each run's
+  final frame hands back and the client strips from that frame;
+* the platform keeps no conversation map after a run ends;
+* where the call and the store both hold a key, the call wins;
+* only string pairs rest;
 * persistence is opt-in and `forget` ends it.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
+from typing import TYPE_CHECKING
 
 from maivn import InMemoryPrivateDataStore
 from maivn._internal.client import Client
-from maivn._internal.private_data_store import merged_private_data, persistable_pairs
+from maivn._internal.models import StreamEvent
+from maivn._internal.private_data_store import (
+    CALLER_HELD_PRIVATE_DATA_KEY,
+    merged_private_data,
+    persistable_pairs,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    import pytest
 
 
 def _client(store: InMemoryPrivateDataStore | None) -> Client:
@@ -36,14 +45,8 @@ def _client(store: InMemoryPrivateDataStore | None) -> Client:
     )
 
 
-def test_the_store_holds_only_what_the_caller_declared() -> None:
-    """A server-allocated key cannot reach the client store, by construction.
-
-    The client persists `persistable_pairs(supplied)` - the map the CALLER
-    passed to this call - and never a map the server sends back. So a discovered
-    key like `pii_email_1` stays server-side, which is the division of labour
-    custody exists to make true.
-    """
+def test_a_call_remembers_what_the_caller_declared() -> None:
+    """The map passed to a call is kept for the thread."""
 
     async def exercise() -> None:
         store = InMemoryPrivateDataStore()
@@ -123,3 +126,91 @@ def test_the_precedence_rule_is_the_one_the_server_applies() -> None:
         'a': 'supplied',
         'b': 'stored',
     }
+
+
+# MARK: - The final frame hands the shield's keys to this store
+
+
+_EMAIL = 'dana.lee@example.com'
+
+
+def _final(payload: dict[str, object]) -> StreamEvent:
+    return StreamEvent(
+        position=7,
+        event_type='final',
+        data={'type': 'final', 'session_id': 'ses-1', 'payload': payload},
+    )
+
+
+def _handed_over(**extra: object) -> StreamEvent:
+    return _final(
+        {
+            'message': 'Sent to ' + _EMAIL,
+            CALLER_HELD_PRIVATE_DATA_KEY: {'pii_email_1': _EMAIL},
+            **extra,
+        }
+    )
+
+
+def _keep(client: Client, event: StreamEvent, thread_id: str | None) -> StreamEvent:
+    return asyncio.run(
+        client._keep_caller_held_private_data(event, thread_id=thread_id)  # noqa: SLF001 # pyright: ignore[reportPrivateUsage]
+    )
+
+
+def test_the_final_frame_hands_the_shields_keys_to_the_threads_store() -> None:
+    """The next call on the thread sends `pii_email_1` back; nothing else keeps it."""
+    store = InMemoryPrivateDataStore()
+    client = _client(store)
+
+    kept = _keep(client, _handed_over(), 'thread-1')
+
+    assert asyncio.run(store.resolve('thread-1', ())) == {'pii_email_1': _EMAIL}
+    assert CALLER_HELD_PRIVATE_DATA_KEY not in kept.payload
+    assert kept.data['payload'] == {'message': 'Sent to ' + _EMAIL}
+    next_call = asyncio.run(
+        client._thread_private_data('thread-1', None)  # noqa: SLF001 # pyright: ignore[reportPrivateUsage]
+    )
+    assert next_call == {'pii_email_1': _EMAIL}
+
+
+def test_a_call_without_a_thread_keeps_nothing_but_still_strips_the_frame() -> None:
+    """Same rule as declared values: no named thread, nothing persists."""
+    store = InMemoryPrivateDataStore()
+    kept = _keep(_client(store), _handed_over(thread_id='thr-server'), None)
+    assert asyncio.run(store.resolve('thr-server', ())) == {}
+    assert CALLER_HELD_PRIVATE_DATA_KEY not in kept.payload
+
+
+def test_without_a_store_the_values_are_dropped_from_the_frame_and_kept_nowhere() -> None:
+    """`private_data_store=None` keeps values within the call that carried them."""
+    kept = _keep(_client(None), _handed_over(), 'thread-1')
+    assert CALLER_HELD_PRIVATE_DATA_KEY not in kept.payload
+
+
+def test_frames_without_a_hand_over_pass_through_untouched() -> None:
+    """Ordinary frames are the same object; nothing is copied or opened."""
+    event = _final({'message': 'done'})
+    assert _keep(_client(InMemoryPrivateDataStore()), event, 'thread-1') is event
+
+
+class _BrokenStore(InMemoryPrivateDataStore):
+    async def remember(self, thread_id: str, mapping: Mapping[str, str]) -> None:
+        del thread_id, mapping
+        message = 'vault unavailable'
+        raise OSError(message)
+
+    async def resolve(self, thread_id: str, placeholders: Sequence[str]) -> dict[str, str]:
+        del thread_id, placeholders
+        return {}
+
+
+def test_a_store_that_cannot_keep_them_does_not_cost_this_turns_answer(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Only the next turn loses resolution; the warning names no value."""
+    with caplog.at_level(logging.WARNING):
+        kept = _keep(_client(_BrokenStore()), _handed_over(), 'thread-1')
+    assert kept.data['payload'] == {'message': 'Sent to ' + _EMAIL}
+    assert 'could not be kept' in caplog.text
+    assert _EMAIL not in caplog.text

@@ -62,6 +62,12 @@ def _native() -> Any:
     return import_module('private_data_vault')
 
 
+def _requires_open(native: Any, scope: str | None = None, *, path: str | None) -> bool:
+    # Older wheels cannot distinguish leftover setup from established storage.
+    probe = getattr(native, 'default_requires_open', native.default_exists)
+    return bool(probe(scope, path=path))
+
+
 class AutomaticVault:
     """Resolve stable authority and open a native store when needed."""
 
@@ -88,7 +94,7 @@ class AutomaticVault:
         path = None if directory is None else str(directory)
         try:
             native = _native().LocalVault
-            if not has_values and not await asyncio.to_thread(native.default_exists, path=path):
+            if not has_values and not await asyncio.to_thread(_requires_open, native, path=path):
                 return None
         except Exception:  # noqa: BLE001 - sanitize untrusted provider/native errors.
             raise VaultSetupError(_SETUP_HELP) from None
@@ -106,7 +112,7 @@ class AutomaticVault:
             raise VaultSetupError(message) from None
         try:
             if not has_values and not await asyncio.to_thread(
-                native.default_exists, scope, path=path
+                _requires_open, native, scope, path=path
             ):
                 return None
             vault = await asyncio.to_thread(self._open, native, scope, path)
@@ -133,6 +139,18 @@ class AutomaticVault:
         except Exception:  # noqa: BLE001 - native diagnostics are not public SDK errors.
             raise VaultSetupError(_SETUP_HELP) from None
         return merged_private_data(stored, supplied) if stored or supplied else supplied
+
+    async def remember(self, thread_id: str, pairs: Mapping[str, str]) -> None:
+        """Keep values a finished run handed back, opening storage if needed."""
+        if not pairs:
+            return
+        store = await self.store(has_values=True)
+        if store is None:
+            return
+        try:
+            await store.remember(thread_id, pairs)
+        except Exception:  # noqa: BLE001 - native diagnostics are not public SDK errors.
+            raise VaultSetupError(_SETUP_HELP) from None
 
     async def forget(self, thread_id: str) -> None:
         """Purge local values without creating a new vault or leaking native errors."""
