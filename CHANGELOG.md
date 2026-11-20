@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.2] - 2026-11-20
+
+### Changed
+- Requires private-data-vault >=0.1.2,<0.2. Upgrading maivn now also upgrades an older private-data-vault, so reading a thread no longer fails on vault setup that was interrupted and left empty.
+
 ## [2.8.1] - 2026-11-19
 
 ### Changed
